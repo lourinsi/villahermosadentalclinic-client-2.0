@@ -1,0 +1,293 @@
+diff --git a/components/CalendarView.tsx b/components/CalendarView.tsx
+index 4ba60c1..e6d6f65 100644
+--- a/components/CalendarView.tsx
++++ b/components/CalendarView.tsx
+@@ -1088,21 +1088,19 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
+               )}
+ 
+               {/* View Mode Buttons and Status Badge - always on right */}
+-              <div className="flex items-center gap-3">
+-                {/* View Mode Buttons - only for patient */}
+-                {(portal === 'patient' || portal === 'public') && (
+-                  <div className="flex items-center gap-2">
+-                    {(['month','week','day'] as const).map(mode => (
+-                      <button
+-                        key={mode}
+-                        onClick={() => setViewMode(mode)}
+-                        className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+-                      >
+-                        {mode}
+-                      </button>
+-                    ))}
+-                  </div>
+-                )}
++              <div className="flex items-center gap-3" data-tour-id="calendar-view-toggle">
++                <div className="flex items-center gap-2">
++                  {(['month','week','day'] as const).map((mode) => (
++                    <button
++                      key={mode}
++                      data-tour-id={`calendar-view-${mode}`}
++                      onClick={() => setViewMode(mode)}
++                      className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
++                    >
++                      {mode}
++                    </button>
++                  ))}
++                </div>
+ 
+                 <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
+                   <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+diff --git a/components/DoctorsGrid.tsx b/components/DoctorsGrid.tsx
+index 5081b38..e387469 100644
+--- a/components/DoctorsGrid.tsx
++++ b/components/DoctorsGrid.tsx
+@@ -66,7 +66,7 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
+   }
+ 
+   return (
+-    <div className="space-y-8 p-4 md:p-8 max-w-7xl mx-auto">
++    <div data-tour-id={portal === 'admin' ? 'admin-doctors-page' : portal === 'patient' ? 'patient-doctors-page' : 'public-doctors-page'} className="space-y-8 p-4 md:p-8 max-w-7xl mx-auto">
+       <div className="flex flex-col gap-4">
+         <h1 className="text-3xl font-bold tracking-tight">Our Dental Specialists</h1>
+         <p className="text-muted-foreground text-lg">{getDescription()}</p>
+@@ -137,6 +137,7 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
+               </CardContent>
+               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
+                 <Button
++                  data-tour-id="doctor-card-button"
+                   onClick={() => handleDoctorClick(doctor)}
+                   className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
+                 >
+diff --git a/components/ImprovedBookingModal.tsx b/components/ImprovedBookingModal.tsx
+index a9d5992..7040b88 100644
+--- a/components/ImprovedBookingModal.tsx
++++ b/components/ImprovedBookingModal.tsx
+@@ -1573,10 +1573,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
+ 
+   // First step: validate details and move to payment
+   const handleConfirmBooking = async () => {
++    console.log('[BookingModal] handleConfirmBooking start', { modalStep, open, isBooking, selectedPatient, selectedDoctor, selectedTime, selectedDate, appointmentType });
+     // Progress to the next step in the multi-step flow
+     setIsBooking(true);
+     try {
+-      await handleNextStep();
++      const result = await handleNextStep();
++      console.log('[BookingModal] handleConfirmBooking result', { result, modalStep });
+     } catch (err) {
+       console.error('Booking: details error', err);
+     } finally {
+@@ -1598,6 +1600,57 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
+     await handleNextStep();
+   };
+ 
++  useEffect(() => {
++    const handleGuidedNext = async () => {
++      console.log('[BookingModal] guided next event received', { open, isBooking, modalStep, selectedDoctor, visibleDoctorsCount: visibleDoctors.length });
++      if (!open || isBooking) return;
++
++      if (modalStep === "payment") return;
++
++      if (modalStep === "doctor" && !selectedDoctor) {
++        const firstAvailableDoctor = visibleDoctors.find((doctor) => !hasDoctorScheduleConflict(doctor.name));
++        if (firstAvailableDoctor) {
++          setSelectedDoctor(firstAvailableDoctor.name);
++          setModalStep("treatment");
++        }
++        return;
++      }
++
++      await handleConfirmBooking();
++    };
++
++    const handleGuidedPrev = () => {
++      if (!open || isBooking) return;
++      handlePrevStep();
++    };
++
++    window.addEventListener("villahermosa-tour:booking-next", handleGuidedNext);
++    window.addEventListener("villahermosa-tour:booking-prev", handleGuidedPrev);
++
++    return () => {
++      window.removeEventListener("villahermosa-tour:booking-next", handleGuidedNext);
++      window.removeEventListener("villahermosa-tour:booking-prev", handleGuidedPrev);
++    };
++  }, [
++    handleConfirmBooking,
++    handlePrevStep,
++    isBooking,
++    modalStep,
++    open,
++    selectedDoctor,
++    visibleDoctors,
++  ]);
++
++  useEffect(() => {
++    if (!open) return;
++
++    window.dispatchEvent(
++      new CustomEvent("villahermosa-tour:booking-step-change", {
++        detail: { step: modalStep },
++      })
++    );
++  }, [modalStep, open]);
++
+   // Calculate what the final status will be for display in summary
+   const getProjectedStatus = () => {
+     if (isPastStatusRestricted) {
+@@ -2057,6 +2110,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
+   };
+ 
+   const handleClose = () => {
++    console.log('[BookingModal] handleClose called', { modalStep, open, isBooking });
+     setModalStep("patient");
+     setIsRescheduling(false);
+     setAmountToPay("");
+@@ -2099,8 +2153,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
+ 
+ return (
+     <>
+-      <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
+-        <DialogContent className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
++      <Dialog open={open} onOpenChange={(v) => {
++          console.log('[BookingModal] Dialog onOpenChange', { v, modalStep, open, isBooking });
++          if (!v) handleClose(); else onOpenChange(true);
++        }}>
++        <DialogContent data-tour-id="booking-modal-shell" className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
+           <DialogHeader className="p-6 bg-white border-b sticky top-0 z-20 shadow-sm">
+             <div className="flex items-center justify-between mb-2">
+               {modalStep !== 'patient' ? (
+@@ -2192,7 +2249,7 @@ return (
+               
+               {/* STEP 1: PATIENT */}
+               {modalStep === 'patient' && (
+-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
++                <div data-tour-id="booking-patient-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                   <div className="flex items-center gap-5 mb-10">
+                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                       <Stethoscope className="h-7 w-7" />
+@@ -2206,6 +2263,7 @@ return (
+                         type="button"
+                         variant="outline"
+                         size="sm"
++                        data-tour-id="booking-new-patient"
+                         onClick={() => openAddPatientModal({ publicBooking: isPublicBookingMode })}
+                         className="ml-auto h-12 px-5 gap-2 rounded-2xl text-[11px] font-black uppercase tracking-widest border-2 hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm"
+                       >
+@@ -2215,10 +2273,10 @@ return (
+                     )}
+                   </div>
+                   <Select value={selectedPatient} onValueChange={setSelectedPatient}>
+-                    <SelectTrigger className="h-20 rounded-[2rem] border-2 border-gray-100 bg-white px-8 text-lg font-bold shadow-sm hover:border-blue-200 transition-all">
++                    <SelectTrigger data-tour-id="booking-patient-select" className="h-20 rounded-[2rem] border-2 border-gray-100 bg-white px-8 text-lg font-bold shadow-sm hover:border-blue-200 transition-all">
+                       <SelectValue placeholder="Search or choose a patient" />
+                     </SelectTrigger>
+-                    <SelectContent className="rounded-2xl border-none shadow-2xl">
++                    <SelectContent data-tour-id="booking-patient-options" className="rounded-2xl border-none shadow-2xl">
+                       {patients.map(p => (
+                         <SelectItem key={p.id} value={p.id} className="rounded-xl my-1 mx-2">{p.name}</SelectItem>
+                       ))}
+@@ -2229,7 +2287,7 @@ return (
+ 
+               {/* STEP 2: SCHEDULE */}
+               {modalStep === 'schedule' && (
+-                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
++                <div data-tour-id="booking-schedule-step" className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                   <div className="flex items-center gap-5 mb-10">
+                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                       <CalendarIcon className="h-7 w-7" />
+@@ -2265,6 +2323,7 @@ return (
+ 
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <button 
++                      data-tour-id="booking-date-card"
+                       onClick={() => setIsDatePickerOpen(true)} 
+                       className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
+                     >
+@@ -2278,6 +2337,7 @@ return (
+                       </div>
+                     </button>
+                     <button 
++                      data-tour-id="booking-time-card"
+                       onClick={() => setIsTimePickerOpen(true)} 
+                       className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
+                     >
+@@ -2296,7 +2356,7 @@ return (
+ 
+               {/* STEP 3: DOCTOR */}
+               {modalStep === 'doctor' && showDoctorStep && (
+-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
++                <div data-tour-id="booking-doctor-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                   <div className="flex items-center gap-5 mb-10">
+                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                       <Award className="h-7 w-7" />
+@@ -2327,6 +2387,7 @@ return (
+                         return (
+                           <button
+                             key={doctor.id}
++                            data-tour-id="booking-doctor-option"
+                             type="button"
+                             onClick={() => !unavailable && setSelectedDoctor(doctor.name)}
+                             disabled={unavailable}
+@@ -2377,7 +2438,7 @@ return (
+ 
+               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
+               {modalStep === 'treatment' && (
+-                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
++                <div data-tour-id="booking-treatment-step" className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
+                   {/* Treatment Selection */}
+                   <div className="space-y-6">
+                     <div className="flex items-center gap-5 mb-10">
+@@ -2401,6 +2462,7 @@ return (
+                       ].map((t) => (
+                         <button
+                           key={t.name}
++                          data-tour-id={t.name === "Routine Cleaning" ? "booking-routine-cleaning" : undefined}
+                           type="button"
+                           onClick={() => setAppointmentType(t.name)}
+                           className={`p-4 rounded-[2rem] border-2 transition-all flex flex-col items-center justify-center gap-3 shadow-sm ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
+@@ -2530,7 +2592,7 @@ return (
+ 
+               {/* FINAL STEP: PAYMENT & STATUS */}
+               {modalStep === 'payment' && (
+-                <div className="mx-auto max-w-4xl space-y-8 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
++                <div data-tour-id="booking-payment-step" className="mx-auto max-w-4xl space-y-8 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                   <div className="flex items-center gap-6 p-6 bg-gray-50/50 rounded-[2rem] border border-gray-100/50">
+                     <div className="flex h-16 w-16 items-center justify-center rounded-[1.25rem] bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-50 shrink-0">
+                       <CreditCard className="h-8 w-8" />
+@@ -2670,7 +2732,9 @@ return (
+                   </Button>
+                 )}
+                 <Button
+-                  onClick={() => {
++                  type="button"
++                  onClick={(event) => {
++                    event.preventDefault();
+                     if (isBooking) return;
+                     const overpayNow = modalStep === 'payment' && isOverpay;
+                     if (overpayNow) {
+@@ -2688,6 +2752,7 @@ return (
+                   }}
+                   aria-disabled={modalStep === 'payment' && isOverpay}
+                   disabled={isBooking}
++                  data-tour-id="booking-next-button"
+                   className={`h-12 w-full sm:min-w-[200px] rounded-2xl bg-blue-600 px-8 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 transition-all sm:w-auto ${modalStep === 'payment' && isOverpay ? 'opacity-80 cursor-pointer' : ''} ${overpayPulse ? 'ring-2 ring-red-400 animate-pulse' : ''}`}
+                 >
+                   {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+@@ -2802,7 +2867,7 @@ return (
+ 
+       {/* Summary confirmation dialog */}
+       <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
+-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
++        <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
+           <DialogHeader className="border-b bg-gray-50 px-6 py-5">
+             <div className="flex items-center gap-4">
+               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+@@ -3007,7 +3072,7 @@ return (
+           )}
+ 
+           <DialogFooter className="flex gap-3 border-t bg-gray-50/60 p-6">
+-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
++            <Button data-tour-id="booking-summary-back" variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
+               Back to Edit
+             </Button>
+             <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmSummary} disabled={isBooking}>
