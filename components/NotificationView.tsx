@@ -6,7 +6,7 @@ import { Notification } from "../lib/notification-types";
 import { Appointment } from "@/hooks/useAppointments";
 import { useNotificationLogic } from "../hooks/useNotificationLogic";
 import { NotificationItem } from "./NotificationItem";
-import { Bell, MoreHorizontal, Check, Trash2, Loader } from "lucide-react";
+import { Bell, MoreHorizontal, Trash2, Loader } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,10 +76,6 @@ export function NotificationView({
       console.log('[NotificationView] 📥 Notifications updated from parent (merging optimistic state)');
       console.log('[NotificationView] Incoming total:', notifications.length);
 
-      // Build a map of incoming notifications
-      const incomingMap = new Map<string, Notification>();
-      notifications.forEach(n => incomingMap.set(n.id, { ...n }));
-
       // Start with incoming notifications and apply optimistic deleted flags
       const merged: Notification[] = notifications.map(n => {
         if (optimisticDeletedRef.current.has(n.id)) {
@@ -87,15 +83,6 @@ export function NotificationView({
           return { ...n, deleted: true, deletedAt: n.deletedAt || new Date().toISOString() };
         }
         return { ...n };
-      });
-
-      // There may be local notifications created optimistically that the server hasn't returned yet
-      // (rare). Include any local-only entries so UI doesn't lose them.
-      localNotifications.forEach(local => {
-        if (!incomingMap.has(local.id)) {
-          // keep local-only entries (e.g., newly added notifications) in the merged list
-          merged.push(local);
-        }
       });
 
       // If server now reports an item as deleted, clear its optimistic marker
@@ -238,17 +225,12 @@ export function NotificationView({
     );
   };
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="max-w-[680px] mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-8">
-        <div className="flex flex-col items-center justify-center">
-          <Loader className="h-8 w-8 text-violet-600 animate-spin mb-4" />
-          <p className="text-gray-600">Loading notifications...</p>
-        </div>
-      </div>
-    );
-  }
+  const renderLoadingState = () => (
+    <div className="flex min-h-[280px] flex-col items-center justify-center p-12 text-center">
+      <Loader className="mb-4 h-8 w-8 text-violet-600 animate-spin" />
+      <p className="text-gray-600">Loading notifications...</p>
+    </div>
+  );
 
   // Show error state
   if (error) {
@@ -365,7 +347,9 @@ export function NotificationView({
           ref={activeTab === 'notifications' ? scrollRootRef : undefined}
           className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]"
         >
-          {filteredNotifications.length === 0 ? (
+          {isLoading ? (
+            renderLoadingState()
+          ) : filteredNotifications.length === 0 ? (
             <div className="p-12 text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
                 <Bell className="h-6 w-6 text-gray-400" />
@@ -409,7 +393,9 @@ export function NotificationView({
           ref={activeTab === 'deleted' ? scrollRootRef : undefined}
           className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]"
         >
-          {deletedNotifications.length === 0 ? (
+          {isLoading ? (
+            renderLoadingState()
+          ) : deletedNotifications.length === 0 ? (
             <div className="p-12 text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
                 <Trash2 className="h-6 w-6 text-gray-400" />

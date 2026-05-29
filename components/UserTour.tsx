@@ -70,26 +70,6 @@ const ADD_PATIENT_MODAL_SELECTORS = [
 
 const TOUR_STEPS: TourStep[] = [
   {
-    id: "landing-login",
-    route: "/",
-    target: '[data-tour-id="landing-login"]',
-    title: "Start with login",
-    body: "New users can begin here. Open Login first, then choose the admin portal on the next screen.",
-    primaryLabel: "Open login",
-    placement: "bottom",
-    action: { type: "route", href: "/login" },
-  },
-  {
-    id: "choose-admin",
-    route: "/login",
-    target: '[data-tour-id="patient-login-admin-link"]',
-    title: "Choose Admin Login",
-    body: "This regular login screen links to the clinic admin portal. Click Admin Login to continue the demo.",
-    primaryLabel: "Open admin login",
-    placement: "top",
-    action: { type: "route", href: "/admin/login" },
-  },
-  {
     id: "admin-credentials",
     route: "/admin/login",
     target: '[data-tour-id="admin-login-demo-card"]',

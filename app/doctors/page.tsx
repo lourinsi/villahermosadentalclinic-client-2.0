@@ -1,7 +1,5 @@
-"use client";
-
-import PublicDoctorsPage from "@/components/PublicDoctorsPage";
+import { redirect } from "next/navigation";
 
 export default function DoctorsPage() {
-  return <PublicDoctorsPage />;
+  redirect("/");
 }

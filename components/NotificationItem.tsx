@@ -22,6 +22,7 @@ import { format } from "date-fns";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { useDoctors } from "../hooks/useDoctors";
+import { formatPaymentStatusLabel } from "@/lib/status-colors";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +54,9 @@ type NotificationChangeSummaryItem = {
 };
 
 const ignoredChangeFields = new Set(["changedAt", "updatedAt"]);
+
+const isPaymentStatusField = (field: string) =>
+  field.replace(/[\s_-]+/g, "").toLowerCase() === "paymentstatus";
 
 const labelForChangeField = (field: string) => {
   const labels: Record<string, string> = {
@@ -109,10 +113,18 @@ const getNotificationChangeSummary = (notification: Notification): NotificationC
   });
 };
 
+const formatEmbeddedPaymentStatusText = (text: string) =>
+  text.replace(/\bhalf[\s_-]+paid\b/gi, () => formatPaymentStatusLabel("half-paid").toLowerCase());
+
+const formatChangeStatusValue = (change: NotificationChangeSummaryItem, value: string) =>
+  isPaymentStatusField(change.field) ? formatPaymentStatusLabel(value) : value;
+
 const formatChangeValue = (change: NotificationChangeSummaryItem) => {
-  if (change.from && change.to) return `${change.from} -> ${change.to}`;
-  if (change.to) return `Now ${change.to}`;
-  if (change.from) return `Was ${change.from}`;
+  if (change.from && change.to) {
+    return `${formatChangeStatusValue(change, change.from)} -> ${formatChangeStatusValue(change, change.to)}`;
+  }
+  if (change.to) return `Now ${formatChangeStatusValue(change, change.to)}`;
+  if (change.from) return `Was ${formatChangeStatusValue(change, change.from)}`;
   return "Updated";
 };
 
@@ -140,6 +152,7 @@ export function NotificationItem({
   const isLog = notification.isLog;
   const appointmentId = notification.metadata?.appointmentId;
   const changeSummary = getNotificationChangeSummary(notification);
+  const displayMessage = formatEmbeddedPaymentStatusText(notification.message);
   const hasStatusChange = changeSummary.some((change) => change.field === "status");
   const isCreatedRequest = Boolean(notification.metadata?.isRequest && changeSummary.length === 0);
   const shouldShowAppointmentActions = Boolean(
@@ -238,7 +251,7 @@ export function NotificationItem({
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <p className={`${isCompact ? 'text-xs line-clamp-3' : 'text-sm'} leading-snug ${!notification.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
-              {notification.message}
+              {displayMessage}
             </p>
             {isLog && (
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full ${isCompact ? 'text-[10px]' : 'text-xs'} font-medium bg-gray-200 text-gray-700 flex-shrink-0`}>

@@ -38,6 +38,7 @@ import useSharedBookingLogic, {
   getBookingCreateTime,
   getBookingDefaultDate,
   getBookingDefaultScheduleAction,
+  useBookingPaymentPrefill,
   getBookingDefaultTime,
   getBookingEditDate,
   getBookingEditTime,
@@ -213,7 +214,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
-  const [selectedDate, setSelectedDate] = useState<Date>(defaultDate ?? new Date());
+  const [selectedDate, setSelectedDate] = useState<Date>(getBookingDefaultDate(defaultDate));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
@@ -276,6 +277,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     canCreatePatients,
     canManagePricing,
     canManageStatuses,
+    canManagePaymentStatuses,
     isDoctorSelectionLocked,
   } = getBookingActor({
     userRole: user?.role,
@@ -1222,7 +1224,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
-      setPaymentMethod(appointmentToEdit.paymentMethod || (appointmentToEdit.paymentStatus === 'pay-at-clinic' ? 'Pay at Clinic' : ''));
+      setPaymentMethod(appointmentToEdit.paymentMethod || '');
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
@@ -1273,6 +1275,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     duration,
   });
   const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
+
+  useBookingPaymentPrefill({
+    open,
+    modalStep,
+    amountToPay,
+    remainingBalance,
+    setAmountToPay,
+  });
 
   const { handleNextStep } = useSharedBookingLogic({
     modalStep,
@@ -1851,13 +1861,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               )}
               
               <DialogTitle className="flex items-center gap-2 text-2xl font-bold flex-1 text-center">
-                {title ? title : (
-                  modalStep === 'details' 
-                    ? (appointmentToEdit 
-                        ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') 
-                        : 'Appointment Details') 
-                    : 'Payment Summary'
-                )}
+                {title ? title : (() => {
+                  const isPastAppointment = isPastAppointmentDate(selectedDate ?? appointmentToEdit?.date);
+                  if (modalStep === 'details') {
+                    if (appointmentToEdit) {
+                      if (isPatientReadonly) return 'View Appointment';
+                      return isPastAppointment ? 'Edit past appointment' : 'Edit Appointment';
+                    }
+                    return isPastAppointment ? 'Add a past appointment' : 'Appointment Details';
+                  }
+                  return 'Payment Summary';
+                })()}
               </DialogTitle>
               
                 {/* Step indicators - hidden if cancelled and patient role */}
@@ -2501,14 +2515,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <span className={`text-[10px] font-bold uppercase text-center leading-tight ${paymentMethod === "Cash" ? "text-blue-700" : "text-gray-500"}`}>Cash</span>
                       </Button>
                     )}
-                    <Button
+                    {/* <Button
                       variant="outline"
                       className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${paymentMethod === "Pay at Clinic" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-200"}`}
                       onClick={() => { setPaymentMethod("Pay at Clinic"); setAmountToPay("0"); }}
                     >
                       <Banknote className={`h-6 w-6 ${paymentMethod === "Pay at Clinic" ? "text-blue-600" : "text-gray-600"}`} />
                       <span className={`text-[10px] font-bold uppercase text-center leading-tight ${paymentMethod === "Pay at Clinic" ? "text-blue-700" : "text-gray-500"}`}>Pay at Clinic</span>
-                    </Button>
+                    </Button> */}
                   </div>
                 </div>
 
@@ -2530,11 +2544,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                 )}
 
-                {/* Payment Status Display - Read-only for Patient, Editable for Admin/Doctor */}
+                {/* Payment Status Display - read-only unless admin can manage payment statuses */}
                 {isEditMode && (
                   <div className="space-y-2">
                     <Label htmlFor="paymentStatus" className="text-sm font-semibold">Payment Status</Label>
-                    {user?.role === "patient" ? (
+                    {!canManagePaymentStatuses ? (
                       <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-700">Status:</span>
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
@@ -2808,6 +2822,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedDate={selectedDate}
         onDateSelect={setSelectedDate}
         doctorName={selectedDoctor}
+        patientId={selectedPatient}
         selectedTime={selectedTime}
         duration={duration}
         dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"}

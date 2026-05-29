@@ -2,7 +2,7 @@
 
 import React, { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth.tsx";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 interface ProtectedRouteProps {
@@ -10,43 +10,27 @@ interface ProtectedRouteProps {
   allowedRoles?: string[];
 }
 
+const MANAGEMENT_ROLES = ["admin", "receptionist"];
+
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push("/login");
+      router.push("/admin/login");
       return;
     }
 
-    // Role-based access control
     if (!isLoading && isAuthenticated && user) {
-      // If allowedRoles is specified, check if user has the required role
-      if (allowedRoles && !allowedRoles.includes(user.role)) {
-        // Redirect to appropriate dashboard based on role
-        if (user.role === "doctor") {
-          router.push("/doctor/dashboard");
-        } else {
-          router.push("/admin/dashboard");
-        }
+      const routeRoles = allowedRoles || MANAGEMENT_ROLES;
+
+      if (!routeRoles.includes(user.role)) {
+        router.push("/admin/login");
         return;
       }
-
-      // Redirect doctors away from admin routes
-      if (user.role === "doctor" && pathname?.startsWith("/admin")) {
-        router.push("/doctor/dashboard");
-        return;
-      }
-
-      // Redirect admins away from doctor routes (optional - admins can access everything)
-      // if (user.role === "admin" && pathname?.startsWith("/doctor")) {
-      //   router.push("/admin/dashboard");
-      //   return;
-      // }
     }
-  }, [isLoading, isAuthenticated, user, router, pathname, allowedRoles]);
+  }, [isLoading, isAuthenticated, user, router, allowedRoles]);
 
   if (isLoading) {
     return (
@@ -63,9 +47,9 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     return null; // Router will redirect to login
   }
 
-  // Check role-based access
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return null; // Router will redirect
+  const routeRoles = allowedRoles || MANAGEMENT_ROLES;
+  if (user && !routeRoles.includes(user.role)) {
+    return null;
   }
 
   return <>{children}</>;

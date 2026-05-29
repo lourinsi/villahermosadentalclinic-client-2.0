@@ -83,6 +83,7 @@ const PAYMENT_STATUS_ALIASES: Record<string, string> = {
   "fully-paid": "paid",
   "full-paid": "paid",
   "paid-in-full": "paid",
+  "half paid": "half-paid",
   halfpaid: "half-paid",
   half_paid: "half-paid",
   partial: "half-paid",
@@ -104,6 +105,10 @@ export const DEFAULT_PAYMENT_STATUS_COLORS: Record<string, StatusColorClasses> =
   "over-paid": { bgColor: "bg-teal-100", textColor: "text-teal-700" },
 };
 
+const PAYMENT_STATUS_DISPLAY_LABELS: Record<string, string> = {
+  "half-paid": "Partial",
+};
+
 export const DEFAULT_PAYMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
   {
     key: 1,
@@ -122,7 +127,7 @@ export const DEFAULT_PAYMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
   {
     key: 3,
     value: "half-paid",
-    label: "Half Paid",
+    label: "Partial",
     description: "Partial payment received",
     ...DEFAULT_PAYMENT_STATUS_COLORS["half-paid"],
   },
@@ -135,10 +140,10 @@ export const DEFAULT_PAYMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
   },
   {
     key: 5,
-    value: "pay-at-clinic",
-    label: "Pay at Clinic",
-    description: "Payment to be made at clinic",
-    ...DEFAULT_PAYMENT_STATUS_COLORS["pay-at-clinic"],
+    value: "over-paid",
+    label: "Over-paid",
+    description: "Payment exceeds appointment total",
+    ...DEFAULT_PAYMENT_STATUS_COLORS["over-paid"],
   },
 ];
 
@@ -153,6 +158,8 @@ export function formatPaymentStatusLabel(status?: string | null): string {
   const normalized = normalizePaymentStatus(status);
   if (!normalized) return "Unpaid";
 
+  if (PAYMENT_STATUS_DISPLAY_LABELS[normalized]) return PAYMENT_STATUS_DISPLAY_LABELS[normalized];
+
   const statusOption = DEFAULT_PAYMENT_STATUS_OPTIONS.find((option) => option.value === normalized);
   if (statusOption) return statusOption.label;
   if (normalized === "over-paid") return "Over-paid";
@@ -162,6 +169,13 @@ export function formatPaymentStatusLabel(status?: string | null): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function formatPaymentStatusOptionLabel(status?: string | null, label?: string | null): string {
+  const statusLabel = PAYMENT_STATUS_DISPLAY_LABELS[normalizePaymentStatus(status)];
+  const fallbackLabel = PAYMENT_STATUS_DISPLAY_LABELS[normalizePaymentStatus(label)];
+
+  return statusLabel || fallbackLabel || String(label || "").trim() || formatPaymentStatusLabel(status);
 }
 
 export function hasDefaultAppointmentStatusColors(status?: string | null): boolean {
@@ -197,7 +211,7 @@ export function applyDefaultAppointmentStatusColors<T extends { value: string; b
   };
 }
 
-export function applyDefaultPaymentStatusColors<T extends { value: string; bgColor?: string; textColor?: string }>(
+export function applyDefaultPaymentStatusColors<T extends { value: string; label?: string; bgColor?: string; textColor?: string }>(
   status: T
 ): T & StatusColorClasses {
   const defaultColors = getDefaultPaymentStatusColors(status.value);
@@ -205,6 +219,7 @@ export function applyDefaultPaymentStatusColors<T extends { value: string; bgCol
 
   return {
     ...status,
+    label: formatPaymentStatusOptionLabel(status.value, status.label),
     bgColor: shouldUseDefault ? defaultColors.bgColor : status.bgColor || defaultColors.bgColor,
     textColor: shouldUseDefault ? defaultColors.textColor : status.textColor || defaultColors.textColor,
   };

@@ -23,11 +23,13 @@ import useSharedBookingLogic, {
   ALLOWED_BOOKING_DURATIONS,
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
+  getPastAppointmentStatusOptions,
   findNextAvailableBookingSlot,
   formatBookingDoctorName as formatDoctorName,
   formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
   getBookingAppointmentStatusConfig,
+  useBookingPaymentPrefill,
   getBookingAutoPreselectConfig,
   getBookingActor,
   getBookingCancellationConfig,
@@ -46,7 +48,6 @@ import useSharedBookingLogic, {
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   getBookingDoctorInitials as getDoctorInitials,
-  getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
   isSignificantBookingPaymentStatus,
@@ -60,7 +61,7 @@ import useSharedBookingLogic, {
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
-import { useDoctors } from "@/hooks/useDoctors";
+import { useDoctors, type DoctorOption } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 
@@ -327,16 +328,68 @@ const getPersonInitials = (name?: string) => {
   return initials || "?";
 };
 
-const getFirstDoctorById = (doctors: Array<{ id?: string; name?: string }> = []) => {
-  return [...doctors]
-    .filter((doctor) => String(doctor.name || "").trim())
+type BookingSlotCandidate = {
+  date: Date;
+  time: string;
+  doctorName: string;
+  doctorIndex: number;
+};
+
+const getBookingSlotTimestamp = (slot: { date: Date; time: string }) => {
+  const [hours = 0, minutes = 0] = slot.time.split(":").map(Number);
+  const date = new Date(slot.date);
+  date.setHours(hours, minutes, 0, 0);
+  return date.getTime();
+};
+
+const findNextAvailablePatientSchedule = async ({
+  startDate,
+  doctorsToCheck,
+  durationToCheck,
+  patientToCheck,
+  timeSlots,
+  availabilityMode,
+  localBlockingAppointments,
+}: {
+  startDate: Date;
+  doctorsToCheck: DoctorOption[];
+  durationToCheck: string;
+  patientToCheck?: string;
+  timeSlots: string[];
+  availabilityMode: "authenticated" | "public";
+  localBlockingAppointments: any[];
+}): Promise<BookingSlotCandidate | null> => {
+  const doctorsWithNames = doctorsToCheck.filter((doctor) => String(doctor.name || "").trim());
+  if (doctorsWithNames.length === 0) return null;
+
+  const candidates = await Promise.all(
+    doctorsWithNames.map(async (doctor, doctorIndex): Promise<BookingSlotCandidate | null> => {
+      const slot = await findNextAvailableBookingSlot({
+        startDate,
+        doctorToCheck: doctor.name,
+        durationToCheck,
+        patientToCheck,
+        timeSlots,
+        availabilityMode,
+        localBlockingAppointments,
+      });
+
+      return slot
+        ? {
+            ...slot,
+            doctorName: doctor.name,
+            doctorIndex,
+          }
+        : null;
+    })
+  );
+
+  return candidates
+    .filter((candidate): candidate is BookingSlotCandidate => Boolean(candidate))
     .sort((a, b) => {
-      const aId = String(a.id || "").trim();
-      const bId = String(b.id || "").trim();
-      if (!aId && bId) return 1;
-      if (aId && !bId) return -1;
-      return aId.localeCompare(bId, undefined, { numeric: true, sensitivity: "base" });
-    })[0];
+      const timeDiff = getBookingSlotTimestamp(a) - getBookingSlotTimestamp(b);
+      return timeDiff || a.doctorIndex - b.doctorIndex;
+    })[0] || null;
 };
 
 const DEFAULT_BOOKING_TREATMENT = "Routine Cleaning";
@@ -368,6 +421,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
+
+  // Define toDate helper before useState calls that use it
+  const toDate = (value: any): Date => {
+    if (!value) return new Date();
+    if (value instanceof Date) return value;
+    try {
+      const parsed = typeof value === 'string' ? parseLocalDateOnly(value) ?? new Date(value) : new Date(value);
+      return parsed instanceof Date && !isNaN(parsed.getTime()) ? parsed : new Date(String(value));
+    } catch (err) {
+      return new Date();
+    }
+  };
   
   const [isPriceEditable, setIsPriceEditable] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
@@ -380,7 +445,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
-  const [selectedDate, setSelectedDate] = useState<Date>(defaultDate ?? new Date());
+  const [selectedDate, setSelectedDate] = useState<Date>(() => toDate(defaultDate ?? new Date()));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
@@ -407,26 +472,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
   const [activeTourStepId, setActiveTourStepId] = useState(getCurrentTourStepId);
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
+  const [dailyAppointmentsDateKey, setDailyAppointmentsDateKey] = useState("");
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
+  const autoPreselectedScheduleRef = useRef<{ patientId: string; scheduleKey: string } | null>(null);
+  const autoPreselectedDoctorRef = useRef<string | null>(null);
+  const previousSelectedPatientRef = useRef<string>("");
   const autoPreselectRequestIdRef = useRef(0);
   const autoPreselectSearchKeyRef = useRef<string | null>(null);
   const selectedDateRef = useRef(selectedDate);
   const selectedTimeRef = useRef(selectedTime);
   const selectedDoctorRef = useRef(selectedDoctor);
-
-  const toDate = (value: any): Date => {
-    if (!value) return new Date();
-    if (value instanceof Date) return value;
-    try {
-      const parsed = typeof value === 'string' ? parseLocalDateOnly(value) ?? new Date(value) : new Date(value);
-      return parsed instanceof Date && !isNaN(parsed.getTime()) ? parsed : new Date(String(value));
-    } catch (err) {
-      return new Date();
-    }
-  };
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -438,6 +496,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     if (!open) {
       appliedDefaultScheduleKeyRef.current = null;
+      autoPreselectedScheduleRef.current = null;
+      autoPreselectedDoctorRef.current = null;
+      previousSelectedPatientRef.current = "";
       autoPreselectRequestIdRef.current += 1;
       autoPreselectSearchKeyRef.current = null;
     }
@@ -475,6 +536,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     canCreatePatients,
     canManagePricing,
     canManageStatuses,
+    canManagePaymentStatuses,
     isPatientLevelBookingMode,
     isDoctorSelectionLocked,
   } = getBookingActor({
@@ -499,17 +561,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Fetch all appointments for the day to check conflicts across all doctors and patients
   useEffect(() => {
-    if (!open || !selectedDate) return;
+    if (!open || !selectedDate) {
+      setDailyAppointmentsDateKey("");
+      return;
+    }
+    let cancelled = false;
+    const dateStr = formatDateToYYYYMMDD(selectedDate);
+    setDailyAppointmentsDateKey("");
     
     const fetchDailyAppointments = async () => {
       try {
-        const dateStr = formatDateToYYYYMMDD(selectedDate);
         if (isPublicBookingMode) {
           const filtered = publicBlockingAppointments.filter(
             (apt: any) =>
               apt.date === dateStr && String(apt.id) !== String(appointmentToEdit?.id || "")
           );
+          if (cancelled) return;
           setDailyAppointments(filtered);
+          setDailyAppointmentsDateKey(dateStr);
           setPatientAppointments(
             selectedPatient
               ? filtered.filter((apt: any) => String(apt.patientId) === String(selectedPatient))
@@ -592,7 +661,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 }))
             });
             
+            if (cancelled) return;
             setDailyAppointments(filtered);
+            setDailyAppointmentsDateKey(dateStr);
             
             // Also filter for current patient if one is selected
             if (selectedPatient) {
@@ -609,6 +680,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
     
     fetchDailyAppointments();
+    return () => {
+      cancelled = true;
+    };
   }, [open, selectedDate, selectedPatient, appointmentToEdit?.id, isPublicBookingMode, publicBlockingAppointments]);
 
   // Read-only for patient viewing their own booked/reserved appointment: only notes editable
@@ -1086,10 +1160,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [appointmentType]);
 
   useEffect(() => {
+    autoPreselectedScheduleRef.current = null;
     setSelectedDate(getBookingDefaultDate(defaultDate));
   }, [defaultDate]);
 
   useEffect(() => {
+    autoPreselectedScheduleRef.current = null;
     setSelectedTime(getBookingDefaultTime(defaultTime));
   }, [defaultTime]);
 
@@ -1105,6 +1181,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // Sync doctorName prop to selectedDoctor state when it changes
   useEffect(() => {
     if (doctorName) {
+      autoPreselectedDoctorRef.current = null;
       setSelectedDoctor(doctorName);
     }
   }, [doctorName]);
@@ -1112,51 +1189,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     if (!open || appointmentToEdit || doctorName) return;
     if (user?.role === 'doctor' && user.username) {
+      autoPreselectedDoctorRef.current = null;
       setSelectedDoctor(user.username);
     }
   }, [open, appointmentToEdit, doctorName, user?.role, user?.username]);
 
-  // Auto-preselect first doctor for non-doctor portals when modal opens
-  // BUT: Skip if doctorName was explicitly passed (e.g., from DoctorAvailabilityView)
-  useEffect(() => {
-    if (!open) return;
-    
-    // Only auto-preselect if user is NOT a doctor
-    if (user?.role === 'doctor') return;
-
-    // Non-doctor users choose a doctor explicitly in the doctor step.
-    if (!doctorName) return;
-    
-    // If doctorName prop was explicitly passed, don't auto-select a different doctor
-    // The doctorName will be synced via the other useEffect that watches doctorName prop
-    if (doctorName) {
-      console.log('[BookingModal] 📋 Skipping auto-doctor-selection: doctorName explicitly passed from props');
-      return;
-    }
-    
-    // Only auto-preselect if no doctor is currently selected
-    if (selectedDoctor) return;
-    
-    // Only auto-preselect if editing an appointment (use doctor from appointment)
-    if (appointmentToEdit?.doctor) return;
-    
-    // Auto-preselect first available doctor (only when NO doctorName prop passed)
-    if (doctors && doctors.length > 0) {
-      console.log('[BookingModal] 🏥 Auto-selecting first available doctor');
-      setSelectedDoctor(doctors[0].name);
-    }
-  }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
-
-  const getAutoPreselectDoctor = useCallback(() => {
+  const getExplicitPreselectDoctor = useCallback(() => {
     if (selectedDoctor) return selectedDoctor;
     if (doctorName) return doctorName;
     if (user?.role === 'doctor') return user.username || (user as any)?.name || "";
-    return getFirstDoctorById(doctors)?.name || "";
-  }, [selectedDoctor, doctorName, user, doctors]);
+    return "";
+  }, [selectedDoctor, doctorName, user]);
 
   // Centralized auto-preselect/validation runner for the schedule step.
   const runAutoPreselect = useCallback(async (patientId?: string) => {
-    const doctorToPreselect = getAutoPreselectDoctor();
+    const doctorToPreselect = getExplicitPreselectDoctor();
     const autoPreselect = getBookingAutoPreselectConfig({
       isEditing: Boolean(appointmentToEdit),
       defaultDate,
@@ -1177,12 +1224,60 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (autoPreselect.type === "preserve_schedule") return;
 
     if (autoPreselect.type === "wait_for_doctor") {
-      console.log('[BookingModal] ⏳ Waiting for doctor to be selected before auto-preselect...');
+      const selectedAppointmentType = appointmentType || autoPreselect.defaultAppointmentType;
+      const durationToSearch = String(normalizeBookingDuration(appointmentTypeDurations[selectedAppointmentType]));
+      const patientToSearch = patientId || selectedPatient || defaultPatientId || undefined;
+      const doctorPoolKey = doctors.map((doctor) => doctor.id || doctor.name).join(",");
+      const searchKey = [
+        "any-doctor",
+        doctorPoolKey,
+        durationToSearch,
+        patientToSearch || "",
+        isPublicBookingMode ? "public" : "standard",
+      ].join("|");
+
+      if (autoPreselectSearchKeyRef.current === searchKey) {
+        return;
+      }
+
+      autoPreselectSearchKeyRef.current = searchKey;
+      const requestId = autoPreselectRequestIdRef.current + 1;
+      autoPreselectRequestIdRef.current = requestId;
+      const selectedDateAtSearchStart = formatDateToYYYYMMDD(selectedDateRef.current);
+
+      const nextSlot = await findNextAvailablePatientSchedule({
+        startDate: new Date(),
+        doctorsToCheck: doctors,
+        durationToCheck: durationToSearch,
+        patientToCheck: patientToSearch,
+        timeSlots: TIME_SLOTS,
+        availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+        localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+      });
+
+      if (requestId !== autoPreselectRequestIdRef.current) return;
+      if (selectedTimeRef.current || selectedDoctorRef.current) return;
+      if (formatDateToYYYYMMDD(selectedDateRef.current) !== selectedDateAtSearchStart) return;
+
+      if (nextSlot) {
+        console.log('[BookingModal] Found next available patient schedule:', {
+          date: formatDateToYYYYMMDD(nextSlot.date),
+          time: nextSlot.time,
+          availabilityFoundWithDoctor: nextSlot.doctorName,
+        });
+        autoPreselectedScheduleRef.current = {
+          patientId: String(patientToSearch || ""),
+          scheduleKey: `${formatDateToYYYYMMDD(nextSlot.date)}|${nextSlot.time}`,
+        };
+        setSelectedDate(nextSlot.date);
+        setSelectedTime(nextSlot.time);
+      }
       return;
     }
 
     if (doctorToPreselect && !selectedDoctor) {
-      console.log('[BookingModal] Auto-preselecting doctor before schedule search:', doctorToPreselect);
+      console.log('[BookingModal] Using explicitly provided doctor before schedule search:', doctorToPreselect);
+      autoPreselectedDoctorRef.current = null;
       setSelectedDoctor(doctorToPreselect);
     }
 
@@ -1221,6 +1316,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
     if (nextSlot) {
       console.log('[BookingModal] Found next available slot after patient selection:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
+      autoPreselectedScheduleRef.current = {
+        patientId: String(autoPreselect.patientToSearch || ""),
+        scheduleKey: `${formatDateToYYYYMMDD(nextSlot.date)}|${nextSlot.time}`,
+      };
       setSelectedDate(nextSlot.date);
       setSelectedTime(nextSlot.time);
     }
@@ -1235,8 +1334,40 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     selectedTime,
     isPublicBookingMode,
     publicBlockingAppointments,
-    getAutoPreselectDoctor,
+    doctors,
+    getExplicitPreselectDoctor,
   ]);
+
+  useEffect(() => {
+    if (!open || appointmentToEdit) {
+      previousSelectedPatientRef.current = selectedPatient;
+      return;
+    }
+
+    const previousPatient = previousSelectedPatientRef.current;
+    if (!previousPatient) {
+      previousSelectedPatientRef.current = selectedPatient;
+      return;
+    }
+
+    if (selectedPatient && String(previousPatient) !== String(selectedPatient)) {
+      if (autoPreselectedScheduleRef.current) {
+        autoPreselectedScheduleRef.current = null;
+        autoPreselectSearchKeyRef.current = null;
+        setSelectedTime("");
+      }
+
+      const autoDoctor = autoPreselectedDoctorRef.current;
+      if (autoDoctor) {
+        autoPreselectedDoctorRef.current = null;
+        setSelectedDoctor((current) =>
+          normalizeDoctorName(current) === normalizeDoctorName(autoDoctor) ? "" : current
+        );
+      }
+    }
+
+    previousSelectedPatientRef.current = selectedPatient;
+  }, [open, appointmentToEdit, selectedPatient]);
 
   // Auto-preselect date, time, and appointment type for all portals
   useEffect(() => {
@@ -1264,6 +1395,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (!appointmentType) setAppointmentType(DEFAULT_BOOKING_TREATMENT);
 
       if (defaultScheduleAction.shouldApplySchedule) {
+        autoPreselectedScheduleRef.current = null;
         setSelectedDate(defaultScheduleAction.date);
         setSelectedTime(defaultScheduleAction.time);
         appliedDefaultScheduleKeyRef.current = defaultScheduleAction.scheduleKey;
@@ -1418,6 +1550,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
     if (appointmentToEdit) {
+      autoPreselectedScheduleRef.current = null;
+      autoPreselectedDoctorRef.current = null;
       console.log('[BookingModal] 📂 OPENING APPOINTMENT FOR EDITING:', {
         appointmentId: appointmentToEdit.id,
         patientName: appointmentToEdit.patientName,
@@ -1459,7 +1593,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Notes from history remain visible in the AppointmentHistoryView below,
       // but they are not auto-copied into the editable notes field.
       setNotes('');
-      setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
+      setSelectedDate(toDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate })));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
       if (appointmentToEdit.doctor) {
@@ -1469,7 +1603,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
-      setPaymentMethod(appointmentToEdit.paymentMethod || (appointmentToEdit.paymentStatus === 'pay-at-clinic' ? 'Pay at Clinic' : ''));
+      const existingPaymentMethod = String(appointmentToEdit.paymentMethod || "").trim();
+      setPaymentMethod(existingPaymentMethod.toLowerCase() === 'pay at clinic' ? '' : existingPaymentMethod);
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
@@ -1479,6 +1614,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setModalStep(isPaymentFlow || appointmentToEdit ? 'payment' : 'patient');
       setIsRescheduling(false);
     } else {
+      autoPreselectedScheduleRef.current = null;
+      autoPreselectedDoctorRef.current = null;
+      previousSelectedPatientRef.current = defaultPatientId ? String(defaultPatientId) : '';
       // Reset form when creating new appointment
       // If a defaultPatientId was provided (e.g., user clicked Schedule on a patient), prefer it
       setSelectedPatient(defaultPatientId ? String(defaultPatientId) : '');
@@ -1488,11 +1626,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
-      setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
+      setSelectedDate(toDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode })));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
       setAmountToPay('');
-      setAppointmentStatus(isPastAppointmentMode ? 'tbd' : 'scheduled');
+      setAppointmentStatus(isPastAppointmentMode ? 'completed' : 'scheduled');
       setPaymentStatus('unpaid');
       setPaymentMethod('');
       // Reset the flag when opening for new appointment
@@ -1574,7 +1712,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     appointmentToEdit?.doctor?.profilePictureUrl,
   ));
 
-  const hasDoctorScheduleConflict = (doctorNameToCheck: string) => {
+  const selectedDateKey = formatDateToYYYYMMDD(selectedDate);
+  const isSelectedDateAppointmentsLoaded = !selectedDateKey || dailyAppointmentsDateKey === selectedDateKey;
+
+  const hasDoctorScheduleConflict = useCallback((doctorNameToCheck: string) => {
     if (!selectedDate || !selectedTime || !doctorNameToCheck) return false;
 
     const [hours, minutes] = selectedTime.split(':').map(Number);
@@ -1596,7 +1737,29 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
       return slotStart < aptEnd && slotEnd > aptDate;
     });
-  };
+  }, [selectedDate, selectedTime, duration, dailyAppointments]);
+
+  useEffect(() => {
+    if (!open || appointmentToEdit || modalStep !== 'doctor') return;
+    if (selectedDoctor || !selectedDate || !selectedTime) return;
+    if (!isSelectedDateAppointmentsLoaded) return;
+
+    const firstAvailableDoctor = visibleDoctors.find((doctor) => !hasDoctorScheduleConflict(doctor.name));
+    if (!firstAvailableDoctor) return;
+
+    autoPreselectedDoctorRef.current = firstAvailableDoctor.name;
+    setSelectedDoctor(firstAvailableDoctor.name);
+  }, [
+    open,
+    appointmentToEdit,
+    modalStep,
+    selectedDoctor,
+    selectedDate,
+    selectedTime,
+    isSelectedDateAppointmentsLoaded,
+    visibleDoctors,
+    hasDoctorScheduleConflict,
+  ]);
 
   const canOpenStep = (stepId: ImprovedBookingStep) => {
     if (isBooking) return false;
@@ -1634,8 +1797,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const hasDiscount = discountAmount > 0;
   const discountedPrice = Math.max(0, finalPrice - discountAmount);
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
-  const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
-  const isOverpay = paymentMethod !== "Pay at Clinic" && paymentAmountNow > remainingBalance;
+  const paymentAmountNow = parseFloat(amountToPay) || 0;
+  const isOverpay = paymentAmountNow > remainingBalance;
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const selectedTreatmentName = appointmentType === "Other"
     ? customAppointmentTypeName || "Custom Treatment"
@@ -1647,6 +1810,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   });
   const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
   const mergedHistoryLogs = getMergedBookingLogs(appointmentLogs, paymentLogs);
+  const hasScheduledStatusOption = appointmentStatusOptions.some(
+    (status) => String(status.value || '').trim().toLowerCase() === 'scheduled'
+  );
+  const defaultAppointmentStatus = isPastStatusRestricted || !hasScheduledStatusOption ? 'completed' : 'scheduled';
+
+  useBookingPaymentPrefill({
+    open,
+    modalStep,
+    amountToPay,
+    remainingBalance,
+    setAmountToPay,
+  });
+
+  useEffect(() => {
+    if (!open || statusChangedByUser === 1) return;
+    if (appointmentStatus === defaultAppointmentStatus) return;
+    setAppointmentStatus(defaultAppointmentStatus);
+  }, [open, statusChangedByUser, appointmentStatus, defaultAppointmentStatus]);
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
@@ -1685,7 +1866,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const handleConfirmPayment = async () => {
     // Prevent overpayment: do not proceed if entered amount exceeds remaining balance
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountPaidRaw) || 0);
+    const amountPaid = parseFloat(amountPaidRaw) || 0;
     if (amountPaid > remainingBalance) {
       toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
       return;
@@ -1712,8 +1893,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       }
 
       if (modalStep === "doctor" && !selectedDoctor) {
+        if (!isSelectedDateAppointmentsLoaded) return;
         const firstAvailableDoctor = visibleDoctors.find((doctor) => !hasDoctorScheduleConflict(doctor.name));
         if (firstAvailableDoctor) {
+          autoPreselectedDoctorRef.current = firstAvailableDoctor.name;
           setSelectedDoctor(firstAvailableDoctor.name);
           setModalStep("treatment");
         }
@@ -1741,8 +1924,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     isBooking,
     modalStep,
     open,
+    isSelectedDateAppointmentsLoaded,
     selectedDoctor,
     visibleDoctors,
+    hasDoctorScheduleConflict,
   ]);
 
   useEffect(() => {
@@ -1757,30 +1942,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Calculate what the final status will be for display in summary
   const getProjectedStatus = () => {
-    if (isPastStatusRestricted) {
-      return normalizePastAppointmentStatus(appointmentStatus || appointmentToEdit?.status);
+    if (statusChangedByUser === 1) {
+      return isPastStatusRestricted
+        ? normalizePastAppointmentStatus(appointmentStatus || appointmentToEdit?.status || defaultAppointmentStatus)
+        : appointmentStatus || appointmentToEdit?.status || defaultAppointmentStatus;
     }
 
-    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = parseFloat(amountPaidRaw) || 0;
-
-    return getProjectedBookingStatus({
-      userRole: user?.role,
-      bookingMode,
-      isEditing: Boolean(appointmentToEdit),
-      statusChangedByUser: statusChangedByUser === 1,
-      selectedStatus: appointmentStatus,
-      existingStatus: appointmentToEdit?.status,
-      amountPaid,
-      previouslyPaidAmount,
-      totalPrice: discountedPrice,
-    });
+    return defaultAppointmentStatus;
   };
 
   // Calculate what the final payment status will be for display in summary
   const getFinalPaymentStatus = () => {
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountPaidRaw) || 0);
+    const amountPaid = parseFloat(amountPaidRaw) || 0;
 
     return getProjectedPaymentStatus({
       paymentMethod,
@@ -1827,11 +2001,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
       
-      // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-      if (paymentMethod === "Pay at Clinic") {
-        amountPaidRaw = '0';
-      }
       const amountPaid = parseFloat(amountPaidRaw) || 0;
 
       // Final validation: prevent overpayment
@@ -1937,8 +2107,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
         if (amountPaid > 0) {
           toast.success(`Payment of ₱${amountPaid.toLocaleString()} recorded successfully!`);
-        } else if (paymentMethod === "Pay at Clinic") {
-          toast.success(`Appointment set to pay at clinic!`);
         } else {
           toast.success(`Appointment updated successfully!`);
         }
@@ -2159,9 +2327,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           timestamp: new Date().toISOString(),
         });
 
-        if (paymentMethod === "Pay at Clinic") {
-          toast.success(`Appointment created (Pay at Clinic)!`);
-        } else if (amountPaid > 0) {
+        if (amountPaid > 0) {
           toast.success(`Appointment booked with payment of ₱${amountPaid.toLocaleString()}!`);
         } else {
           toast.success(`Appointment booked successfully!`);
@@ -2214,12 +2380,38 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const handleClose = () => {
+    autoPreselectedScheduleRef.current = null;
+    autoPreselectedDoctorRef.current = null;
+    previousSelectedPatientRef.current = "";
     setModalStep("patient");
     setIsRescheduling(false);
     setAmountToPay("");
     setCustomAppointmentTypeName("");
     setCustomPrice("0");
     onOpenChange(false);
+  };
+
+  const clearAutomaticScheduleSelection = () => {
+    autoPreselectedScheduleRef.current = null;
+    autoPreselectSearchKeyRef.current = null;
+
+    const autoDoctor = autoPreselectedDoctorRef.current;
+    if (autoDoctor) {
+      autoPreselectedDoctorRef.current = null;
+      setSelectedDoctor((current) =>
+        normalizeDoctorName(current) === normalizeDoctorName(autoDoctor) ? "" : current
+      );
+    }
+  };
+
+  const handleManualDateSelect = (date: Date) => {
+    clearAutomaticScheduleSelection();
+    setSelectedDate(toDate(date));
+  };
+
+  const handleManualTimeSelect = (time: string) => {
+    clearAutomaticScheduleSelection();
+    setSelectedTime(time);
   };
 
   const viewCurrentAppointment = async (appointmentId?: string) => {
@@ -2278,8 +2470,20 @@ return (
 
               <DialogTitle className="text-xl font-black text-gray-900 flex-1 text-center tracking-tight">
                 {title ? title : (
-                  modalStep === 'payment' ? 'Complete Booking' : 
-                  appointmentToEdit ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') : 'Book Appointment'
+                  (() => {
+                    const isPastAppointment = isPastAppointmentDate(selectedDate);
+                    
+                    if (modalStep === 'payment') {
+                      return 'Complete Booking';
+                    }
+                    
+                    if (appointmentToEdit) {
+                      if (isPatientReadonly) return 'View Appointment';
+                      return isPastAppointment ? 'Edit past appointment' : 'Edit Appointment';
+                    }
+                    
+                    return isPastAppointment ? 'Add a past appointment' : 'Book Appointment';
+                  })()
                 )}
               </DialogTitle>
               {isEditMode && mergedHistoryLogs.length > 0 ? (
@@ -2495,7 +2699,11 @@ return (
                             key={doctor.id}
                             data-tour-id="booking-doctor-option"
                             type="button"
-                            onClick={() => !unavailable && setSelectedDoctor(doctor.name)}
+                            onClick={() => {
+                              if (unavailable) return;
+                              autoPreselectedDoctorRef.current = null;
+                              setSelectedDoctor(doctor.name);
+                            }}
                             disabled={unavailable}
                             className={`group flex min-h-[120px] flex-col justify-center rounded-[2rem] border-2 bg-white p-5 text-left shadow-sm transition-all ${
                               selected
@@ -2745,15 +2953,6 @@ return (
                             </p>
                           </div>
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setAmountToPay(String(remainingBalance))}
-                          disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
-                          className="h-12 shrink-0 rounded-2xl border-gray-100 bg-white px-6 text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm"
-                        >
-                          Full Payment
-                        </Button>
                       </div>
 
                       <div className="relative group">
@@ -2768,7 +2967,6 @@ return (
                           onChange={(e: any) => setAmountToPay(e.target.value)}
                           max={remainingBalance}
                           className="h-24 rounded-[1.5rem] border-2 border-gray-100 bg-gray-50/50 pl-16 pr-8 text-4xl font-black shadow-none transition-all appearance-none focus:border-blue-600 focus:bg-white focus:ring-0 tracking-tighter"
-                          disabled={paymentMethod === "Pay at Clinic"}
                         />
                       </div>
                     </div>
@@ -2779,14 +2977,13 @@ return (
                         {[
                           { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
                           { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-indigo-600", shadow: "shadow-indigo-100" },
-                          ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
-                          { id: "Pay at Clinic", label: "Pay at Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600", shadow: "shadow-emerald-100" }
+                          ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : [])
                         ].map((pm) => (
                           <button
                             key={pm.id}
                             type="button"
                             aria-pressed={paymentMethod === pm.id}
-                            onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
+                            onClick={() => setPaymentMethod(pm.id)}
                             className={`flex flex-col h-[7.5rem] items-center justify-center gap-3 rounded-3xl border-2 px-4 transition-all group relative ${
                               paymentMethod === pm.id
                                 ? `border-blue-600 bg-blue-50/50 text-blue-700 shadow-xl ${pm.shadow}`
@@ -3120,7 +3317,7 @@ return (
                   <div className="min-w-0 md:justify-self-end md:text-right">
                     <div>
                       <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Payment Status</p>
-                      {canManagePricing ? (
+                      {canManagePaymentStatuses ? (
                         <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
                           <SelectTrigger className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 md:w-[160px] ${
                             getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
@@ -3205,8 +3402,8 @@ return (
         openedFromBookingModal={true}
       />
 
-      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
-      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={handleManualDateSelect} doctorName={selectedDoctor} patientId={selectedPatient} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={handleManualTimeSelect} onDateChange={handleManualDateSelect} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
     </>
   );
  }

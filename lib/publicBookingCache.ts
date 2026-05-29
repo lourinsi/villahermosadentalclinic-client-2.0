@@ -26,7 +26,7 @@ export type PublicBookingPatient = {
 };
 
 export type PublicBookingAppointment = Omit<Appointment, "paymentStatus"> & {
-  paymentStatus?: Appointment["paymentStatus"] | "pay-at-clinic";
+  paymentStatus?: Appointment["paymentStatus"];
   paymentMethod?: string;
   publicToken?: string;
   publicAccessToken?: string;

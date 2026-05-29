@@ -1,10 +1,7 @@
-import PatientLayout from "@/components/PatientLayout";
-import ProtectedRoute from "@/components/ProtectedRoute";
+import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 
-export default function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <ProtectedRoute allowedRoles={["patient"]}>
-      <PatientLayout>{children}</PatientLayout>
-    </ProtectedRoute>
-  );
+export default function PatientLayout({ children }: { children: ReactNode }) {
+  void children;
+  redirect("/admin/dashboard");
 }

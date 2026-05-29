@@ -11,8 +11,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog";
+import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { DollarSign } from "lucide-react";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { getAppointmentStatusOptionWithColors } from "@/lib/status-colors";
 
@@ -27,6 +30,7 @@ interface Props {
 
 export default function ApproveRejectDialog({ open, onOpenChange, mode, appointment, isProcessing = false, onConfirm }: Props) {
   const { statuses } = useAppointmentStatuses();
+  const { openEditModal } = useAppointmentModal();
 
   const patientName = appointment?.patientName || appointment?.patient?.name || appointment?.patient || "Patient";
   const status = appointment?.status || "reserved";
@@ -37,7 +41,8 @@ export default function ApproveRejectDialog({ open, onOpenChange, mode, appointm
     return d?.name || d?.fullName || d?.username || "";
   })();
 
-  const paymentStatus = (appointment?.paymentStatus || "unpaid").toLowerCase();
+  const paymentStatusRaw = String(appointment?.paymentStatus || "unpaid").toLowerCase().trim();
+  const paymentStatus = paymentStatusRaw.replace(/\s+/g, "-").replace(/_+/g, "-");
 
   const title = mode === "approve"
     ? (status === "tbd" ? "Mark as Completed?" : "Approve Appointment?")
@@ -50,11 +55,19 @@ export default function ApproveRejectDialog({ open, onOpenChange, mode, appointm
     : `Are you sure you want to reject this appointment for ${patientName}? The status will be set to Cancelled.`;
 
   const paymentSummary = (() => {
-    if (paymentStatus.includes("paid")) return `✓ ${patientName} has paid in full.`;
-    if (paymentStatus.includes("half")) return `⚠ ${patientName} has made a partial payment.`;
-    if (paymentStatus.includes("pay")) return `📍 ${patientName} will pay at the clinic.`;
+    if (/half|partial/.test(paymentStatus)) return `⚠ ${patientName} has made a partial payment.`;
+    if (/^paid$/.test(paymentStatus)) return `✓ ${patientName} has paid in full.`;
+    if (/pay/.test(paymentStatus)) return `📍 ${patientName} will pay at the clinic.`;
     return `✗ ${patientName} has not paid yet.`;
   })();
+
+  const hasPaymentDue = !/^(paid|over-paid|overpaid)$/.test(paymentStatus);
+
+  const handleOpenPayment = () => {
+    if (!appointment) return;
+    onOpenChange(false);
+    openEditModal(appointment, false, true);
+  };
 
   const renderStatusBadge = (s?: string) => {
     const statusOption = getAppointmentStatusOptionWithColors(s, statuses);
@@ -63,7 +76,11 @@ export default function ApproveRejectDialog({ open, onOpenChange, mode, appointm
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="rounded-2xl border-none shadow-2xl" onEscapeKeyDown={(e) => e.preventDefault()}>
+      <AlertDialogContent
+        className="rounded-2xl border-none shadow-2xl"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onOverlayClick={() => onOpenChange(false)}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">{title}</AlertDialogTitle>
           <AlertDialogDescription className="text-gray-500 font-medium">{description}</AlertDialogDescription>
@@ -100,6 +117,16 @@ export default function ApproveRejectDialog({ open, onOpenChange, mode, appointm
 
         <AlertDialogFooter className="gap-2">
           <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
+          {mode === "approve" && hasPaymentDue ? (
+            <Button
+              onClick={handleOpenPayment}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold uppercase text-xs tracking-wider"
+              size="sm"
+            >
+              <DollarSign className="h-4 w-4 mr-2" />
+              Pay now
+            </Button>
+          ) : null}
           <AlertDialogAction
             onClick={() => onConfirm()}
             className={mode === "reject" ? "bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider" : "bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"}

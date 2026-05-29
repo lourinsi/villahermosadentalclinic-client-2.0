@@ -26,6 +26,9 @@ import { Label } from "./ui/label";
 import { Input } from "./ui/input";
 import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
+const getNonClinicPaymentStatus = (status?: string | null) =>
+  String(status || "").trim().toLowerCase() === "pay-at-clinic" ? "unpaid" : status || "unpaid";
+
 export function PatientPaymentModal() {
   const {
     isPatientPaymentModalOpen,
@@ -106,7 +109,7 @@ export function PatientPaymentModal() {
       refreshAppointments();
       try {
         const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
-        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
+        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? getNonClinicPaymentStatus(selectedAppointment.paymentStatus) : 'paid');
         // Map to internal appointment status: full paid -> scheduled, partial -> reserved
         const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
@@ -173,7 +176,7 @@ export function PatientPaymentModal() {
       refreshAppointments();
       try {
         const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
-        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
+        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? getNonClinicPaymentStatus(selectedAppointment.paymentStatus) : 'paid');
         const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);

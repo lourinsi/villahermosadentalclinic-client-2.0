@@ -69,7 +69,6 @@ import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
-import { PastAppointmentButton } from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import {
   getAppointmentStatusOptionWithColors,
@@ -190,6 +189,7 @@ export function PatientDetailsModal({
 }: PatientDetailsModalProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
   const [serverPatient, setServerPatient] = useState<Patient | null>(null);
+  const { refreshAppointments, openCreateModal } = useAppointmentModal();
   const patientDisplayName = patient?.name || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient";
   const patientInitials = patientDisplayName
     .split(" ")
@@ -805,7 +805,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   openBookingAppointmentId,
   onOpenBookingModal
 }, ref) => {
-  const { refreshPatients, appointments } = useAppointmentModal();
+  const { refreshPatients, appointments, refreshAppointments, openCreateModal } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const { doctors } = useDoctors(undefined, { enabled: true });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
@@ -2529,15 +2529,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                     <CardTitle>Appointment History</CardTitle>
-                    <PastAppointmentButton
+                    <Button
                       size="sm"
-                      doctorName={doctorFilter}
-                      patientId={patient?.id}
-                      onCreated={() => {
-                        // Optionally refresh patients or history if needed
-                        // refreshPatients is already called in PastAppointmentButton's onBooked
-                      }}
-                    />
+                      type="button"
+                      variant="outline"
+                      onClick={() => openCreateModal()}
+                      className="gap-2 font-semibold"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>New Appointment</span>
+                    </Button>
                 </div>
                 <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2 lg:grid-cols-5 xl:flex xl:items-center">
                     <div className="relative w-full xl:w-[250px]">
@@ -2569,7 +2570,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             {PAYMENT_STATUSES.map(status => (
                                 <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                             ))}
-                            <SelectItem value="over-paid">Over-paid</SelectItem>
                         </SelectContent>
                     </Select>
                     {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
@@ -3016,6 +3016,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         isHistorical={selectedSnapshotIsHistorical}
         openedFromBookingModal={false}
       />
+
       </div>
     </div>
   );

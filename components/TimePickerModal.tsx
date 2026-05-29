@@ -148,21 +148,15 @@ export function TimePickerModal({
     }
   }, [selectedDate, open, viewDate, fetchAppointments]);
 
-  const isPastMode = dateSelectionMode === "past";
-  const isEditMode = dateSelectionMode === "edit";
-
   const startOfDay = (date: Date) => {
     const copy = new Date(date);
     copy.setHours(0, 0, 0, 0);
     return copy;
   };
 
-  const isAfterToday = (date: Date) => startOfDay(date) > startOfDay(new Date());
-
   const navigateDate = (direction: 'prev' | 'next') => {
     const newDate = new Date(viewDate);
     newDate.setDate(viewDate.getDate() + (direction === 'next' ? 1 : -1));
-    if (!isEditMode && isPastMode && isAfterToday(newDate)) return;
     setViewDate(newDate);
     if (onDateChange && !selectionDisabled) {
       onDateChange(newDate);
@@ -198,7 +192,6 @@ export function TimePickerModal({
       const isFutureTime = isToday && (hour > currentHour || (hour === currentHour && minute > currentMinute));
       const isPast = isPastTime || isPastDate;
       const isFuture = isFutureTime || isFutureDate;
-      const isBlockedByDateMode = isPastMode ? isFuture : isPast;
       
       const slotMinutes = timeToMinutes(slot);
       const slotEndMinutes = slotMinutes + normalizeBookingDuration(duration);
@@ -242,23 +235,22 @@ export function TimePickerModal({
       }
 
       const isSelected = selectedTime === slot && formatDateToYYYYMMDD(viewDate) === formatDateToYYYYMMDD(selectedDate);
-      const isBlockedByMode = isEditMode ? false : isBlockedByDateMode;
       
       return {
         time: slot,
-        isAvailable: (!isBooked || isPending) && !isBlockedByMode,
+        isAvailable: (!isBooked || isPending),
         isBooked,
         isTentative,
         isPending,
         isPatientConflict,
         isPast,
         isFuture,
-        isBlockedByDateMode: isBlockedByMode,
+        isBlockedByDateMode: false,
         isSelected,
         appointment
       };
     });
-  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId, isPastMode]);
+  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId]);
 
   const handleTimeSelect = (time: string) => {
     if (selectionDisabled) return;
@@ -271,7 +263,7 @@ export function TimePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-tour-id="booking-time-picker" className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isPastMode ? "Select Past Time" : isEditMode ? "Select Time" : "Select Time"}</DialogTitle>
+          <DialogTitle>Select Time</DialogTitle>
         </DialogHeader>
         
         <div className="space-y-3">
@@ -290,8 +282,7 @@ export function TimePickerModal({
             
             <button
               onClick={() => navigateDate('next')}
-              disabled={!isEditMode && isPastMode && isAfterToday(new Date(new Date(viewDate).setDate(viewDate.getDate() + 1)))}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors border border-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors border border-gray-100"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
             </button>
@@ -320,7 +311,7 @@ export function TimePickerModal({
                       setSnapshotOpen(true);
                     }
                   }}
-                  disabled={selectionDisabled || (slot.isBlockedByDateMode && !slot.appointment)}
+                  disabled={selectionDisabled}
                   className={cn(
                     "px-2 py-2 rounded-lg font-semibold text-xs transition-all border",
                     selectionDisabled
@@ -329,10 +320,6 @@ export function TimePickerModal({
                       ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
                     : slot.isSelected && slot.isAvailable
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
-                      : slot.isBlockedByDateMode && slot.isPast && !slot.appointment
-                      ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
-                      : slot.isBlockedByDateMode && slot.isFuture && !slot.appointment
-                      ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
                       : slot.isAvailable && (!slot.isBooked || slot.isPending)
                       ? "bg-white text-gray-900 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                       : slot.isTentative
@@ -341,8 +328,6 @@ export function TimePickerModal({
                   ) }
                   title={
                     selectionDisabled ? "Time selection is disabled during this tour step"
-                    : slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Upcoming time"
-                    : slot.isBlockedByDateMode && slot.isPast && !slot.appointment ? "Past time"
                     : slot.isPatientConflict ? "Patient is busy (Click to view details)"
                     : slot.isTentative ? "Reserved (Click to view details)"
                     : slot.isBooked && !slot.isPending ? "Booked (Click to view details)"
@@ -351,9 +336,7 @@ export function TimePickerModal({
                 >
                   <div>{formatTimeTo12h(slot.time)}</div>
                   <div className="text-[8px] opacity-70">
-                    {slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Future"
-                    : slot.isBlockedByDateMode && slot.isPast && !slot.appointment ? "Passed"
-                    : slot.isPatientConflict ? "Busy"
+                    {slot.isPatientConflict ? "Busy"
                     : slot.isTentative ? "Rsrvd"
                     : slot.isBooked && !slot.isPending ? "Booked"
                     : "Open"}

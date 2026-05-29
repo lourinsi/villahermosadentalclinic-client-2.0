@@ -5,7 +5,27 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatDateToYYYYMMDD(date: Date): string {
+export function formatDateToYYYYMMDD(dateInput?: Date | string | null): string {
+  if (!dateInput) return "";
+
+  let date: Date;
+  if (dateInput instanceof Date) {
+    date = dateInput;
+  } else {
+    const value = String(dateInput).trim();
+    const isoDateMatch = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(value);
+    if (isoDateMatch) {
+      const year = Number(isoDateMatch[1]);
+      const month = Number(isoDateMatch[2]);
+      const day = Number(isoDateMatch[3]);
+      date = new Date(year, month - 1, day);
+    } else {
+      date = new Date(value);
+    }
+  }
+
+  if (Number.isNaN(date.getTime())) return "";
+
   const year = date.getFullYear();
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');

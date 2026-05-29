@@ -27,6 +27,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const clearAuthState = () => {
+    setIsAuthenticated(false);
+    setUser(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("authToken");
+    }
+  };
+
   // Check if user is already authenticated on mount
   useEffect(() => {
     (async () => {
@@ -55,13 +63,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           staffId: data.user.staffId,
         });
       } else {
-        setIsAuthenticated(false);
-        setUser(null);
+        clearAuthState();
       }
     } catch (error) {
       console.error("[AUTH] Verification error:", error);
-      setIsAuthenticated(false);
-      setUser(null);
+      clearAuthState();
     } finally {
       setIsLoading(false);
     }
@@ -98,8 +104,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.setItem("authToken", data.token);
       }
     } catch (error) {
-      setIsAuthenticated(false);
-      setUser(null);
+      clearAuthState();
       throw error;
     } finally {
       setIsLoading(false);
@@ -117,11 +122,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
       });
 
-      setIsAuthenticated(false);
-      setUser(null);
-      localStorage.removeItem("authToken");
+      clearAuthState();
     } catch (error) {
       console.error("[AUTH] Logout error:", error);
+      clearAuthState();
     } finally {
       setIsLoading(false);
     }

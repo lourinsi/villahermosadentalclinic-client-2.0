@@ -96,9 +96,10 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
   const handleLogout = async () => {
     try {
+      const logoutRedirect = user?.role === "receptionist" ? "/receptionist/login" : "/admin/login";
       await logout();
       toast.success("Logged out successfully");
-      router.push("/login");
+      router.push(logoutRedirect);
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout");
@@ -116,6 +117,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/notifications", label: "Notifications", icon: Bell },
     { href: "/admin/settings", label: "Settings", icon: Settings },
   ];
+  const portalTitle = user?.role === "receptionist" ? "Reception" : "Admin";
 
   const getNavTourId = (label: string) =>
     `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
@@ -123,7 +125,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <div className="flex h-screen bg-gray-100">
       <aside data-tour-id="admin-sidebar" className="w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col">
-        <div className="p-4 text-2xl font-bold border-b border-blue-800">Admin</div>
+        <div className="p-4 text-2xl font-bold border-b border-blue-800">{portalTitle}</div>
         <nav className="flex-1 py-4">
           <ul className="space-y-1">
             {navItems.map((item) => {
@@ -152,7 +154,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         <div className="p-4 border-t border-blue-800 space-y-3">
           <div className="flex items-center space-x-2 px-3 py-2 bg-blue-800 rounded-lg">
             <User className="w-4 h-4 text-blue-200" />
-            <span className="text-sm font-medium truncate">{user?.username || "Admin"}</span>
+            <span className="text-sm font-medium truncate">{user?.username || portalTitle}</span>
           </div>
           <Button
             onClick={handleLogout}

@@ -1,4 +1,5 @@
 import { apiUrl } from "@/lib/api";
+import React, { useEffect, useRef } from "react";
 import {
   CART_APPOINTMENT_STATUS,
   CART_APPOINTMENT_STATUS_LABEL,
@@ -26,7 +27,7 @@ type Toast = { error?: (msg: string) => void } | ((msg: string) => void);
 
 type BookingFlow = 'details-payment' | 'multi-step';
 type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
-type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
+type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | 'receptionist' | '';
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past' | 'edit';
 
@@ -121,6 +122,7 @@ export type BookingStatusOption = {
 export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS;
 
 export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS;
+const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
 
 export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
@@ -217,9 +219,10 @@ export function formatBookingHistoryStatusLabel(value?: unknown) {
 
   const labels: Record<string, string> = {
     "add-to-cart": "Add to Cart",
-    "half-paid": "Half Paid",
+    "half paid": "Partial",
+    "half-paid": "Partial",
+    "half_paid": "Partial",
     "paid": "Fully Paid",
-    "pay-at-clinic": "Pay at Clinic",
     "tbd": "TBD",
   };
 
@@ -382,15 +385,25 @@ export function getBookingPaymentStatusConfig<T extends BookingStatusOption>({
   fallbackStatusOptions?: T[];
 }) {
   const currentPaymentStatusValue = normalizePaymentStatus(paymentStatus || existingStatus || "unpaid");
-  const fetchedPaymentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
-  const basePaymentStatusOptions = [
-    ...fetchedPaymentStatusOptions,
-    ...fallbackStatusOptions.filter(
-      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === fallbackStatus.value)
-    ),
-  ];
+  const sourcePaymentStatusOptions = statusOptions.length > 0
+    ? [...statusOptions, ...fallbackStatusOptions]
+    : fallbackStatusOptions;
+  const basePaymentStatusOptions = sourcePaymentStatusOptions.reduce<T[]>((options, status) => {
+    const normalizedValue = normalizePaymentStatus(status.value);
+    if (
+      !normalizedValue ||
+      HIDDEN_PAYMENT_STATUS_VALUES.has(normalizedValue) ||
+      options.some((option) => normalizePaymentStatus(option.value) === normalizedValue)
+    ) {
+      return options;
+    }
+
+    return [...options, status];
+  }, []);
+  const isHiddenCurrentPaymentStatus = HIDDEN_PAYMENT_STATUS_VALUES.has(currentPaymentStatusValue);
   const paymentStatusOptions =
     currentPaymentStatusValue &&
+    !isHiddenCurrentPaymentStatus &&
     !basePaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === currentPaymentStatusValue)
       ? [
           buildCurrentStatusOption<T>(
@@ -430,6 +443,40 @@ export function getBookingDefaultDate(defaultDate?: Date | null) {
 
 export function getBookingDefaultTime(defaultTime?: string | null) {
   return defaultTime ?? "";
+}
+
+export type UseBookingPaymentPrefillArgs = {
+  open: boolean;
+  modalStep: BookingStep;
+  amountToPay: string;
+  remainingBalance: number;
+  setAmountToPay: (value: string) => void;
+};
+
+export function useBookingPaymentPrefill({
+  open,
+  modalStep,
+  amountToPay,
+  remainingBalance,
+  setAmountToPay,
+}: UseBookingPaymentPrefillArgs) {
+  const paymentAmountPrefilledRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) {
+      paymentAmountPrefilledRef.current = false;
+      return;
+    }
+
+    if (modalStep !== "payment" || remainingBalance <= 0 || paymentAmountPrefilledRef.current) return;
+    if (amountToPay.trim() !== "") {
+      paymentAmountPrefilledRef.current = true;
+      return;
+    }
+
+    setAmountToPay(String(remainingBalance));
+    paymentAmountPrefilledRef.current = true;
+  }, [open, modalStep, amountToPay, remainingBalance, setAmountToPay]);
 }
 
 export function getBookingEditDate({
@@ -728,9 +775,10 @@ export function getBookingActor({
 }) {
   const isPublicBookingMode = bookingMode === 'public';
   const effectiveRole = (isPublicBookingMode ? 'public' : userRole || '') as BookingActorRole;
-  const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor';
+  const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor' || effectiveRole === 'receptionist';
   const isPatientLevelBookingMode = effectiveRole === 'patient' || effectiveRole === 'public';
   const canManageStatuses = Boolean(effectiveRole) && !isPatientLevelBookingMode;
+  const canManagePaymentStatuses = effectiveRole === 'admin';
 
   return {
     effectiveRole,
@@ -740,6 +788,7 @@ export function getBookingActor({
     canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
     canManagePricing: isStaffBookingMode,
     canManageStatuses,
+    canManagePaymentStatuses,
     // Doctors should have the doctor selection locked in the doctor portal
     // (they should not be able to pick other doctors). Keep this true
     // regardless of editing mode so the doctor step is hidden for doctors.
@@ -896,10 +945,6 @@ export function getProjectedPaymentStatus({
   previouslyPaidAmount: number;
   totalPrice: number;
 }) {
-  if (String(paymentMethod || '').trim().toLowerCase() === 'pay at clinic') {
-    return 'pay-at-clinic';
-  }
-
   if (statusChangedByUser) {
     return selectedStatus || existingStatus || 'unpaid';
   }

@@ -36,7 +36,8 @@ export function RecentSchedule({
   });
 
   return (
-    <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col h-full">
+    <div className="w-full h-full flex flex-col">
+      <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col w-full flex-1 min-h-[240px]">
       <CardHeader className="border-b border-gray-50 p-8 space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -134,6 +135,7 @@ export function RecentSchedule({
           )}
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }

@@ -30,7 +30,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     hasMore,
     isLoadingMore,
     loadMoreNotifications
-  } = useNotifications({ includeDeleted: true, limit: 30 });
+  } = useNotifications({ includeDeleted: true, limit: 10 });
 
   const { 
     updateAppointment, 
@@ -117,14 +117,6 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div data-tour-id={`${portal}-notifications-page`} className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
   // Portal-specific props
   const portalProps: Record<Portal, any> = {
     patient: {
@@ -146,7 +138,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     <div data-tour-id={`${portal}-notifications-page`} className="max-w-4xl mx-auto">
       <NotificationView 
         notifications={notifications}
-        isLoading={notificationsLoading}
+        isLoading={isLoading}
         error={error}
         onMarkAsRead={markAsRead}
         onMarkAsUnread={markAsUnread}

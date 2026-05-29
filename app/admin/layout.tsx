@@ -16,7 +16,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ProtectedRoute allowedRoles={["admin"]}>
+    <ProtectedRoute allowedRoles={["admin", "receptionist"]}>
       <AdminLayout>{children}</AdminLayout>
     </ProtectedRoute>
   );

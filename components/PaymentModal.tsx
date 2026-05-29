@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -40,6 +40,7 @@ export function PaymentModal() {
   const [notes, setNotes] = useState<string>("");
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
+  const paymentAmountPrefilledRef = useRef(false);
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
@@ -193,6 +194,22 @@ export function PaymentModal() {
   const selectedApt = appointments.find((a) => a.id === selectedAppointment) || (appointmentId ? appointments.find((a) => a.id === appointmentId) : undefined);
   const outstandingBalance = selectedApt ? (selectedApt.price || 0) - (selectedApt.totalPaid || 0) : 0;
   const isEditing = Boolean(paymentData) || Boolean(paymentId);
+
+  useEffect(() => {
+    if (!isPaymentModalOpen) {
+      paymentAmountPrefilledRef.current = false;
+      return;
+    }
+
+    if (isEditing || !selectedApt || outstandingBalance <= 0 || paymentAmountPrefilledRef.current) return;
+    if (amount.trim() !== "") {
+      paymentAmountPrefilledRef.current = true;
+      return;
+    }
+
+    setAmount(String(outstandingBalance.toFixed(2)));
+    paymentAmountPrefilledRef.current = true;
+  }, [isPaymentModalOpen, isEditing, selectedApt, amount, outstandingBalance]);
 
   const handleSubmit = async () => {
     const amt = parseFloat(amount) || 0;
@@ -374,7 +391,6 @@ export function PaymentModal() {
               {outstandingBalance > 0 && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
                   <span>Outstanding: ₱{outstandingBalance.toFixed(2)}</span>
-                  <button type="button" onClick={() => setAmount(String(outstandingBalance.toFixed(2)))} className="text-primary font-semibold underline-offset-2 hover:underline">Pay in full</button>
                 </div>
               )}
             </div>
