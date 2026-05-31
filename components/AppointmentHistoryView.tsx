@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound, AlertTriangle, CheckCircle2, RefreshCw, History } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
@@ -1030,12 +1031,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           {/* Participants - More compact */}
           <div className="bg-white p-3 rounded-[1.25rem] border border-slate-200/50 shadow-sm grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2.5">
-              <Avatar className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0">
-                <AvatarImage src={resolvedPatientImage} alt={patientName} className="object-cover" />
-                <AvatarFallback className="rounded-xl bg-slate-50">
-                  <UserRound className="w-4 h-4 text-blue-400" />
-                </AvatarFallback>
-              </Avatar>
+              <PatientAvatar src={resolvedPatientImage} name={patientName} dob={patientDateOfBirth || patientDob || patientBirthDate || patientBirthday} className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0" sizeClass="h-9 w-9 rounded-xl" />
               <div className="min-w-0">
                 <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest mb-0.5 block">Patient</Label>
                 <div className="flex min-w-0 items-center gap-1">

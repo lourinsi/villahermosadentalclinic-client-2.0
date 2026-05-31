@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -3189,14 +3190,7 @@ return (
                 <div className="min-w-0">
                   <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Patient</p>
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
-                      {summaryPatientAvatar && (
-                        <AvatarImage src={summaryPatientAvatar} alt={summaryPatientName} className="object-cover" />
-                      )}
-                      <AvatarFallback className="bg-blue-600 text-[11px] font-black text-white">
-                        {getPersonInitials(summaryPatientName)}
-                      </AvatarFallback>
-                    </Avatar>
+                    <PatientAvatar src={summaryPatientAvatar} name={summaryPatientName} dob={summaryPatientDateOfBirth || summaryPatientDob || summaryPatientBirthDate || summaryPatientBirthday} className="h-10 w-10 shrink-0 border-2 border-white shadow-md" sizeClass="h-10 w-10 rounded-2xl" />
                     <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{summaryPatientName}</p>
                   </div>
                 </div>

@@ -62,6 +62,7 @@ import {
 
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
@@ -362,14 +363,7 @@ export function PatientDetailsModal({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4 sm:gap-6">
               <div className="relative group">
-                <Avatar className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20">
-                  {patient?.profilePicture ? (
-                    <AvatarImage src={patient.profilePicture} alt={`${patientDisplayName} photo`} className="object-cover" />
-                  ) : null}
-                  <AvatarFallback className="bg-violet-50 text-2xl font-bold text-violet-600">
-                    {patientInitials}
-                  </AvatarFallback>
-                </Avatar>
+                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20" sizeClass="h-16 w-16 sm:h-20 sm:w-20 rounded-md" />
                 <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
               <div className="min-w-0 space-y-1.5">
@@ -2060,14 +2054,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="h-32 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500" />
                     <CardContent className="-mt-16 px-5 pb-7 pt-0 text-center sm:px-8 sm:pb-10">
                       <div className="relative inline-block group">
-                        <Avatar className="h-36 w-36 border-[6px] border-white bg-white shadow-2xl transition-transform duration-300 group-hover:scale-105">
-                          {formData.profilePicture ? (
-                            <AvatarImage src={formData.profilePicture} alt={patientDisplayName} className="object-cover" />
-                          ) : null}
-                          <AvatarFallback className="bg-violet-50 text-4xl font-black text-violet-600">
-                            {patientInitials}
-                          </AvatarFallback>
-                        </Avatar>
+                        <PatientAvatar src={resolveImageSource(formData.profilePicture)} name={patientDisplayName} dob={formData.dateOfBirth || patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-36 w-36 border-[6px] border-white bg-white shadow-2xl transition-transform duration-300 group-hover:scale-105" sizeClass="h-36 w-36 rounded-full" />
                         <Label
                           htmlFor={patientPhotoInputId}
                           className="absolute bottom-2 right-2 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-4 border-white bg-violet-600 text-white shadow-xl transition-all hover:scale-110 active:scale-90 hover:bg-violet-700"
@@ -2396,11 +2383,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         <div className="space-y-4">
                           <Label className="text-xs font-black uppercase tracking-widest text-slate-400">Primary Contact / Guardian</Label>
                           <div className="group flex items-center rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-violet-100 hover:shadow-md sm:p-5">
-                            <Avatar className="h-14 w-14 mr-5 ring-4 ring-slate-50 group-hover:ring-violet-50 transition-all">
-                              <AvatarFallback className="bg-violet-50 text-violet-600 font-black text-lg">
-                                {parentPatient.name?.charAt(0) || "P"}
-                              </AvatarFallback>
-                            </Avatar>
+                            <PatientAvatar src={resolveImageSource(parentPatient.profilePicture)} name={parentPatient.name} dob={parentPatient.dateOfBirth || parentPatient.dob || parentPatient.birthday} className="h-14 w-14 mr-5 ring-4 ring-slate-50 group-hover:ring-violet-50 transition-all" sizeClass="h-14 w-14 rounded-md" />
                             <div className="min-w-0 flex-1">
                               <div className="font-black text-slate-900 text-lg leading-tight truncate">{parentPatient.name}</div>
                               <div className="text-sm font-bold text-slate-500 flex items-center gap-2 mt-1">
@@ -2464,11 +2447,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           {familyMembers.map((member) => (
                             <div key={member.id} className="group flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 transition-all hover:border-blue-100 hover:shadow-lg sm:p-5">
                               <div className="flex items-center min-w-0">
-                                <Avatar className="h-12 w-12 mr-4 ring-2 ring-slate-50 group-hover:ring-blue-50 transition-all">
-                                  <AvatarFallback className="bg-blue-50 text-blue-600 font-black">
-                                    {member.name?.charAt(0)}
-                                  </AvatarFallback>
-                                </Avatar>
+                                <PatientAvatar src={resolveImageSource(member.profilePicture)} name={member.name} dob={member.dateOfBirth || member.dob || member.birthday} className="h-12 w-12 mr-4 ring-2 ring-slate-50 group-hover:ring-blue-50 transition-all" sizeClass="h-12 w-12 rounded-md" />
                                 <div className="min-w-0">
                                   <div className="text-base font-black text-slate-900 truncate">{member.name}</div>
                                   <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{member.relationship || "Dependent"}</div>

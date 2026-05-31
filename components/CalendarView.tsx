@@ -33,6 +33,7 @@ import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-ty
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import CalendarPopover from "./CalendarPopover";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 
@@ -589,24 +590,29 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     >
                       <div className="flex flex-col h-full">
                         <div className="flex items-start gap-3">
-                          <div className="flex-shrink-0">
-                            <Avatar className="h-10 w-10 border border-gray-100">
+                            <div className="flex-shrink-0">
                               {(() => {
-                                // Show patient picture when doctor filter is applied, doctor picture when showing all doctors
-                                if (showPatient) {
-                                  return <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} alt={appointment.patientName} />;
-                                } else {
-                                  const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                  const src = doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                  return <AvatarImage src={src} alt={appointment.doctor} />;
-                                }
+                                const src = showPatient
+                                  ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`
+                                  : (() => {
+                                      const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                      return doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                    })();
+
+                                return (
+                                  <PatientAvatar
+                                    src={src}
+                                    name={appointment.patientName || appointment.doctor}
+                                    dob={appointment.patientDateOfBirth || appointment.patientDob || appointment.patientBirthDate || appointment.patientBirthday}
+                                    className="h-10 w-10 border border-gray-100"
+                                    sizeClass="h-10 w-10"
+                                  />
+                                );
                               })()}
-                              <AvatarFallback>{showPatient ? String(appointment.patientName || '').substring(0,2).toUpperCase() : String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
-                            </Avatar>
-                          </div>
+                            </div>
                           <div className="flex-1 min-w-0">
                             <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
-                              {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
+                              {appointment.patientName ? appointment.patientName : `Dr. ${appointment.doctor}`}
                               {appointment.paymentStatus === 'unpaid' && (
                                 <Badge className={`${getPaymentStatusBadgeClassName(appointment.paymentStatus)} text-[8px] h-3 px-1 uppercase font-black`}>Unpaid</Badge>
                               )}
@@ -762,20 +768,20 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             >
                               <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-2 truncate pr-1">
-                                  <div className="flex-shrink-0">
-                                    <Avatar className="h-7 w-7 border border-gray-100">
-                                      {(() => {
-                                        if (showPatient) {
-                                          return <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} alt={appointment.patientName} />;
-                                        } else {
-                                          const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                          const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                          return <AvatarImage src={src} alt={appointment.doctor} />;
-                                        }
-                                      })()}
-                                      <AvatarFallback>{showPatient ? String(appointment.patientName || '').substring(0,2).toUpperCase() : String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
-                                    </Avatar>
-                                  </div>
+                                    <div className="flex-shrink-0">
+                                      {showPatient ? (
+                                        <PatientAvatar src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} name={appointment.patientName} dob={appointment.patientDateOfBirth || appointment.patientDob || appointment.patientBirthDate || appointment.patientBirthday} className="h-7 w-7 border border-gray-100" sizeClass="h-7 w-7 rounded-full" />
+                                      ) : (
+                                        <Avatar className="h-7 w-7 border border-gray-100">
+                                          {(() => {
+                                            const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                            const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                            return <AvatarImage src={src} alt={appointment.doctor} />;
+                                          })()}
+                                          <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                                        </Avatar>
+                                      )}
+                                    </div>
                                   <div className="font-semibold truncate flex items-center gap-1">
                                     {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
                                     {isReservedAppointmentStatus(appointment.status) && (
@@ -891,10 +897,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         handleOpenAppointment(apt);
                       }}
                     >
-                      <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
-                        <AvatarImage src={avatarSrc} alt={showPatient ? apt.patientName : apt.doctor} />
-                        <AvatarFallback>{fallback}</AvatarFallback>
-                      </Avatar>
+                      <PatientAvatar src={avatarSrc} name={showPatient ? apt.patientName : apt.doctor} dob={apt.patientDateOfBirth || apt.patientDob || apt.patientBirthDate || apt.patientBirthday} className="h-5 w-5 border border-gray-100 flex-shrink-0" sizeClass="h-5 w-5 rounded-full" />
                       <div className="truncate">
                         {showPatient ? apt.patientName : `${apt.time} • Dr. ${apt.doctor}`}
                         {isReservedAppointmentStatus(apt.status) && " (R)"}

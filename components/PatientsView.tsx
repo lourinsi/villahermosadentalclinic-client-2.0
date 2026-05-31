@@ -28,7 +28,7 @@ import {
   Bell,
   Trash2
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
@@ -501,12 +501,13 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                     >
                       <TableCell className="py-4">
                         <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 border border-slate-200 shadow-sm">
-                            <AvatarImage src={patient.profilePicture} alt={patient.name} className="object-cover" />
-                            <AvatarFallback className="bg-violet-50 text-violet-600 font-semibold">
-                              {patient.firstName?.[0]}{patient.lastName?.[0]}
-                            </AvatarFallback>
-                          </Avatar>
+                          <PatientAvatar
+                            src={patient.profilePicture}
+                            name={patient.name}
+                            dob={patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday}
+                            className="h-10 w-10 border border-slate-200 shadow-sm"
+                            sizeClass="h-10 w-10"
+                          />
                           <div className="flex flex-col">
                             <span className="font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer"
                               onClick={() => {

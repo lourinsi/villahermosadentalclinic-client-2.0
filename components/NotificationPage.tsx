@@ -1,12 +1,13 @@
 import React from "react";
+import dynamic from "next/dynamic";
 import { NotificationView } from "@/components/NotificationView";
-import AppointmentHistoryView from "@/components/AppointmentHistoryView";
+const AppointmentHistoryView = dynamic(() => import("@/components/AppointmentHistoryView"), { ssr: false });
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
-import ApproveRejectDialog from "@/components/ApproveRejectDialog";
+const ApproveRejectDialog = dynamic(() => import("@/components/ApproveRejectDialog"), { ssr: false });
 
 type Portal = "patient" | "doctor" | "admin";
 
@@ -33,13 +34,19 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   } = useNotifications({ includeDeleted: true, limit: 10 });
 
   const { 
-    updateAppointment, 
-    refreshAppointments, 
+    updateAppointment,
+    refreshAppointments,
     openEditModalById,
-    appointments,
-    isEditModalOpen,
-    selectedAppointment,
-    isLoading: appointmentsLoading
+    // NOTE: we intentionally avoid reading `appointments`, `selectedAppointment`,
+    // and `isEditModalOpen` here to prevent eager loading/processing that some
+    // consumers trigger. Only imperative methods are required by this page.
+    // The appointment snapshot logic is kept local and lazy.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // (kept in provider) 
+    // appointments,
+    // isEditModalOpen,
+    // selectedAppointment,
+    // isLoading: appointmentsLoading
   } = useAppointmentModal();
 
   const {
@@ -54,9 +61,17 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     handleViewCurrentSnapshot,
     handleViewAppointmentSnapshot,
     resetAppointmentSnapshot,
-  } = useNotificationAppointmentSnapshot(appointments);
+  // Pass an empty appointments array so the snapshot hook doesn't implicitly
+  // iterate or depend on the full appointments list until the user explicitly
+  // requests it (via the history view).
+  } = useNotificationAppointmentSnapshot([]);
 
-  const isLoading = notificationsLoading || appointmentsLoading;
+  const isLoading = notificationsLoading;
+
+  // Local state to track whether the appointment edit modal was opened from
+  // the snapshot view. This avoids reading provider internals like
+  // `selectedAppointment`/`isEditModalOpen` which can cause additional work.
+  const [isSnapshotAppointmentOpen, setIsSnapshotAppointmentOpen] = React.useState(false);
 
   const {
     approvalDialogAppointment,
@@ -81,15 +96,20 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   const handleOpenSnapshotAppointment = async (appointmentId: string) => {
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    await handleReschedule(appointmentId);
+    // Mark that we're attempting to open the appointment editor from the
+    // snapshot view. The actual editor is provided by the AppointmentModal
+    // provider and will open when `openEditModalById` completes.
+    setIsSnapshotAppointmentOpen(true);
+    try {
+      await handleReschedule(appointmentId);
+    } catch (err) {
+      // If opening failed, clear the local flag so UI reflects reality.
+      setIsSnapshotAppointmentOpen(false);
+      throw err;
+    }
   };
 
-  const isSnapshotAppointmentOpen = Boolean(
-    isEditModalOpen &&
-    appointmentSnapshotId &&
-    selectedAppointment?.id &&
-    String(selectedAppointment.id) === String(appointmentSnapshotId)
-  );
+  // `isSnapshotAppointmentOpen` is tracked locally (see above).
 
   const handleCancelAppointment = async (appointmentId: string) => {
     const confirmed = window.confirm("This appointment is unrefundable. Are you sure you want to cancel?");
@@ -153,12 +173,13 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         portal={portal}
         {...portalProps[portal]}
       />
-      <AppointmentHistoryView
+        <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {
           setIsAppointmentHistoryOpen(open);
           if (!open) {
             resetAppointmentSnapshot();
+            setIsSnapshotAppointmentOpen(false);
           }
         }}
         appointmentSnapshot={appointmentSnapshot}

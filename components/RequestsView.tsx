@@ -13,6 +13,7 @@ import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { 
   Clock, 
   CheckCircle, 
@@ -1073,12 +1074,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={patientName} />
-                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(patientName)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <PatientAvatar src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {request.id.slice(0, 8)}</div>
@@ -1395,12 +1391,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={patientName} />
-                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(patientName)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <PatientAvatar src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {item.id.slice(0, 8)}</div>
