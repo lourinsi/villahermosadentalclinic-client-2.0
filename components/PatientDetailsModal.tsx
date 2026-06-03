@@ -78,7 +78,6 @@ import {
 } from "@/lib/status-colors";
 import {
   buildPatientAppointmentSummary,
-  getPatientAppointments,
 } from "@/lib/patient-aggregates";
 
 export interface Patient {
@@ -91,6 +90,9 @@ export interface Patient {
   alternateEmail?: string;
   alternatePhone?: string;
   dateOfBirth: string;
+  dob?: string;
+  birthday?: string;
+  birthDate?: string;
   lastVisit?: string;
   nextAppointment?: string | null;
   status?: string;
@@ -190,7 +192,6 @@ export function PatientDetailsModal({
 }: PatientDetailsModalProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
   const [serverPatient, setServerPatient] = useState<Patient | null>(null);
-  const { refreshAppointments, openCreateModal } = useAppointmentModal();
   const patientDisplayName = patient?.name || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient";
   const patientInitials = patientDisplayName
     .split(" ")
@@ -256,65 +257,18 @@ export function PatientDetailsModal({
   }, [open, patient?.id, refreshTrigger]);
 
   useEffect(() => {
-    let mounted = true;
+    if (!open) {
+      setModalOverdueAppointmentCount(null);
+      setModalAppointmentSummary(null);
+      return;
+    }
 
-    const loadOverdueAppointmentCount = async () => {
-      if (!open) {
-        setModalOverdueAppointmentCount(null);
-        setModalAppointmentSummary(null);
-        return;
-      }
-
-      setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
-
-      if (!patient?.id) return;
-
-      try {
-        const patientName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ");
-        const endpoint = doctorFilter
-          ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
-          : `/api/appointments?patientId=${encodeURIComponent(String(patient.id))}`;
-        const res = await fetch(apiUrl(endpoint), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        const json = await res.json();
-
-        if (!mounted) return;
-
-        if (json && json.success && Array.isArray(json.data)) {
-          const patientScopedAppointments = doctorFilter
-            ? json.data.filter((apt: Appointment) =>
-                String(apt.patientId || "") === String(patient.id) ||
-                apt.patientName === patientName
-              )
-            : json.data;
-
-          const summary = buildPatientAppointmentSummary(
-            { ...patient, ...(serverPatient || {}) },
-            patientScopedAppointments
-          );
-          setModalAppointmentSummary(summary);
-          setModalOverdueAppointmentCount(summary.overdueAppointmentCount);
-        }
-      } catch (err) {
-        console.warn('Failed to fetch overdue appointment count:', err);
-        if (mounted) setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
-      }
-    };
-
-    loadOverdueAppointmentCount();
-    return () => { mounted = false; };
+    setModalOverdueAppointmentCount(serverPatient?.overdueAppointmentCount ?? patient?.overdueAppointmentCount ?? null);
+    setModalAppointmentSummary(null);
   }, [
     open,
-    patient?.id,
-    patient?.name,
-    patient?.firstName,
-    patient?.lastName,
     patient?.overdueAppointmentCount,
-    serverPatient,
-    doctorFilter,
-    refreshTrigger,
+    serverPatient?.overdueAppointmentCount,
   ]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
@@ -458,7 +412,7 @@ export function PatientDetailsModal({
 
             <PatientDetails
               ref={detailsRef}
-              patient={patient}
+              patient={serverPatient || patient}
               onDeletePatient={onDeletePatient}
               isModified={isModified}
               setIsModified={setIsModified}
@@ -801,7 +755,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 }, ref) => {
   const { refreshPatients, appointments, refreshAppointments, openCreateModal } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
-  const { doctors } = useDoctors(undefined, { enabled: true });
+  const [activeTab, setActiveTab] = useState("info");
+  const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
+  const shouldLoadFinancialLog = activeTab === "payments";
+  const { doctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -851,6 +808,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     .join("")
     .slice(0, 2)
     .toUpperCase() || "P";
+
+  useEffect(() => {
+    setActiveTab("info");
+  }, [patient.id]);
 
   const handlePatientPhotoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1445,7 +1406,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   useEffect(() => {
     const fetchFamilyData = async () => {
-      if (!patient?.id) return;
+      if (activeTab !== "family" || !patient?.id) return;
 
       try {
         setIsLoadingFamily(true);
@@ -1482,7 +1443,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     };
 
     fetchFamilyData();
-  }, [patient]);
+  }, [activeTab, patient]);
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
@@ -1505,105 +1466,51 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   }, [isModified]);
 
   useEffect(() => {
-    // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
-    const loadFullPatient = async () => {
-      if (!patient?.id) {
-        const initialData = {
-          firstName: patient.firstName || patient.name?.split(' ')[0] || '',
-          lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
-          email: patient.email || '',
-          phone: patient.phone || '',
-          alternateEmail: patient.alternateEmail || '',
-          alternatePhone: patient.alternatePhone || '',
-          dateOfBirth: patient.dateOfBirth || '',
-          insurance: patient.insurance || '',
-          balance: patient.balance ?? 0,
-          status: patient.status || 'active',
-          createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
-          allergies: patient.allergies || '',
-          medicalHistory: patient.medicalHistory || '',
-          treatmentPlan: patient.treatmentPlan || '',
-          clinicalNotes: patient.clinicalNotes || '',
-          address: patient.address || '',
-          city: patient.city || '',
-          zipCode: patient.zipCode || '',
-          emergencyContact: patient.emergencyContact || '',
-          emergencyPhone: patient.emergencyPhone || '',
-          notes: patient.notes || '',
-          profilePicture: patient.profilePicture || '',
-          dentalCharts: patient.dentalCharts || []
-        };
-        setFormData(initialData);
-        setOriginalLoadedData(initialData);
-        setLoadedPatient(patient);
-        return;
-      }
-
-      try {
-        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patient.id)}`), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        const json = await res.json();
-        if (json?.success && json.data) {
-          const p = json.data;
-          setLoadedPatient(p);
-          const loadedData = {
-            firstName: p.firstName || p.name?.split(' ')[0] || '',
-            lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
-            email: p.email || '',
-            phone: p.phone || '',
-            alternateEmail: p.alternateEmail || '',
-            alternatePhone: p.alternatePhone || '',
-            dateOfBirth: p.dateOfBirth || '',
-            insurance: p.insurance || '',
-            balance: p.balance ?? 0,
-            status: p.status || 'active',
-            createdAt: p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-            allergies: p.allergies || '',
-            medicalHistory: p.medicalHistory || '',
-            treatmentPlan: p.treatmentPlan || '',
-            clinicalNotes: p.clinicalNotes || '',
-            address: p.address || '',
-            city: p.city || '',
-            zipCode: p.zipCode || '',
-            emergencyContact: p.emergencyContact || '',
-            emergencyPhone: p.emergencyPhone || '',
-            notes: p.notes || '',
-            profilePicture: p.profilePicture || '',
-            dentalCharts: p.dentalCharts || []
-          };
-          setFormData(loadedData);
-          // Update original loaded data to match what came from server
-          setOriginalLoadedData(loadedData);
-        }
-      } catch (err) {
-        console.error("Failed to load full patient data:", err);
-        setLoadedPatient(patient);
-      }
+    const loadedData = {
+      firstName: patient.firstName || patient.name?.split(' ')[0] || '',
+      lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
+      email: patient.email || '',
+      phone: patient.phone || '',
+      alternateEmail: patient.alternateEmail || '',
+      alternatePhone: patient.alternatePhone || '',
+      dateOfBirth: patient.dateOfBirth || '',
+      insurance: patient.insurance || '',
+      balance: patient.balance ?? 0,
+      status: patient.status || 'active',
+      createdAt: patient.createdAt ? new Date(patient.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      allergies: patient.allergies || '',
+      medicalHistory: patient.medicalHistory || '',
+      treatmentPlan: patient.treatmentPlan || '',
+      clinicalNotes: patient.clinicalNotes || '',
+      address: patient.address || '',
+      city: patient.city || '',
+      zipCode: patient.zipCode || '',
+      emergencyContact: patient.emergencyContact || '',
+      emergencyPhone: patient.emergencyPhone || '',
+      notes: patient.notes || '',
+      profilePicture: patient.profilePicture || '',
+      dentalCharts: patient.dentalCharts || []
     };
-
-    loadFullPatient();
+    setLoadedPatient(patient);
+    setFormData(loadedData);
+    setOriginalLoadedData(loadedData);
   }, [patient]);
 
   useEffect(() => {
+    if (!shouldLoadHistoryData) return;
+
     // If doctorFilter is set, fetch appointments directly from API for this patient
     // This ensures we get the doctor's appointments even if shared state is empty
     if (doctorFilter) {
       const fetchPatientAppointments = async () => {
         try {
-          const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
           const response = await fetch(
-            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`),
+            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}&patientId=${encodeURIComponent(String(patient.id || ""))}`),
             { headers: getAuthHeaders(), credentials: 'include' }
           );
           const result = await response.json();
           if (result.success && result.data) {
-            // Filter to only this patient's appointments
-            const filtered = getPatientAppointments<Appointment>(
-              result.data as Appointment[],
-              { ...patient, name: patientName }
-            ).sort((a: Appointment, b: Appointment) =>
+            const filtered = (result.data as Appointment[]).sort((a: Appointment, b: Appointment) =>
               parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
             );
             setPatientAppointments(filtered);
@@ -1649,7 +1556,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       fetchPatientAppointments();
     }
-  }, [appointments, patient, doctorFilter]);
+  }, [appointments, patient, doctorFilter, shouldLoadHistoryData]);
 
   useEffect(() => {
     const summary = buildPatientAppointmentSummary(loadedPatient, patientAppointments);
@@ -1774,6 +1681,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       };
 
       applyTransactions();
+      if (!shouldLoadFinancialLog) return;
 
       const controller = new AbortController();
       const loadPersistedTransactions = async () => {
@@ -1870,7 +1778,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
 
       return () => controller.abort();
-    }, [buildPatientTransactions, patientAppointments, patient?.id]);
+    }, [buildPatientTransactions, patientAppointments, patient?.id, shouldLoadFinancialLog]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -2018,7 +1926,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   return (
     <div className="flex-1 overflow-hidden bg-slate-50/50">
       <div className="h-full flex flex-col">
-        <Tabs defaultValue="info" data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
           <div className="shrink-0 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
             <TabsList className="flex h-auto min-h-14 w-full justify-start gap-2 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">

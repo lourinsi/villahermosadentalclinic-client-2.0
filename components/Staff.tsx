@@ -3,7 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import { toast } from "sonner";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Appointment } from "../hooks/useAppointments";
 import AddStaffModalWrapper from "./AddStaffModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import { CalendarView } from "./CalendarView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { getStaffInitials, staffPasswordManagerIgnoreProps } from "./sharedAddStaffLogic";
@@ -160,6 +161,11 @@ export function StaffView() {
   const [financialRecords, setFinancialRecords] = useState<StaffFinancialRecord[]>([]);
   const [attendanceData, setAttendanceData] = useState<Attendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("staff");
+  const [isFinancialLoading, setIsFinancialLoading] = useState(false);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+  const [hasLoadedFinancials, setHasLoadedFinancials] = useState(false);
+  const [hasLoadedAttendance, setHasLoadedAttendance] = useState(false);
   const [isEditStaffDialogOpen, setIsEditStaffDialogOpen] = useState(false);
   const [isStaffDetailsDialogOpen, setIsStaffDetailsDialogOpen] = useState(false);
   const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
@@ -226,46 +232,70 @@ export function StaffView() {
     String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
 
-  const fetchAllStaffData = async () => {
+  const fetchStaffData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [
-        staffResponse,
-        financialResponse,
-        attendanceResponse,
-      ] = await Promise.all([
-        fetch(apiUrl("/api/staff?limit=100"), { credentials: "include" }),
-        fetch(apiUrl("/api/staff/financials"), { credentials: "include" }),
-        fetch(apiUrl(`/api/staff/attendance?month=${encodeURIComponent(attendanceMonth)}`), { credentials: "include" }),
-      ]);
+      const staffResponse = await fetch(apiUrl("/api/staff?limit=100"), { credentials: "include" });
 
       if (!staffResponse.ok) throw new Error(`HTTP error! status: ${staffResponse.status} for staff data`);
       const staffData = (await staffResponse.json()).data || [];
       setStaffData(staffData);
-
-      if (!financialResponse.ok) throw new Error(`HTTP error! status: ${financialResponse.status} for financial records`);
-      const financialRecordsData = (await financialResponse.json()).data || [];
-      setFinancialRecords(financialRecordsData);
-
-      if (!attendanceResponse.ok) throw new Error(`HTTP error! status: ${attendanceResponse.status} for attendance data`);
-      const attendanceData = (await attendanceResponse.json()).data || [];
-      setAttendanceData(attendanceData);
-
     } catch (err) {
       console.error("Error fetching staff data:", err);
       toast.error("Failed to fetch staff data. Please sign in again or check the backend server.");
-      // Ensure all data arrays are empty on error
       setStaffData([]);
-      setFinancialRecords([]);
-      setAttendanceData([]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const fetchFinancialRecords = useCallback(async () => {
+    setIsFinancialLoading(true);
+    try {
+      const response = await fetch(apiUrl("/api/staff/financials"), { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status} for financial records`);
+      const financialRecordsData = (await response.json()).data || [];
+      setFinancialRecords(financialRecordsData);
+      setHasLoadedFinancials(true);
+    } catch (err) {
+      console.error("Error fetching staff financial records:", err);
+      toast.error("Failed to fetch financial records.");
+      setFinancialRecords([]);
+    } finally {
+      setIsFinancialLoading(false);
+    }
+  }, []);
+
+  const fetchAttendanceData = useCallback(async () => {
+    setIsAttendanceLoading(true);
+    try {
+      const response = await fetch(apiUrl(`/api/staff/attendance?month=${encodeURIComponent(attendanceMonth)}`), { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status} for attendance data`);
+      const attendanceData = (await response.json()).data || [];
+      setAttendanceData(attendanceData);
+      setHasLoadedAttendance(true);
+    } catch (err) {
+      console.error("Error fetching attendance data:", err);
+      toast.error("Failed to fetch attendance data.");
+      setAttendanceData([]);
+    } finally {
+      setIsAttendanceLoading(false);
+    }
+  }, [attendanceMonth]);
+
+  const refreshLoadedStaffData = useCallback(() => {
+    fetchStaffData();
+    if (hasLoadedFinancials) fetchFinancialRecords();
+    if (hasLoadedAttendance) fetchAttendanceData();
+  }, [fetchAttendanceData, fetchFinancialRecords, fetchStaffData, hasLoadedAttendance, hasLoadedFinancials]);
 
   useEffect(() => {
-    fetchAllStaffData();
-  }, [attendanceMonth]);
+    fetchStaffData();
+  }, [fetchStaffData]);
+
+  useEffect(() => {
+    if (activeTab === "attendance") fetchAttendanceData();
+  }, [activeTab, fetchAttendanceData]);
 
   const getStaffIdentifier = (staff: Staff) => String(staff.id || staff.email || staff.name);
 
@@ -295,7 +325,7 @@ export function StaffView() {
       if (!response.ok) throw new Error("Failed to delete staff member");
       toast.success("Staff member removed");
       setIsDeleteStaffDialogOpen(false);
-      fetchAllStaffData();
+      refreshLoadedStaffData();
     } catch (error) {
       console.error("Error deleting staff member:", error);
       toast.error("Failed to delete staff member");
@@ -402,7 +432,7 @@ export function StaffView() {
         toast.success("Financial record added successfully!");
         setIsAddFinancialDialogOpen(false);
         setNewFinancialRecord(emptyFinancialForm);
-        fetchAllStaffData(); // Refresh data
+        fetchFinancialRecords();
       } else {
         const errorData = await response.json();
         toast.error(errorData.message || "Failed to add financial record.");
@@ -464,7 +494,7 @@ export function StaffView() {
         throw new Error(result?.message || "Failed to approve financial record");
       }
       toast.success("Financial record approved");
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error approving financial record:", error);
       toast.error("Failed to approve financial record");
@@ -498,7 +528,7 @@ export function StaffView() {
       }
       toast.success("Financial record updated");
       handleFinancialEditDialogChange(false);
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error updating financial record:", error);
       toast.error("Failed to update financial record");
@@ -646,7 +676,7 @@ export function StaffView() {
       }
       toast.success("Financial record removed");
       handleDeleteFinancialDialogChange(false);
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error deleting financial record:", error);
       toast.error("Failed to delete financial record");
@@ -783,7 +813,7 @@ export function StaffView() {
           <AddStaffModalWrapper
             open={isAddStaffDialogOpen}
             onOpenChange={setIsAddStaffDialogOpen}
-            onStaffAdded={fetchAllStaffData}
+            onStaffAdded={refreshLoadedStaffData}
           />
         </div>
       </div>
@@ -847,7 +877,15 @@ export function StaffView() {
         </Card>
       </div>
 
-      <Tabs defaultValue="staff" className="space-y-6" onValueChange={() => fetchAllStaffData()}>
+      <Tabs
+        value={activeTab}
+        className="space-y-6"
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "financial" && !hasLoadedFinancials) fetchFinancialRecords();
+          if (value === "attendance" && !hasLoadedAttendance) setIsAttendanceLoading(true);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="staff" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Staff Directory</TabsTrigger>
           <TabsTrigger value="financial" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
@@ -1157,7 +1195,7 @@ export function StaffView() {
               </div>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isFinancialLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
@@ -1271,7 +1309,7 @@ export function StaffView() {
               </div>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isAttendanceLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
@@ -1355,7 +1393,7 @@ export function StaffView() {
         onOpenChange={setIsEditStaffDialogOpen}
         staffMode="edit"
         staff={selectedStaff}
-        onStaffSaved={fetchAllStaffData}
+        onStaffSaved={refreshLoadedStaffData}
       />
 
       <Dialog open={isDeleteStaffDialogOpen} onOpenChange={setIsDeleteStaffDialogOpen}>
@@ -1566,11 +1604,11 @@ export function StaffView() {
 
       {/* Staff Schedule Dialog */}
       <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-        <DialogContent className="w-[min(1120px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] sm:max-w-[1120px] max-h-[92vh] overflow-hidden bg-gray-50 p-0 flex flex-col">
-          <DialogHeader className="shrink-0 border-b bg-white p-6">
+        <DialogContent className="flex max-h-[96dvh] w-[min(1180px,calc(100vw-0.75rem))] max-w-[calc(100vw-0.75rem)] flex-col overflow-hidden bg-gray-50 p-0 sm:max-h-[92vh] sm:max-w-[1180px]">
+          <DialogHeader className="shrink-0 border-b bg-white p-4 sm:p-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border-2 border-white shadow-sm">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <Avatar className="h-12 w-12 border-2 border-white shadow-sm sm:h-16 sm:w-16">
                   {scheduleStaff?.profilePicture ? (
                     <AvatarImage src={scheduleStaff.profilePicture} alt={scheduleStaff.name} className="object-cover" />
                   ) : null}
@@ -1579,9 +1617,9 @@ export function StaffView() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <DialogTitle className="flex items-center gap-2 text-xl font-bold text-gray-900">
-                    <CalendarDays className="h-5 w-5 text-blue-600" />
-                    {scheduleStaff?.name}&apos;s Schedule
+                  <DialogTitle className="flex items-center gap-2 text-lg font-bold text-gray-900 sm:text-xl">
+                    <CalendarDays className="h-5 w-5 shrink-0 text-blue-600" />
+                    <span className="truncate">{scheduleStaff?.name}&apos;s Schedule</span>
                   </DialogTitle>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     {scheduleStaff?.role ? <Badge variant="secondary">{scheduleStaff.role}</Badge> : null}
@@ -1595,7 +1633,7 @@ export function StaffView() {
                   </div>
                 </div>
               </div>
-              <div className="rounded-lg border bg-blue-50 px-4 py-3 text-sm">
+              <div className="self-start rounded-lg border bg-blue-50 px-4 py-3 text-sm md:self-auto">
                 <p className="font-semibold text-blue-900">{staffAppointments.length} appointments</p>
                 <p className="text-blue-700">
                   {scheduleDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
@@ -1604,163 +1642,60 @@ export function StaffView() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-auto p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const newDate = new Date(scheduleDate);
-                  newDate.setMonth(newDate.getMonth() - 1);
-                  handleScheduleMonthChange(newDate);
-                }}
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" />
-                Previous
-              </Button>
-              <h3 className="text-xl font-bold text-gray-900">
-                {scheduleDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </h3>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const newDate = new Date(scheduleDate);
-                  newDate.setMonth(newDate.getMonth() + 1);
-                  handleScheduleMonthChange(newDate);
-                }}
-              >
-                Next
-                <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-
-            {isLoadingSchedule ? (
-              <div className="rounded-2xl bg-white text-center py-16 text-muted-foreground">
-                <div className="inline-block">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                  Loading schedule...
-                </div>
+          <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="rounded-xl bg-white p-2 shadow-sm sm:p-3 lg:p-4">
+                <CalendarView
+                  portal="doctor"
+                  defaultDoctorFilter={scheduleStaff?.name ?? "all"}
+                  appointmentsOverride={staffAppointments}
+                  isLoadingOverride={isLoadingSchedule}
+                  onOpenAppointment={openScheduleAppointment}
+                />
               </div>
-            ) : (
-              <div className="space-y-8">
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <div className="grid grid-cols-7 gap-2">
-                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                    <div key={day} className="text-center text-sm font-semibold text-muted-foreground py-2">
-                      {day}
-                    </div>
-                  ))}
 
-                  {(() => {
-                    const year = scheduleDate.getFullYear();
-                    const month = scheduleDate.getMonth();
-                    const firstDay = new Date(year, month, 1);
-                    const lastDay = new Date(year, month + 1, 0);
-                    const daysInMonth = lastDay.getDate();
-                    const startingDay = firstDay.getDay();
-
-                    const days = [];
-
-                    // Empty cells for days before the first day of the month
-                    for (let i = 0; i < startingDay; i++) {
-                      days.push(
-                        <div key={`empty-${i}`} className="min-h-[76px] sm:min-h-[100px] bg-gray-50 rounded-xl"></div>
-                      );
-                    }
-
-                    // Days of the month
-                    for (let day = 1; day <= daysInMonth; day++) {
-                      const currentDate = new Date(year, month, day);
-                      const appointments = getAppointmentsForDate(currentDate);
-                      const isToday = new Date().toDateString() === currentDate.toDateString();
-
-                      days.push(
-                        <div
-                          key={day}
-                          className={`min-h-[86px] sm:min-h-[112px] rounded-xl border p-2 transition-colors ${
-                            isToday ? 'border-blue-500 bg-blue-50' : appointments.length ? 'border-blue-100 bg-white' : 'border-gray-200 bg-gray-50/60'
-                          }`}
-                        >
-                          <div className={`text-sm font-bold mb-2 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                            {day}
+              <div className="rounded-xl bg-white p-3 shadow-sm sm:p-4">
+                <h4 className="font-semibold mb-3 flex items-center gap-2 text-gray-900">
+                  <Calendar className="h-4 w-4" />
+                  Upcoming appointments ({upcomingStaffAppointments.length})
+                </h4>
+                {upcomingStaffAppointments.length === 0 ? (
+                  <p className="rounded-2xl border bg-white py-10 text-center text-sm text-muted-foreground">
+                    No upcoming appointments scheduled
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+                    {upcomingStaffAppointments.map((apt, idx) => (
+                      <button
+                        key={apt.id || `${apt.date}-${apt.time}-${idx}`}
+                        type="button"
+                        onClick={() => openScheduleAppointment(apt)}
+                        className="flex w-full items-center justify-between gap-4 rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/50"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="min-w-[54px] text-center">
+                            <div className="text-lg font-bold text-blue-600">{new Date(apt.date + 'T00:00:00').getDate()}</div>
+                            <div className="text-xs text-muted-foreground">{new Date(apt.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</div>
                           </div>
-                          <div className="space-y-1">
-                            {appointments.slice(0, 3).map((apt, idx) => (
-                              <button
-                                key={apt.id || `${apt.date}-${apt.time}-${idx}`}
-                                type="button"
-                                onClick={() => openScheduleAppointment(apt)}
-                                className="flex w-full items-center gap-1 rounded-md bg-blue-100 px-1.5 py-1 text-left text-[11px] font-semibold text-blue-800 transition-colors hover:bg-blue-200"
-                                title={`${formatTime(apt.time)} - ${apt.patientName}`}
-                              >
-                                <Clock className="h-3 w-3 shrink-0" />
-                                <span className="truncate">{formatTime(apt.time)}</span>
-                              </button>
-                            ))}
-                            {appointments.length > 3 && (
-                              <div className="text-xs font-medium text-muted-foreground">
-                                +{appointments.length - 3} more
-                              </div>
-                            )}
+                          <div>
+                            <p className="font-medium">{apt.patientName}</p>
+                            <p className="text-sm text-muted-foreground">
+                              <Clock className="h-3 w-3 inline mr-1" />
+                              {formatTime(apt.time)}
+                              {apt.duration && ` - ${apt.duration} min`}
+                            </p>
                           </div>
                         </div>
-                      );
-                    }
-
-                    return days;
-                  })()}
+                        <Badge className={getAppointmentStatusClass(apt.status)}>{apt.status}</Badge>
+                      </button>
+                    ))}
                   </div>
-                </div>
-
-                <div>
-                  <h4 className="font-semibold mb-3 flex items-center gap-2 text-gray-900">
-                    <Calendar className="h-4 w-4" />
-                    Upcoming appointments ({upcomingStaffAppointments.length})
-                  </h4>
-                  {upcomingStaffAppointments.length === 0 ? (
-                    <p className="rounded-2xl border bg-white py-10 text-center text-sm text-muted-foreground">
-                      No upcoming appointments scheduled
-                    </p>
-                  ) : (
-                    <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
-                      {upcomingStaffAppointments
-                        .map((apt, idx) => (
-                          <button
-                            key={apt.id || `${apt.date}-${apt.time}-${idx}`}
-                            type="button"
-                            onClick={() => openScheduleAppointment(apt)}
-                            className="flex w-full items-center justify-between gap-4 rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/50"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="min-w-[54px] text-center">
-                                <div className="text-lg font-bold text-blue-600">
-                                  {new Date(apt.date + 'T00:00:00').getDate()}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {new Date(apt.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
-                                </div>
-                              </div>
-                              <div>
-                                <p className="font-medium">{apt.patientName}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  <Clock className="h-3 w-3 inline mr-1" />
-                                  {formatTime(apt.time)}
-                                  {apt.duration && ` - ${apt.duration} min`}
-                                </p>
-                              </div>
-                            </div>
-                            <Badge className={getAppointmentStatusClass(apt.status)}>
-                              {apt.status}
-                            </Badge>
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-white p-3 sm:p-4">
             <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>

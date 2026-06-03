@@ -44,8 +44,9 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     closeCreateModal,
     selectedAppointment,
     newAppointmentDate,
-    newAppointmentTime
-    , newAppointmentCreationMode
+    newAppointmentTime,
+    newAppointmentDoctorName,
+    newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -237,6 +238,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             appointmentToEdit={selectedAppointment}
             defaultDate={newAppointmentDate}
             defaultTime={newAppointmentTime}
+            doctorName={newAppointmentDoctorName}
             appointmentCreationMode={newAppointmentCreationMode}
           />
         )}

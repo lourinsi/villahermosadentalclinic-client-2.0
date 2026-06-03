@@ -45,6 +45,13 @@ import useSharedBookingLogic, {
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
+  fetchBookingRecurringDeletionItems,
+  buildBookingRecurrencePayload,
+  getBookingRecurrenceState,
+  hasActiveBookingRecurringChild,
+  logBookingRecurringCancelPreview,
+  normalizeBookingRecurringDeletionItems,
+  RECURRING_APPOINTMENT_OPTIONS,
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
@@ -55,10 +62,13 @@ import useSharedBookingLogic, {
   normalizePastAppointmentStatus,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
+  type BookingRecurringDeletionItem as RecurringAppointmentDeletionItem,
 } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
+import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
+import { RecurringAppointmentCancelSelector } from "./RecurringAppointmentCancelSelector";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -230,6 +240,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
   const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceOption, setRecurrenceOption] = useState<string>(RECURRING_APPOINTMENT_OPTIONS[0]);
+  const [customRecurrenceDate, setCustomRecurrenceDate] = useState<string>("");
+  const [recurringAppointmentDeletionDates, setRecurringAppointmentDeletionDates] = useState<string[]>([]);
+  const [recurringAppointmentDeletionItems, setRecurringAppointmentDeletionItems] = useState<RecurringAppointmentDeletionItem[]>([]);
+  const [selectedRecurringAppointmentDeletionIds, setSelectedRecurringAppointmentDeletionIds] = useState<string[]>([]);
+  const [isLoadingRecurringCancelPreview, setIsLoadingRecurringCancelPreview] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
@@ -243,6 +260,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
+  const recurrenceTouchedRef = useRef(false);
 
   // If a default patient id is provided (e.g., from PatientsView schedule button), preselect it
   useEffect(() => {
@@ -476,6 +494,140 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   });
   const getPaymentStatusOption = (statusValue: string) =>
     paymentStatusOptions.find((status) => status.value === statusValue);
+
+  const bookingRecurrenceState = useMemo(
+    () => getBookingRecurrenceState(appointmentToEdit, appointmentLogs),
+    [appointmentToEdit, appointmentLogs]
+  );
+
+  const applyRecurringDeletionItems = useCallback((items: RecurringAppointmentDeletionItem[]) => {
+    const uniqueItems = normalizeBookingRecurringDeletionItems(items);
+
+    setRecurringAppointmentDeletionItems(uniqueItems);
+    setRecurringAppointmentDeletionDates(uniqueItems.map((item) => item.date).filter(Boolean));
+    setSelectedRecurringAppointmentDeletionIds([]);
+  }, []);
+
+  const fetchRecurringDeletionItems = useCallback(async () => {
+    return fetchBookingRecurringDeletionItems({
+      appointment: appointmentToEdit,
+      recurrenceState: bookingRecurrenceState,
+      isPublicCachedAppointment,
+      getAuthHeaders,
+    });
+  }, [
+    appointmentToEdit,
+    bookingRecurrenceState,
+    isPublicCachedAppointment,
+  ]);
+
+  const refreshRecurringDeletionItems = useCallback(async () => {
+    const items = await fetchRecurringDeletionItems();
+    applyRecurringDeletionItems(items);
+    return items;
+  }, [applyRecurringDeletionItems, fetchRecurringDeletionItems]);
+
+  const openCancelDialogWithRecurringPreview = useCallback(async () => {
+    if (isLoadingRecurringCancelPreview) return;
+
+    setIsLoadingRecurringCancelPreview(true);
+    try {
+      const linkedRecurringAppointments = await refreshRecurringDeletionItems();
+      logBookingRecurringCancelPreview({
+        appointment: appointmentToEdit,
+        items: linkedRecurringAppointments,
+      });
+      setIsDeleteDialogOpen(true);
+    } finally {
+      setIsLoadingRecurringCancelPreview(false);
+    }
+  }, [
+    appointmentToEdit,
+    isLoadingRecurringCancelPreview,
+    refreshRecurringDeletionItems,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchRecurringDeletionItems().then((items) => {
+      if (!cancelled) applyRecurringDeletionItems(items);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRecurringDeletionItems, fetchRecurringDeletionItems]);
+
+  useEffect(() => {
+    recurrenceTouchedRef.current = false;
+  }, [open, appointmentToEdit?.id]);
+
+  useEffect(() => {
+    if (!open || recurrenceTouchedRef.current) return;
+
+    if (!appointmentToEdit) {
+      setIsRecurring(false);
+      setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
+      setCustomRecurrenceDate("");
+      return;
+    }
+
+    setIsRecurring(false);
+    setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
+    setCustomRecurrenceDate("");
+  }, [
+    open,
+    appointmentToEdit,
+    bookingRecurrenceState.isRecurring,
+    bookingRecurrenceState.recurrenceOption,
+    bookingRecurrenceState.customRecurrenceDate,
+  ]);
+
+  const handleRecurringChange = useCallback((nextIsRecurring: boolean) => {
+    recurrenceTouchedRef.current = true;
+    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
+      appointmentId: appointmentToEdit?.id,
+      recurrenceState: bookingRecurrenceState,
+      items: recurringAppointmentDeletionItems,
+    });
+    if (nextIsRecurring && hasActiveRecurringChild) {
+      toast.info("This appointment already has a recurring appointment.");
+      setIsRecurring(false);
+      return;
+    }
+    setIsRecurring(nextIsRecurring);
+  }, [
+    appointmentToEdit?.id,
+    bookingRecurrenceState,
+    recurringAppointmentDeletionItems,
+  ]);
+
+  useEffect(() => {
+    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
+      appointmentId: appointmentToEdit?.id,
+      recurrenceState: bookingRecurrenceState,
+      items: recurringAppointmentDeletionItems,
+    });
+    if (hasActiveRecurringChild && isRecurring) {
+      setIsRecurring(false);
+    }
+  }, [
+    appointmentToEdit?.id,
+    bookingRecurrenceState,
+    isRecurring,
+    recurringAppointmentDeletionItems,
+  ]);
+
+  const handleRecurrenceOptionChange = useCallback((option: string) => {
+    recurrenceTouchedRef.current = true;
+    setRecurrenceOption(option);
+  }, []);
+
+  const handleCustomRecurrenceDateChange = useCallback((date: string) => {
+    recurrenceTouchedRef.current = true;
+    setCustomRecurrenceDate(date);
+  }, []);
 
   useEffect(() => {
     if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
@@ -1403,6 +1555,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
+      recurrence: isRecurring ? {
+        option: recurrenceOption,
+        customDate: customRecurrenceDate || null,
+      } : { enabled: false },
       payment: {
         amountToPay,
         method: paymentMethod,
@@ -1418,6 +1574,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
+      const recurrencePayload = isRecurring
+        ? buildBookingRecurrencePayload({
+            isRecurring,
+            recurrenceOption,
+            customRecurrenceDate,
+            existingRecurrence: undefined,
+          })
+        : null;
+      const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1487,6 +1652,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentMethod,
               totalPaid: newTotalPaid,
               balance: newBalance,
+              ...recurrenceUpdate,
               updatedAt: new Date().toISOString(),
               isPublicCache: true,
             } as any)
@@ -1506,7 +1672,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentStatus: updatePaymentStatus as any,
               totalPaid: newTotalPaid,
               balance: newBalance,
-            });
+              ...recurrenceUpdate,
+            } as any);
 
         // Log the updated appointment details
         console.log('[BookingModal Payment] ✅ APPOINTMENT UPDATED SUCCESSFULLY:', {
@@ -1583,7 +1750,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentMethod,
               totalPaid: amountPaid,
               balance: newBalance,
-            });
+              ...recurrenceUpdate,
+            } as any);
           } else {
             // Persist to backend using public booking endpoint. Fallback to cache on failure.
             try {
@@ -1611,6 +1779,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentMethod,
                 price: finalPrice,
                 discount: Number(discount) || 0,
+                ...recurrenceUpdate,
               };
 
               const resp = await fetch(apiUrl("/api/appointments/public-book"), {
@@ -1652,7 +1821,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   paymentMethod,
                   totalPaid: amountPaid,
                   balance: newBalance,
-                });
+                  ...recurrenceUpdate,
+                } as any);
               }
             } catch (err) {
               console.error("Public booking error, falling back to cache:", err);
@@ -1673,7 +1843,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentMethod,
                 totalPaid: amountPaid,
                 balance: newBalance,
-              });
+                ...recurrenceUpdate,
+              } as any);
             }
           }
         } else {
@@ -1693,7 +1864,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             paymentStatus: paymentStatus as any,
             totalPaid: amountPaid,
             balance: newBalance,
-          });
+            ...recurrenceUpdate,
+          } as any);
         }
 
         // Auto-cancel any overlapping cart appointments for the same doctor
@@ -1780,18 +1952,28 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
+      const cancelRecurrenceUpdate = selectedRecurringAppointmentDeletionIds.length > 0
+        ? {
+            recurrence: {
+              ...(bookingRecurrenceState.recurrence || appointmentToEdit.recurrence || {}),
+              enabled: false,
+              deleteGeneratedAppointmentIds: selectedRecurringAppointmentDeletionIds,
+            },
+          }
+        : {};
       // Update status to cancelled instead of deleting
       const updated = isPublicCachedAppointment
         ? cachePublicBookingAppointment({
             ...appointmentToEdit,
             status: 'cancelled',
+            ...cancelRecurrenceUpdate,
             updatedAt: new Date().toISOString(),
             isPublicCache: true,
           } as any)
         : await updateAppointment(appointmentToEdit.id, {
-            ...appointmentToEdit,
             status: 'cancelled',
-          });
+            ...cancelRecurrenceUpdate,
+          } as any);
       try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch {}
       if (onBooked) onBooked(updated);
       toast?.success?.('Appointment marked as cancelled');
@@ -1859,21 +2041,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </button>
               )}
-              
+
               <DialogTitle className="flex items-center gap-2 text-2xl font-bold flex-1 text-center">
-                {title ? title : (() => {
-                  const isPastAppointment = isPastAppointmentDate(selectedDate ?? appointmentToEdit?.date);
-                  if (modalStep === 'details') {
-                    if (appointmentToEdit) {
-                      if (isPatientReadonly) return 'View Appointment';
-                      return isPastAppointment ? 'Edit past appointment' : 'Edit Appointment';
-                    }
-                    return isPastAppointment ? 'Add a past appointment' : 'Appointment Details';
-                  }
-                  return 'Payment Summary';
-                })()}
+                {title ? title : (
+                  modalStep === 'details'
+                    ? (appointmentToEdit
+                        ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment')
+                        : 'Appointment Details')
+                    : 'Payment Summary'
+                )}
               </DialogTitle>
-              
+
                 {/* Step indicators - hidden if cancelled and patient role */}
                 {!(isCancelled && user?.role === 'patient') && (
                   <div className="flex gap-2">
@@ -2376,9 +2554,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               <DialogFooter className="flex gap-3 pt-6 border-t">
                 {/* destructive cancel for all users when editing an appointment */}
                 {canCancelAppointment && (
-                  <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <CalendarIcon className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
+                  <Button variant="destructive" onClick={openCancelDialogWithRecurringPreview} disabled={isBooking || isLoadingRecurringCancelPreview} className="h-11 px-4 rounded-lg mr-auto">
+                    {isLoadingRecurringCancelPreview ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                    )}
+                    {isBooking ? 'Processing...' : isLoadingRecurringCancelPreview ? 'Loading...' : 'Cancel Appointment'}
                   </Button>
                 )}
                 
@@ -2579,9 +2761,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
                 {canCancelAppointment && (
-                  <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <CalendarIcon className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
+                  <Button variant="destructive" onClick={openCancelDialogWithRecurringPreview} disabled={isBooking || isLoadingRecurringCancelPreview} className="h-11 px-4 rounded-lg mr-auto">
+                    {isLoadingRecurringCancelPreview ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                    )}
+                    {isBooking ? 'Processing...' : isLoadingRecurringCancelPreview ? 'Loading...' : 'Cancel Appointment'}
                   </Button>
                 )}
                 
@@ -2611,7 +2797,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
       {/* Cancel confirmation dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-[2rem]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CalendarIcon className="h-5 w-5 text-red-600" />
@@ -2628,6 +2814,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 Are you sure you want to cancel this appointment? This will mark it as <strong>Cancelled</strong> and release the time slot, but the record will remain in the system history.
               </p>
             </div>
+            <RecurringAppointmentCancelSelector
+              items={recurringAppointmentDeletionItems}
+              selectedIds={selectedRecurringAppointmentDeletionIds}
+              onSelectedIdsChange={setSelectedRecurringAppointmentDeletionIds}
+              formatTimeTo12h={formatTimeTo12h}
+            />
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isBooking} className="flex-1">
@@ -2644,159 +2836,79 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       </Dialog>
 
       {/* Summary confirmation dialog */}
-      <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm Appointment Details</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-3">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Patient:</span>
-                  <span className="font-semibold">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Service:</span>
-                  <span className="font-semibold">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Date:</span>
-                  <span className="font-semibold">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Time:</span>
-                  <span className="font-semibold">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Doctor:</span>
-                  <span className="font-semibold">{displayDoctor}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Duration:</span>
-                  <span className="inline-flex items-center gap-2 font-semibold">
-                    {duration} mins
-                    {durationConflict && (
-                      <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {bookingConflictWarnings.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
-                    <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                    </span>
-                    This appointment has a scheduling conflict. Hover the warning icon for details.
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  {canEditAppointmentStatus ? (
-                    <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded px-2 text-xs font-bold border-0 ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                      } ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                      }`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {appointmentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value}>
-                            {status.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                    } ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                    }`}>
-                      {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Payment Status:</span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                  } ${
-                    getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                  }`}>
-                    {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
-                  </span>
-                </div>
-                <CompactNotesField
-                  id="booking-summary-notes"
-                  label="Notes:"
-                  placeholder="No notes added."
-                  value={notes}
-                  onChange={setNotes}
-                  disabled={isPatientReadonly && isCancelled}
-                  className="border-t border-blue-100 pt-2 mt-2"
-                  labelClassName="text-sm font-normal text-gray-600"
-                  textareaClassName="rounded-md bg-white/70 text-sm font-semibold"
-                />
-                <div className="border-t border-blue-100 pt-2 mt-2">
-                  <div className="flex justify-between font-bold">
-                    <span>Total Price:</span>
-                    <span className={`${Number(discount) > 0 ? 'text-gray-400 line-through' : 'text-blue-700'}`}>₱{finalPrice.toLocaleString()}</span>
-                  </div>
-                  {Number(discount) > 0 && (
-                    <>
-                      <div className="flex justify-between text-orange-600 font-semibold">
-                        <span>Discount:</span>
-                        <span>-₱{Number(discount).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-green-600 font-bold text-lg">
-                        <span>Final Price:</span>
-                        <span>₱{discountedPrice.toLocaleString()}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {previouslyPaidAmount > 0 && (
-                  <div className="flex justify-between text-green-600 font-semibold">
-                    <span>Already Paid:</span>
-                    <span>₱{previouslyPaidAmount.toLocaleString()}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-green-700 font-semibold">
-                  <span>Amount to Pay Now:</span>
-                  <span>₱{paymentAmountNow.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-blue-700 font-semibold">
-                  <span>Remaining Balance:</span>
-                  <span>₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Patient-facing note: suggest payment to reserve when booking remains in the cart */}
-          {isPatientLevelBookingMode && isCartAppointmentStatus(getFinalAppointmentStatus()) && (
-            <div className="px-4 pb-4">
-              <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
-                Tip: This booking will be added to your cart. Add a payment now to reserve this schedule.
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="flex-1">
-              Back
-            </Button>
-            <Button className="bg-green-600 hover:bg-green-700 text-white flex-1" onClick={handleConfirmSummary} disabled={isBooking}>
-              {isBooking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              {isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmAppointmentModal
+        open={isConfirmSummaryOpen}
+        onOpenChange={setIsConfirmSummaryOpen}
+        onConfirm={handleConfirmSummary}
+        isBooking={isBooking}
+        patientName={patients.find((p) => p.id === selectedPatient)?.name || String(selectedPatient)}
+        doctorName={displayDoctor}
+        appointmentType={appointmentType}
+        customAppointmentTypeName={customAppointmentTypeName}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        duration={duration}
+        notes={notes}
+        onNotesChange={setNotes}
+        durationConflict={durationConflict}
+        bookingConflictWarnings={bookingConflictWarnings}
+        appointmentStatus={getFinalAppointmentStatus()}
+        appointmentStatusOptions={appointmentStatusOptions}
+        onAppointmentStatusChange={handleStatusChange}
+        canEditAppointmentStatus={canEditAppointmentStatus}
+        paymentStatus={getFinalPaymentStatus()}
+        paymentStatusOptions={paymentStatusOptions}
+        onPaymentStatusChange={() => {}}
+        canManagePaymentStatuses={false}
+        finalPrice={finalPrice}
+        discount={Number(discount) || 0}
+        discountedPrice={discountedPrice}
+        previouslyPaidAmount={previouslyPaidAmount}
+        paymentAmountNow={paymentAmountNow}
+        isRecurring={isRecurring}
+        onRecurringChange={handleRecurringChange}
+        recurrenceOption={recurrenceOption}
+        onRecurrenceOptionChange={handleRecurrenceOptionChange}
+        customRecurrenceDate={customRecurrenceDate}
+        onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
+        canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
+          appointmentId: appointmentToEdit?.id,
+          recurrenceState: bookingRecurrenceState,
+          items: recurringAppointmentDeletionItems,
+        })}
+        recurringAppointmentDate={bookingRecurrenceState.generatedAppointmentDate}
+        recurringAppointmentDates={recurringAppointmentDeletionDates}
+        recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
+        selectedRecurringAppointmentDeletionIds={selectedRecurringAppointmentDeletionIds}
+        onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        getPersonInitials={(name?: string) => {
+          const initials = String(name || "")
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part[0])
+            .join("")
+            .toUpperCase();
+          return initials || "?";
+        }}
+        getDoctorInitials={(name: string) => {
+          return (name || "")
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((p) => p[0])
+            .join("")
+            .toUpperCase() || "?";
+        }}
+        getBookingStatusLabel={getBookingStatusLabel}
+        getAppointmentStatusOption={getAppointmentStatusOption}
+        getPaymentStatusOption={getPaymentStatusOption}
+        formatTimeTo12h={formatTimeTo12h}
+        isPatientReadonly={isPatientReadonly}
+        isCancelled={isCancelled}
+        isPatientLevelBookingMode={isPatientLevelBookingMode}
+        isCartAppointmentStatus={isCartAppointmentStatus}
+        userRole={user?.role}
+      />
 
       {/* Historical Snapshot View-only Modal */}
       <AppointmentHistoryView

@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   ChevronLeft, 
@@ -15,9 +14,12 @@ import {
   CalendarRange, 
   Trash2, 
   Clock,
-  X,
   DollarSign,
-  ListFilter
+  ListFilter,
+  Cake,
+  PartyPopper,
+  MoreHorizontal,
+  RefreshCw
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
@@ -29,10 +31,19 @@ import { useAuth } from "@/hooks/useAuth";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { apiUrl } from "@/lib/api";
 import { AllAppointmentsView } from "./AllAppointmentsView";
-import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import CalendarPopover from "./CalendarPopover";
 import AppointmentHistoryView from "./AppointmentHistoryView";
@@ -48,15 +59,65 @@ import {
   getStatusSoftBgColorClass,
 } from "@/lib/status-colors";
 
-// Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
-// This will be moved inside the component since we need the hook
-const getStatusLabelHelper = (key: number, statuses: any[]): string => {
-  const status = statuses.find(s => s.key === key);
-  return status?.label || String(key);
+const COMPACT_TOOLBAR_WIDTH = 1280;
+
+const PRIMARY_VIEW_OPTIONS = [
+  { value: "month", label: "Month", statusLabel: "Month View" },
+  { value: "week", label: "Week", statusLabel: "Week View" },
+  { value: "day", label: "Day", statusLabel: "Day View" },
+] as const;
+
+type PrimaryViewMode = (typeof PRIMARY_VIEW_OPTIONS)[number]["value"];
+
+const getViewModeStatusLabel = (mode: ViewMode) => {
+  const option = PRIMARY_VIEW_OPTIONS.find((item) => item.value === mode);
+  if (option) return option.statusLabel;
+  if (mode === "custom") return "Custom Range";
+  if (mode === "all") return "All Appointments";
+  return "Calendar View";
 };
 
-// Status filter defaults - will be supplemented by backend statuses
-const DEFAULT_STATUS_FILTERS = ["all", "scheduled", "completed"];
+const pickImageSource = (...sources: unknown[]) => {
+  for (const source of sources) {
+    if (typeof source !== "string") continue;
+    const trimmed = source.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+};
+
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (source.startsWith("http") || source.startsWith("data:") || source.startsWith("blob:")) {
+    return source;
+  }
+  return apiUrl(source);
+};
+
+const getRecurringAppointmentIconVariant = (appointment: Appointment): "source" | "generated" | null => {
+  const recurrence = appointment.recurrence || {};
+  if (recurrence?.generatedFromId || recurrence?.generatedFromDate) return "generated";
+  if (appointment.isRecurring) return "source";
+  return null;
+};
+
+const RecurringAppointmentIcon = ({
+  className = "",
+  variant = "source",
+}: {
+  className?: string;
+  variant?: "source" | "generated";
+}) => (
+  <span
+    title={variant === "generated" ? "Generated from recurring appointment" : "Recurring appointment"}
+    aria-label={variant === "generated" ? "Generated from recurring appointment" : "Recurring appointment"}
+    className={`inline-flex shrink-0 items-center justify-center rounded-full ${
+      variant === "generated" ? "bg-slate-100 text-slate-500" : "bg-violet-100 text-violet-700"
+    } ${className}`}
+  >
+    <RefreshCw className={`h-2.5 w-2.5 animate-spin ${variant === "generated" ? "[animation-duration:3.5s]" : "[animation-duration:2.5s]"}`} />
+  </span>
+);
 
 type CalendarPortal = 'admin' | 'doctor' | 'patient' | 'public';
 
@@ -84,6 +145,8 @@ export function CalendarView({
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [isCompactToolbar, setIsCompactToolbar] = useState(true);
   const { user } = useAuth();
   const [selectedDoctor, setSelectedDoctor] = useState(defaultDoctorFilter || "all");
   const [selectedType, setSelectedType] = useState("all");
@@ -95,9 +158,30 @@ export function CalendarView({
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
-  
-  // Define getStatusLabel inside the component so it can use the hook
-  const getStatusLabel = (key: number): string => getStatusLabelHelper(key, APPOINTMENT_STATUSES);
+
+  useEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+
+    const updateToolbarMode = (width = toolbar.getBoundingClientRect().width) => {
+      setIsCompactToolbar(width < COMPACT_TOOLBAR_WIDTH);
+    };
+
+    updateToolbarMode();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleWindowResize = () => updateToolbarMode();
+      window.addEventListener("resize", handleWindowResize);
+      return () => window.removeEventListener("resize", handleWindowResize);
+    }
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      updateToolbarMode(entry.contentRect.width);
+    });
+
+    resizeObserver.observe(toolbar);
+    return () => resizeObserver.disconnect();
+  }, []);
   const { 
     openCreateModal, 
     appointments, 
@@ -109,6 +193,57 @@ export function CalendarView({
   } = useAppointmentModal();
   const displayedAppointments = appointmentsOverride ?? appointments;
   const usesExternalAppointments = appointmentsOverride !== undefined;
+  const [patientRecordsCache, setPatientRecordsCache] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const ids = Array.from(new Set(displayedAppointments.map(a => String(a.patientId || '').trim()).filter(id => id && !patientRecordsCache[id])));
+    if (ids.length === 0) return;
+
+    (async () => {
+      const newCache: Record<string, any> = {};
+      for (const id of ids) {
+        try {
+          const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+          const headers: HeadersInit = { 'Content-Type': 'application/json' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(id)}`), { headers, credentials: 'include' });
+          const data = await res.json();
+          if (data && data.success && data.data) newCache[id] = data.data;
+          else newCache[id] = null;
+        } catch (e) {
+          newCache[id] = null;
+        }
+      }
+      if (!isMounted) return;
+      setPatientRecordsCache(prev => ({ ...prev, ...newCache }));
+    })();
+
+    return () => { isMounted = false; };
+  }, [displayedAppointments, patientRecordsCache]);
+  const parseLocalDate = (dateStr: string): Date => {
+    // Handle ISO format with optional time component (e.g., "2026-06-15" or "2026-06-15T00:00:00Z")
+    const datePart = String(dateStr).split('T')[0];
+    const parts = datePart.split('-').map(Number);
+    if (parts.length !== 3) return new Date(NaN);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  };
+
+  const getAppointmentPatientDob = (appointment: Appointment) => {
+    const patientId = String(appointment.patientId || '').trim();
+    const patientRecord = patientId ? patientRecordsCache[patientId] : undefined;
+    const patient = appointment.patient as any;
+    return appointment.patientDateOfBirth ||
+      appointment.patientDob ||
+      appointment.patientBirthDate ||
+      appointment.patientBirthday ||
+      patient?.dateOfBirth ||
+      patient?.dob ||
+      patient?.birthDate ||
+      patient?.birthday ||
+      (patientRecord && (patientRecord.dateOfBirth || patientRecord.dob || patientRecord.birthDate || patientRecord.birthday));
+  };
+
   const {
     isAppointmentHistoryOpen,
     setIsAppointmentHistoryOpen,
@@ -404,6 +539,16 @@ export function CalendarView({
     return getAppointmentCalendarStatusColors(type, APPOINTMENT_STATUSES);
   };
 
+  const handlePrimaryViewModeChange = (mode: PrimaryViewMode) => {
+    setSearchTerm("");
+    setViewMode(mode);
+  };
+
+  const calendarViewStatusLabel = searchTerm !== "" ? "Search Results" : getViewModeStatusLabel(viewMode);
+  const activePrimaryViewMode = PRIMARY_VIEW_OPTIONS.some((option) => option.value === viewMode)
+    ? viewMode
+    : "";
+
   // NOTE: Convert time string to minutes since midnight for easier comparison
   const timeToMinutes = (time: string): number => {
     const [hours, minutes] = time.split(':').map(Number);
@@ -566,8 +711,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                   const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                   const colors = getColorForType(appointment.status);
-                  const showPatient = selectedDoctor !== 'all';
-                  
+                  const patientImageSrc = resolveImageSource(
+                    pickImageSource(
+                      appointment.patientProfile,
+                      appointment.patientProfilePicture,
+                      appointment.patient?.profilePicture,
+                      appointment.patient?.profilePictureUrl
+                    )
+                  ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName || appointment.doctor}`;
+                  const appointmentDisplayName = appointment.patientName || appointment.doctor;
+                  const appointmentPatientDob = getAppointmentPatientDob(appointment) as string | undefined;
+                  const recurringIconVariant = getRecurringAppointmentIconVariant(appointment);
                   const width = `${100 / totalColumns}%`;
                   const left = `${(columnIndex * 100) / totalColumns}%`;
                   
@@ -591,28 +745,19 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       <div className="flex flex-col h-full">
                         <div className="flex items-start gap-3">
                             <div className="flex-shrink-0">
-                              {(() => {
-                                const src = showPatient
-                                  ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`
-                                  : (() => {
-                                      const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                      return doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                    })();
-
-                                return (
-                                  <PatientAvatar
-                                    src={src}
-                                    name={appointment.patientName || appointment.doctor}
-                                    dob={appointment.patientDateOfBirth || appointment.patientDob || appointment.patientBirthDate || appointment.patientBirthday}
-                                    className="h-10 w-10 border border-gray-100"
-                                    sizeClass="h-10 w-10"
-                                  />
-                                );
-                              })()}
+                              <PatientAvatar
+                                src={patientImageSrc}
+                                name={appointmentDisplayName}
+                                dob={appointmentPatientDob}
+                                birthdayReferenceDate={appointment.date}
+                                className="h-10 w-10 border border-gray-100"
+                                sizeClass="h-10 w-10"
+                              />
                             </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
-                              {appointment.patientName ? appointment.patientName : `Dr. ${appointment.doctor}`}
+                            <div className="font-semibold text-sm pr-2 flex min-w-0 items-center gap-2">
+                              {recurringIconVariant && <RecurringAppointmentIcon className="h-4 w-4" variant={recurringIconVariant} />}
+                              <span className="truncate">{appointmentDisplayName}</span>
                               {appointment.paymentStatus === 'unpaid' && (
                                 <Badge className={`${getPaymentStatusBadgeClassName(appointment.paymentStatus)} text-[8px] h-3 px-1 uppercase font-black`}>Unpaid</Badge>
                               )}
@@ -621,7 +766,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               {typeName} • {appointment.duration || 30}min
                             </div>
                             <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-2">
-                              <div className="text-[12px] font-medium">{showPatient ? '' : appointment.patientName}</div>
+                              <div className="text-[12px] font-medium">{appointment.patientName ? `Dr. ${appointment.doctor}` : ''}</div>
                             </div>
                           </div>
                         </div>
@@ -744,7 +889,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                           const colors = getColorForType(appointment.status);
-                          const showPatient = selectedDoctor !== 'all';
+                          const patientImageSrc = resolveImageSource(
+                            pickImageSource(
+                              appointment.patientProfile,
+                              appointment.patientProfilePicture,
+                              appointment.patient?.profilePicture,
+                              appointment.patient?.profilePictureUrl
+                            )
+                          ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName || appointment.doctor}`;
+                          const appointmentDisplayName = appointment.patientName || appointment.doctor;
+                          const appointmentPatientDob = getAppointmentPatientDob(appointment) as string | undefined;
+                          const recurringIconVariant = getRecurringAppointmentIconVariant(appointment);
                           
                           const width = `${100 / totalColumns}%`;
                           const left = `${(columnIndex * 100) / totalColumns}%`;
@@ -769,21 +924,18 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-2 truncate pr-1">
                                     <div className="flex-shrink-0">
-                                      {showPatient ? (
-                                        <PatientAvatar src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} name={appointment.patientName} dob={appointment.patientDateOfBirth || appointment.patientDob || appointment.patientBirthDate || appointment.patientBirthday} className="h-7 w-7 border border-gray-100" sizeClass="h-7 w-7 rounded-full" />
-                                      ) : (
-                                        <Avatar className="h-7 w-7 border border-gray-100">
-                                          {(() => {
-                                            const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                            const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                            return <AvatarImage src={src} alt={appointment.doctor} />;
-                                          })()}
-                                          <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
-                                        </Avatar>
-                                      )}
-                                    </div>
-                                  <div className="font-semibold truncate flex items-center gap-1">
-                                    {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
+                                        <PatientAvatar
+                                        src={patientImageSrc}
+                                        name={appointmentDisplayName}
+                                        dob={appointmentPatientDob}
+                                        birthdayReferenceDate={appointment.date}
+                                        className="h-7 w-7 border border-gray-100"
+                                        sizeClass="h-7 w-7 rounded-full"
+                                      />
+                                  </div>
+                                  <div className="font-semibold flex min-w-0 items-center gap-1">
+                                    {recurringIconVariant && <RecurringAppointmentIcon className="h-3.5 w-3.5" variant={recurringIconVariant} />}
+                                    <span className="truncate">{appointmentDisplayName}</span>
                                     {isReservedAppointmentStatus(appointment.status) && (
                                       <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
                                     )}
@@ -794,7 +946,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                 </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
-                              <div className="truncate opacity-75 mt-0.5">{showPatient ? '' : appointment.patientName}</div>
+                              <div className="truncate opacity-75 mt-0.5">{appointment.patientName ? `Dr. ${appointment.doctor}` : ''}</div>
                               {appointment.price != null && <div className="mt-1 font-medium">${appointment.price.toFixed(2)}</div>}
                             </div>
                           )
@@ -835,9 +987,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
     }
 
     return (
-      <div className="grid grid-cols-7 border-t border-l border-gray-200">
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[680px] grid-cols-7 border-t border-l border-gray-200 md:min-w-0">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-          <div key={day} className="p-3 text-center text-xs font-bold text-gray-500 bg-gray-50 border-r border-b border-gray-200 uppercase tracking-wider">
+          <div key={day} className="border-r border-b border-gray-200 bg-gray-50 p-2 text-center text-xs font-bold uppercase text-gray-500 sm:p-3">
             {day}
           </div>
         ))}
@@ -850,7 +1003,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           return (
             <div
               key={idx}
-              className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors ${
+              className={`min-h-[104px] border-r border-b border-gray-200 p-2 transition-colors sm:min-h-[120px] ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               } ${portal === 'public' && isPastDay ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
               onClick={() => {
@@ -875,19 +1028,18 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(apt.status);
-                  const showPatient = selectedDoctor !== 'all';
-                  
-                  let avatarSrc = '';
-                  let fallback = '';
-                  if (showPatient) {
-                    avatarSrc = `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.patientName}`;
-                    fallback = String(apt.patientName || '').substring(0,2).toUpperCase();
-                  } else {
-                    const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
-                    avatarSrc = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
-                    fallback = String(apt.doctor || '').substring(0,2).toUpperCase();
-                  }
-                  
+                  const patientImageSrc = resolveImageSource(
+                    pickImageSource(
+                      apt.patientProfile,
+                      apt.patientProfilePicture,
+                      apt.patient?.profilePicture,
+                      apt.patient?.profilePictureUrl
+                    )
+                  ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.patientName || apt.doctor}`;
+                  const appointmentDisplayName = apt.patientName || apt.doctor;
+                  const appointmentPatientDob = getAppointmentPatientDob(apt) as string | undefined;
+                  const recurringIconVariant = getRecurringAppointmentIconVariant(apt);
+
                   return (
                     <div
                       key={apt.id}
@@ -896,15 +1048,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         e.stopPropagation();
                         handleOpenAppointment(apt);
                       }}
+                      title={`${formatTime(apt.time)} - ${typeName}`}
                     >
-                      <PatientAvatar src={avatarSrc} name={showPatient ? apt.patientName : apt.doctor} dob={apt.patientDateOfBirth || apt.patientDob || apt.patientBirthDate || apt.patientBirthday} className="h-5 w-5 border border-gray-100 flex-shrink-0" sizeClass="h-5 w-5 rounded-full" />
-                      <div className="truncate">
-                        {showPatient ? apt.patientName : `${apt.time} • Dr. ${apt.doctor}`}
+                      <PatientAvatar src={patientImageSrc} name={appointmentDisplayName} dob={appointmentPatientDob} birthdayReferenceDate={apt.date} className="h-5 w-5 border border-gray-100 flex-shrink-0" sizeClass="h-5 w-5 rounded-full" />
+                      <div className="flex min-w-0 items-center gap-1 truncate">
+                        {recurringIconVariant && <RecurringAppointmentIcon className="h-3.5 w-3.5" variant={recurringIconVariant} />}
+                        {apt.patientName || `${apt.time} • Dr. ${apt.doctor}`}
                         {isReservedAppointmentStatus(apt.status) && " (R)"}
                         {normalizeAppointmentStatus(apt.status) === "to-pay" && " (P)"}
                       </div>
                     </div>
-                  )
+                  );
                 })}
                 {dayAppointments.length > 3 && (
                   <div className="text-[10px] text-muted-foreground pl-1 font-medium cursor-pointer hover:text-muted-foreground/80"
@@ -921,6 +1075,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             </div>
           );
         })}
+        </div>
       </div>
     );
   };
@@ -950,6 +1105,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             {sortedAppointments.map((apt: Appointment) => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(apt.status);
+              const recurringIconVariant = getRecurringAppointmentIconVariant(apt);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
                   handleOpenAppointment(apt);
@@ -957,7 +1113,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
-                      <div className="font-bold text-lg">{apt.patientName}</div>
+                      <div className="flex min-w-0 items-center gap-2 font-bold text-lg">
+                        {recurringIconVariant && <RecurringAppointmentIcon className="h-5 w-5" variant={recurringIconVariant} />}
+                        <span className="truncate">{apt.patientName}</span>
+                      </div>
                       <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
                     </div>
                     <div className="space-y-2 text-sm text-muted-foreground">
@@ -993,23 +1152,23 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
   return (
     <div className="space-y-6">
       <Card className="shadow-sm border-none bg-white">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center space-x-4">
-              <div className={`flex items-center bg-gray-50 rounded-lg p-1 border ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
+        <CardContent className="p-3 sm:p-4">
+          <div ref={toolbarRef} className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+              <div className={`flex shrink-0 items-center rounded-lg border bg-gray-50 p-1 ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'} aria-label="Previous date range">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'} aria-label="Next date range">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
               
               <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-10 gap-2 font-semibold shadow-sm px-4">
-                    <CalendarRange className="h-4 w-4 text-violet-600" />
-                    <span>{formatDateLabel(selectedDate)}</span>
+                  <Button variant="outline" className="h-10 min-w-0 max-w-full gap-2 px-3 font-semibold shadow-sm sm:px-4">
+                    <CalendarRange className="h-4 w-4 shrink-0 text-violet-600" />
+                    <span className="truncate">{formatDateLabel(selectedDate)}</span>
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 shadow-2xl border-none rounded-2xl" align="start">
@@ -1035,15 +1194,15 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               </Popover>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-end">
               {/* Filters - visible only for admin/doctor */}
               {(portal === 'admin' || portal === 'doctor') && (
-                <div className="flex items-center space-x-3">
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:flex xl:items-center">
                   {portal === 'admin' && (
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-gray-400" />
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Users className="h-4 w-4 shrink-0 text-gray-400" />
                       <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                        <SelectTrigger className="h-10 w-full min-w-0 shadow-sm xl:w-[180px]">
                           <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
                         </SelectTrigger>
                         <SelectContent>
@@ -1056,10 +1215,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     </div>
                   )}
                   {(portal === 'admin' || portal === 'doctor') && (
-                    <div className="flex items-center gap-2">
-                      <ListFilter className="h-4 w-4 text-gray-400" />
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ListFilter className="h-4 w-4 shrink-0 text-gray-400" />
                       <Select value={selectedType} onValueChange={setSelectedType}>
-                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                        <SelectTrigger className="h-10 w-full min-w-0 shadow-sm xl:w-[180px]">
                           <SelectValue placeholder="Filter by type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1072,10 +1231,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     </div>
                   )}
                   {(portal === 'admin' || portal === 'doctor') && (
-                    <div className="flex items-center gap-2">
-                      <ListFilter className="h-4 w-4 text-gray-400" />
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ListFilter className="h-4 w-4 shrink-0 text-gray-400" />
                       <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                        <SelectTrigger className="h-10 w-full min-w-0 shadow-sm xl:w-[180px]">
                           <SelectValue placeholder="Filter by status" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1091,24 +1250,54 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               )}
 
               {/* View Mode Buttons and Status Badge - always on right */}
-              <div className="flex items-center gap-3" data-tour-id="calendar-view-toggle">
-                <div className="flex items-center gap-2">
-                  {(['month','week','day'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      data-tour-id={`calendar-view-${mode}`}
-                      onClick={() => setViewMode(mode)}
-                      className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3" data-tour-id="calendar-view-toggle">
+                {!isCompactToolbar && (
+                  <div className="flex items-center gap-1 rounded-lg bg-gray-50 p-1">
+                    {PRIMARY_VIEW_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        data-tour-id={`calendar-view-${option.value}`}
+                        onClick={() => handlePrimaryViewModeChange(option.value)}
+                        className={`h-9 rounded-md px-3 text-xs font-black uppercase transition-all ${viewMode === option.value ? 'bg-white text-violet-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
+                <Badge variant="secondary" className="flex h-10 min-w-0 items-center gap-2 rounded-lg border-violet-100 bg-violet-50 px-3 font-semibold text-violet-700 sm:px-4">
                   <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
-                  {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : viewMode === "custom" ? "Custom Range" : "All Appointments")}
+                  <span className="truncate">{calendarViewStatusLabel}</span>
                 </Badge>
+
+                {isCompactToolbar && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="h-10 w-10 shrink-0 shadow-sm" aria-label="Choose calendar view">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuLabel>Calendar view</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuRadioGroup
+                        value={activePrimaryViewMode}
+                        onValueChange={(value) => handlePrimaryViewModeChange(value as PrimaryViewMode)}
+                      >
+                        {PRIMARY_VIEW_OPTIONS.map((option) => (
+                          <DropdownMenuRadioItem
+                            key={option.value}
+                            value={option.value}
+                            data-tour-id={`calendar-view-${option.value}`}
+                          >
+                            {option.statusLabel}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             </div>
           </div>
@@ -1116,23 +1305,23 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
       </Card>
 
       <Card className="shadow-xl border-none overflow-hidden bg-white">
-        <CardHeader className="border-b bg-gray-50/50 py-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-bold flex items-center gap-2">
+        <CardHeader className="border-b bg-gray-50/50 px-3 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <CardTitle className="flex items-center gap-2 text-base font-bold sm:text-lg">
               {viewMode === "day" && <Clock className="h-5 w-5 text-violet-600" />}
               {viewMode === "week" && <CalendarRange className="h-5 w-5 text-violet-600" />}
               {viewMode === "month" && <CalendarIcon className="h-5 w-5 text-violet-600" />}
               {viewMode === "custom" && <Search className="h-5 w-5 text-violet-600" />}
               {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}
             </CardTitle>
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex w-full items-center gap-x-3 gap-y-2 overflow-x-auto pb-1 lg:w-auto lg:flex-wrap lg:justify-end lg:overflow-visible lg:pb-0">
               {APPOINTMENT_STATUSES.map((status) => {
                 const bgColor = getStatusSoftBgColorClass(status.bgColor);
                 const borderColor = getStatusBorderColorClass(status.bgColor);
                 return (
-                  <div key={status.value} className="flex items-center gap-1.5">
-                    <div className={`w-3 h-3 rounded-full ${bgColor} border ${borderColor}`} />
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{status.label}</span>
+                  <div key={status.value} className="flex shrink-0 items-center gap-1.5">
+                    <div className={`h-3 w-3 rounded-full ${bgColor} border ${borderColor}`} />
+                    <span className="whitespace-nowrap text-[10px] font-bold uppercase text-gray-500">{status.label}</span>
                   </div>
                 );
               })}
@@ -1140,7 +1329,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="max-h-[700px] overflow-y-auto">
+          <div className="max-h-[70vh] overflow-y-auto xl:max-h-[700px]">
             {(isLoadingOverride ?? isLoadingView) ? (
               <div className="flex flex-col items-center justify-center py-24 space-y-4">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>

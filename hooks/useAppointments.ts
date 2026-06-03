@@ -29,8 +29,16 @@ export interface Appointment {
   status: string;
   cancellationReason?: string; // Reason why appointment was cancelled
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid" | "over-paid";
+  paymentMethod?: string;
   balance?: number;
   totalPaid?: number;
+  recurrence?: any;
+  isRecurring?: boolean;
+  recurringSeriesId?: string | null;
+  patientDateOfBirth?: string;
+  patientDob?: string;
+  patientBirthDate?: string;
+  patientBirthday?: string;
   patientProfile?: string;
   patientProfilePicture?: string;
   doctorProfile?: string;

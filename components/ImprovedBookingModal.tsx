@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import PatientAvatar from "./PatientAvatar";
 import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -49,6 +48,13 @@ import useSharedBookingLogic, {
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   getBookingDoctorInitials as getDoctorInitials,
+  fetchBookingRecurringDeletionItems,
+  buildBookingRecurrencePayload,
+  getBookingRecurrenceState,
+  hasActiveBookingRecurringChild,
+  logBookingRecurringCancelPreview,
+  normalizeBookingRecurringDeletionItems,
+  RECURRING_APPOINTMENT_OPTIONS,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
   isSignificantBookingPaymentStatus,
@@ -58,10 +64,13 @@ import useSharedBookingLogic, {
   normalizePastAppointmentStatus,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
+  type BookingRecurringDeletionItem as RecurringAppointmentDeletionItem,
 } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
+import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
+import { RecurringAppointmentCancelSelector } from "./RecurringAppointmentCancelSelector";
 import { useDoctors, type DoctorOption } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -462,6 +471,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
   const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceOption, setRecurrenceOption] = useState<string>(RECURRING_APPOINTMENT_OPTIONS[0]);
+  const [customRecurrenceDate, setCustomRecurrenceDate] = useState<string>("");
+  const [recurringAppointmentDeletionDates, setRecurringAppointmentDeletionDates] = useState<string[]>([]);
+  const [recurringAppointmentDeletionItems, setRecurringAppointmentDeletionItems] = useState<RecurringAppointmentDeletionItem[]>([]);
+  const [selectedRecurringAppointmentDeletionIds, setSelectedRecurringAppointmentDeletionIds] = useState<string[]>([]);
+  const [isLoadingRecurringCancelPreview, setIsLoadingRecurringCancelPreview] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
@@ -486,6 +502,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const selectedDateRef = useRef(selectedDate);
   const selectedTimeRef = useRef(selectedTime);
   const selectedDoctorRef = useRef(selectedDoctor);
+  const recurrenceTouchedRef = useRef(false);
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -751,6 +768,140 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   });
   const getPaymentStatusOption = (statusValue: string) =>
     paymentStatusOptions.find((status) => status.value === statusValue);
+
+  const bookingRecurrenceState = useMemo(
+    () => getBookingRecurrenceState(appointmentToEdit, appointmentLogs),
+    [appointmentToEdit, appointmentLogs]
+  );
+
+  const applyRecurringDeletionItems = useCallback((items: RecurringAppointmentDeletionItem[]) => {
+    const uniqueItems = normalizeBookingRecurringDeletionItems(items);
+
+    setRecurringAppointmentDeletionItems(uniqueItems);
+    setRecurringAppointmentDeletionDates(uniqueItems.map((item) => item.date).filter(Boolean));
+    setSelectedRecurringAppointmentDeletionIds([]);
+  }, []);
+
+  const fetchRecurringDeletionItems = useCallback(async () => {
+    return fetchBookingRecurringDeletionItems({
+      appointment: appointmentToEdit,
+      recurrenceState: bookingRecurrenceState,
+      isPublicCachedAppointment,
+      getAuthHeaders,
+    });
+  }, [
+    appointmentToEdit,
+    bookingRecurrenceState,
+    isPublicCachedAppointment,
+  ]);
+
+  const refreshRecurringDeletionItems = useCallback(async () => {
+    const items = await fetchRecurringDeletionItems();
+    applyRecurringDeletionItems(items);
+    return items;
+  }, [applyRecurringDeletionItems, fetchRecurringDeletionItems]);
+
+  const openCancelDialogWithRecurringPreview = useCallback(async () => {
+    if (isLoadingRecurringCancelPreview) return;
+
+    setIsLoadingRecurringCancelPreview(true);
+    try {
+      const linkedRecurringAppointments = await refreshRecurringDeletionItems();
+      logBookingRecurringCancelPreview({
+        appointment: appointmentToEdit,
+        items: linkedRecurringAppointments,
+      });
+      setIsDeleteDialogOpen(true);
+    } finally {
+      setIsLoadingRecurringCancelPreview(false);
+    }
+  }, [
+    appointmentToEdit,
+    isLoadingRecurringCancelPreview,
+    refreshRecurringDeletionItems,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchRecurringDeletionItems().then((items) => {
+      if (!cancelled) applyRecurringDeletionItems(items);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRecurringDeletionItems, fetchRecurringDeletionItems]);
+
+  useEffect(() => {
+    recurrenceTouchedRef.current = false;
+  }, [open, appointmentToEdit?.id]);
+
+  useEffect(() => {
+    if (!open || recurrenceTouchedRef.current) return;
+
+    if (!appointmentToEdit) {
+      setIsRecurring(false);
+      setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
+      setCustomRecurrenceDate("");
+      return;
+    }
+
+    setIsRecurring(false);
+    setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
+    setCustomRecurrenceDate("");
+  }, [
+    open,
+    appointmentToEdit,
+    bookingRecurrenceState.isRecurring,
+    bookingRecurrenceState.recurrenceOption,
+    bookingRecurrenceState.customRecurrenceDate,
+  ]);
+
+  const handleRecurringChange = useCallback((nextIsRecurring: boolean) => {
+    recurrenceTouchedRef.current = true;
+    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
+      appointmentId: appointmentToEdit?.id,
+      recurrenceState: bookingRecurrenceState,
+      items: recurringAppointmentDeletionItems,
+    });
+    if (nextIsRecurring && hasActiveRecurringChild) {
+      toast.info("This appointment already has a recurring appointment.");
+      setIsRecurring(false);
+      return;
+    }
+    setIsRecurring(nextIsRecurring);
+  }, [
+    appointmentToEdit?.id,
+    bookingRecurrenceState,
+    recurringAppointmentDeletionItems,
+  ]);
+
+  useEffect(() => {
+    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
+      appointmentId: appointmentToEdit?.id,
+      recurrenceState: bookingRecurrenceState,
+      items: recurringAppointmentDeletionItems,
+    });
+    if (hasActiveRecurringChild && isRecurring) {
+      setIsRecurring(false);
+    }
+  }, [
+    appointmentToEdit?.id,
+    bookingRecurrenceState,
+    isRecurring,
+    recurringAppointmentDeletionItems,
+  ]);
+
+  const handleRecurrenceOptionChange = useCallback((option: string) => {
+    recurrenceTouchedRef.current = true;
+    setRecurrenceOption(option);
+  }, []);
+
+  const handleCustomRecurrenceDateChange = useCallback((date: string) => {
+    recurrenceTouchedRef.current = true;
+    setCustomRecurrenceDate(date);
+  }, []);
 
   useEffect(() => {
     if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
@@ -1986,6 +2137,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
+      recurrence: isRecurring ? {
+        option: recurrenceOption,
+        customDate: customRecurrenceDate || null,
+      } : { enabled: false },
       payment: {
         amountToPay,
         method: paymentMethod,
@@ -2001,6 +2156,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
+      const recurrencePayload = isRecurring
+        ? buildBookingRecurrencePayload({
+            isRecurring,
+            recurrenceOption,
+            customRecurrenceDate,
+            existingRecurrence: undefined,
+          })
+        : null;
+      const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
       
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
       const amountPaid = parseFloat(amountPaidRaw) || 0;
@@ -2066,6 +2230,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentMethod,
               totalPaid: newTotalPaid,
               balance: newBalance,
+              ...recurrenceUpdate,
               updatedAt: new Date().toISOString(),
               isPublicCache: true,
             } as any)
@@ -2085,7 +2250,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentStatus: updatePaymentStatus as any,
               totalPaid: newTotalPaid,
               balance: newBalance,
-            });
+              ...recurrenceUpdate,
+            } as any);
 
         // Log the updated appointment details
         console.log('[BookingModal Payment] ✅ APPOINTMENT UPDATED SUCCESSFULLY:', {
@@ -2158,7 +2324,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentMethod,
               totalPaid: amountPaid,
               balance: newBalance,
-            });
+              ...recurrenceUpdate,
+            } as any);
           } else {
             // Persist public booking to backend and fallback to local cache on failure
             try {
@@ -2186,6 +2353,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentMethod,
                 price: finalPrice,
                 discount: Number(discount) || 0,
+                ...recurrenceUpdate,
               };
 
               const resp = await fetch(apiUrl("/api/appointments/public-book"), {
@@ -2227,6 +2395,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   paymentMethod,
                   totalPaid: amountPaid,
                   balance: newBalance,
+                  ...recurrenceUpdate,
                 });
               }
             } catch (err) {
@@ -2248,7 +2417,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentMethod,
                 totalPaid: amountPaid,
                 balance: newBalance,
-              });
+                ...recurrenceUpdate,
+              } as any);
             }
           }
         } else {
@@ -2268,7 +2438,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             paymentStatus: paymentStatus as any,
             totalPaid: amountPaid,
             balance: newBalance,
-          });
+            ...recurrenceUpdate,
+          } as any);
         }
 
         // Auto-cancel any overlapping cart appointments for the same doctor
@@ -2355,18 +2526,28 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
+      const cancelRecurrenceUpdate = selectedRecurringAppointmentDeletionIds.length > 0
+        ? {
+            recurrence: {
+              ...(bookingRecurrenceState.recurrence || appointmentToEdit.recurrence || {}),
+              enabled: false,
+              deleteGeneratedAppointmentIds: selectedRecurringAppointmentDeletionIds,
+            },
+          }
+        : {};
       // Update status to cancelled instead of deleting
       const updated = isPublicCachedAppointment
         ? cachePublicBookingAppointment({
             ...appointmentToEdit,
             status: 'cancelled',
+            ...cancelRecurrenceUpdate,
             updatedAt: new Date().toISOString(),
             isPublicCache: true,
           } as any)
         : await updateAppointment(appointmentToEdit.id, {
-            ...appointmentToEdit,
             status: 'cancelled',
-          });
+            ...cancelRecurrenceUpdate,
+          } as any);
       try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch {}
       if (onBooked) onBooked(updated);
         if (onDeleted) onDeleted(updated);
@@ -3027,12 +3208,16 @@ return (
                   <Button
                     type="button"
                     variant="destructive"
-                    onClick={() => setIsDeleteDialogOpen(true)}
-                    disabled={isBooking}
+                    onClick={openCancelDialogWithRecurringPreview}
+                    disabled={isBooking || isLoadingRecurringCancelPreview}
                     className="h-12 w-full rounded-2xl bg-red-500 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-600 hover:shadow-red-200 sm:w-auto sm:mr-auto transition-all"
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {isBooking ? "Processing..." : "Cancel Appointment"}
+                    {isLoadingRecurringCancelPreview ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                    )}
+                    {isBooking ? "Processing..." : isLoadingRecurringCancelPreview ? "Loading..." : "Cancel Appointment"}
                   </Button>
                 )}
                 <Button
@@ -3075,11 +3260,19 @@ return (
       </Dialog>
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="max-w-md rounded-3xl p-8">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-3xl p-8">
           <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><CalendarIcon className="h-10 w-10" /></div>
           <div className="text-center space-y-2 mb-8">
             <h3 className="text-xl font-black">Cancel Appointment?</h3>
             <p className="text-sm text-gray-500">This releases the time slot. This action is permanent.</p>
+          </div>
+          <div className="mb-6">
+            <RecurringAppointmentCancelSelector
+              items={recurringAppointmentDeletionItems}
+              selectedIds={selectedRecurringAppointmentDeletionIds}
+              onSelectedIdsChange={setSelectedRecurringAppointmentDeletionIds}
+              formatTimeTo12h={formatTimeTo12h}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="h-14 rounded-2xl font-bold">No, Keep it</Button>
@@ -3170,215 +3363,65 @@ return (
       </Dialog>
 
       {/* Summary confirmation dialog */}
-      <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
-          <DialogHeader className="border-b bg-gray-50 px-6 py-5">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
-                <AlertCircle className="h-6 w-6" />
-              </div>
-              <div className="min-w-0">
-                <DialogTitle className="text-xl font-black text-gray-900">Confirm Appointment</DialogTitle>
-                <p className="mt-1 text-sm font-bold text-gray-500">Please review all details before saving</p>
-              </div>
-            </div>
-          </DialogHeader>
-          
-          <div className="space-y-5 bg-white p-6">
-            <div className="rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
-              <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Patient</p>
-                  <div className="flex items-center gap-3">
-                    <PatientAvatar src={summaryPatientAvatar} name={summaryPatientName} dob={summaryPatientDateOfBirth || summaryPatientDob || summaryPatientBirthDate || summaryPatientBirthday} className="h-10 w-10 shrink-0 border-2 border-white shadow-md" sizeClass="h-10 w-10 rounded-2xl" />
-                    <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{summaryPatientName}</p>
-                  </div>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Doctor</p>
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
-                      {summaryDoctorAvatar && (
-                        <AvatarImage src={summaryDoctorAvatar} alt={displayDoctor} className="object-cover" />
-                      )}
-                      <AvatarFallback className="bg-emerald-500 text-[11px] font-black text-white">
-                        {getDoctorInitials(displayDoctor)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{displayDoctor}</p>
-                  </div>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Service</p>
-                  <p className="text-base font-black leading-snug text-gray-900 tracking-tight">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</p>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Schedule</p>
-                  <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
-                    {toDate(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
-                  </p>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Duration</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-base font-black text-gray-900 tracking-tight">{duration} mins</p>
-                    {durationConflict && (
-                      <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Status</p>
-                  {canEditAppointmentStatus ? (
-                    <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                      <SelectTrigger className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:max-w-[180px] ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                      } ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                      }`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        {appointmentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                            {status.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                    } ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                    }`}>
-                      {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <CompactNotesField
-              id="improved-summary-notes"
-              label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
-              placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
-              value={notes}
-              onChange={setNotes}
-              disabled={isPatientReadonly && isCancelled}
-              className="rounded-[1.5rem] border border-gray-100 bg-gray-50/50 p-4"
-              labelClassName="mb-2 text-[9px] font-black uppercase tracking-widest text-gray-400 opacity-70"
-              textareaClassName="min-h-[58px] resize-none rounded-xl border border-gray-100 bg-white p-3 text-sm font-medium transition-all focus:border-blue-500 focus:bg-white"
-            />
-
-            {bookingConflictWarnings.length > 0 && (
-              <div className="rounded-2xl border-2 border-amber-100 bg-amber-50 p-4 text-xs font-bold text-amber-800 flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
-                <p>This appointment has a scheduling conflict. Hover the warning icon for details.</p>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div className="flex items-center gap-4">
-                <div className="h-px flex-1 bg-gray-100"></div>
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Financial Summary</p>
-                <div className="h-px flex-1 bg-gray-100"></div>
-              </div>
-
-              <div className="space-y-5 rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
-                <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_180px] md:items-start">
-                  <div className="min-w-0">
-                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Final Price</p>
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-                      {Number(discount) > 0 && (
-                        <span className="text-sm font-bold text-gray-400 line-through decoration-gray-400/50">&#8369;{(customPrice === "0" ? finalPrice : Number(customPrice)).toLocaleString()}</span>
-                      )}
-                      <p className="text-3xl font-black text-blue-600 tracking-tighter">&#8369;{discountedPrice.toLocaleString()}</p>
-                      {Number(discount) > 0 && (
-                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 shadow-sm">
-                          Saved &#8369;{Number(discount).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="min-w-0 md:justify-self-end md:text-right">
-                    <div>
-                      <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Payment Status</p>
-                      {canManagePaymentStatuses ? (
-                        <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
-                          <SelectTrigger className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 md:w-[160px] ${
-                            getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                          } ${
-                            getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                          }`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-2xl border-none shadow-2xl">
-                            {paymentStatusOptions.map((status) => (
-                              <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                                {status.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <span className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
-                          getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                        } ${
-                          getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                        }`}>
-                          {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 border-t border-gray-100/70 pt-4">
-                  <div className="text-center">
-                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Already Paid</p>
-                    <p className="text-sm font-black text-emerald-600 tracking-tight">₱{previouslyPaidAmount.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Paying Now</p>
-                    <p className="text-sm font-black text-blue-600 tracking-tight">₱{paymentAmountNow.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Remaining</p>
-                    <p className="text-sm font-black text-gray-400 tracking-tight">₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>         
-
-          {/* Patient-facing note: suggest payment to reserve when booking remains in the cart */}
-          {user?.role === 'patient' && isCartAppointmentStatus(getFinalAppointmentStatus()) && (
-            <div className="px-6 pb-5">
-              <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
-                Note: This booking will be added to your cart. Adding a payment will reserve this schedule.
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex gap-3 border-t bg-gray-50/60 p-6">
-            <Button data-tour-id="booking-summary-back" variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
-              Back to Edit
-            </Button>
-            <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmSummary} disabled={isBooking}>
-              {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
-              {isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmAppointmentModal
+        open={isConfirmSummaryOpen}
+        onOpenChange={setIsConfirmSummaryOpen}
+        onConfirm={handleConfirmSummary}
+        isBooking={isBooking}
+        patientName={summaryPatientName}
+        patientAvatar={summaryPatientAvatar}
+        doctorName={displayDoctor}
+        doctorAvatar={summaryDoctorAvatar}
+        appointmentType={appointmentType}
+        customAppointmentTypeName={customAppointmentTypeName}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        duration={duration}
+        notes={notes}
+        onNotesChange={setNotes}
+        durationConflict={durationConflict}
+        bookingConflictWarnings={bookingConflictWarnings}
+        appointmentStatus={getFinalAppointmentStatus()}
+        appointmentStatusOptions={appointmentStatusOptions}
+        onAppointmentStatusChange={handleStatusChange}
+        canEditAppointmentStatus={canEditAppointmentStatus}
+        paymentStatus={getFinalPaymentStatus()}
+        paymentStatusOptions={paymentStatusOptions}
+        onPaymentStatusChange={handlePaymentStatusChange}
+        canManagePaymentStatuses={canManagePaymentStatuses}
+        finalPrice={finalPrice}
+        discount={Number(discount) || 0}
+        discountedPrice={discountedPrice}
+        previouslyPaidAmount={previouslyPaidAmount}
+        paymentAmountNow={paymentAmountNow}
+        isRecurring={isRecurring}
+        onRecurringChange={handleRecurringChange}
+        recurrenceOption={recurrenceOption}
+        onRecurrenceOptionChange={handleRecurrenceOptionChange}
+        customRecurrenceDate={customRecurrenceDate}
+        onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
+        canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
+          appointmentId: appointmentToEdit?.id,
+          recurrenceState: bookingRecurrenceState,
+          items: recurringAppointmentDeletionItems,
+        })}
+        recurringAppointmentDate={bookingRecurrenceState.generatedAppointmentDate}
+        recurringAppointmentDates={recurringAppointmentDeletionDates}
+        recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
+        selectedRecurringAppointmentDeletionIds={selectedRecurringAppointmentDeletionIds}
+        onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        getPersonInitials={getPersonInitials}
+        getDoctorInitials={getDoctorInitials}
+        getBookingStatusLabel={getBookingStatusLabel}
+        getAppointmentStatusOption={getAppointmentStatusOption}
+        getPaymentStatusOption={getPaymentStatusOption}
+        formatTimeTo12h={formatTimeTo12h}
+        isPatientReadonly={isPatientReadonly}
+        isCancelled={isCancelled}
+        isPatientLevelBookingMode={isPatientLevelBookingMode}
+        isCartAppointmentStatus={isCartAppointmentStatus}
+        userRole={user?.role}
+      />
 
       <AppointmentHistoryView
         open={isSnapshotModalOpen}

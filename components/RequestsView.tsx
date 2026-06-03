@@ -1,6 +1,6 @@
 "use client";
 
-import { apiUrl, API_BASE_URL } from "@/lib/api";
+import { apiUrl } from "@/lib/api";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -135,12 +135,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [requestTotal, setRequestTotal] = useState(0);
   const [requestRefreshKey, setRequestRefreshKey] = useState(0);
   const [history, setHistory] = useState<Appointment[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [patientRecordsCache, setPatientRecordsCache] = useState<Record<string, any>>({});
+  const [activeTab, setActiveTab] = useState("requests");
+  const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
   const { refreshAppointments, openCreateModal } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -203,42 +204,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       console.log('[RequestsView] Available appointment statuses:', APPOINTMENT_STATUSES.map(s => s.value));
     }
   }, [APPOINTMENT_STATUSES]);
-
-  // Fetch patient records for requests and history
-  useEffect(() => {
-    const allAppointments = [...requests, ...history];
-    const patientIds = Array.from(new Set(allAppointments.map(apt => apt.patientId).filter(Boolean)));
-
-    if (patientIds.length === 0) return;
-
-    const fetchPatientRecords = async () => {
-      const newCache = { ...patientRecordsCache };
-      
-      for (const patientId of patientIds) {
-        // Skip if already cached
-        if (newCache[patientId]) continue;
-
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/patients/${patientId}`, {
-            credentials: "include",
-            headers: {
-              Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("authToken") : ""}`,
-            },
-          });
-          if (response.ok) {
-            const data = await response.json();
-            newCache[patientId] = data.data || null;
-          }
-        } catch (error) {
-          console.debug(`Failed to fetch patient record ${patientId}:`, error);
-        }
-      }
-
-      setPatientRecordsCache(newCache);
-    };
-
-    fetchPatientRecords();
-  }, [requests, history]);
 
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
@@ -325,7 +290,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const getCurrentPatientName = (appointment: Appointment) =>
-    getAppointmentPatientDisplayName(appointment, patientRecordsCache[appointment.patientId]);
+    getAppointmentPatientDisplayName(appointment);
 
   const sortAppointmentsForColumn = (
     items: Appointment[],
@@ -641,11 +606,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   ]);
 
   useEffect(() => {
+    if (activeTab !== "history") return;
+    setHasLoadedHistory(true);
+
     const controller = new AbortController();
     fetchHistory(historyCurrentPage, controller.signal);
 
     return () => controller.abort();
-  }, [fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
+  }, [activeTab, fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
 
   const refreshHistory = useCallback(() => {
     setHistoryRefreshKey((key) => key + 1);
@@ -653,8 +621,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const refreshAppointmentLists = useCallback(() => {
     refreshRequests();
-    refreshHistory();
-  }, [refreshHistory, refreshRequests]);
+    if (hasLoadedHistory) refreshHistory();
+  }, [hasLoadedHistory, refreshHistory, refreshRequests]);
 
   useEffect(() => {
     const handleAppointmentsUpdated = (event: Event) => {
@@ -900,7 +868,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         )}
       </div>
 
-      <Tabs defaultValue="requests" className="space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "history" && !hasLoadedHistory) setIsHistoryLoading(true);
+        }}
+        className="space-y-6"
+      >
         <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
           <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
             Requests
@@ -1074,7 +1049,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <PatientAvatar src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
+                              <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {request.id.slice(0, 8)}</div>
@@ -1391,7 +1366,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <PatientAvatar src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
+                              <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {item.id.slice(0, 8)}</div>

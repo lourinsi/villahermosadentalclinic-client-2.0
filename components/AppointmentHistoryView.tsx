@@ -14,7 +14,15 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { formatBookingHistoryStatusLabel, normalizeBookingHistoryStatus, isSignificantBookingPaymentStatus } from "./sharedBookingLogic";
+import {
+  formatBookingHistoryStatusLabel,
+  formatBookingDateKey,
+  formatBookingRecurringDate,
+  getBookingRecurrenceState,
+  getBookingRecurringNextDate,
+  normalizeBookingHistoryStatus,
+  isSignificantBookingPaymentStatus,
+} from "./sharedBookingLogic";
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
@@ -281,6 +289,57 @@ const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
 const isLogSnapshot = (snapshot: any) =>
   Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState || snapshot?._isHistorical);
 
+const getRecurringCreatedFromDate = (recurrence?: any, currentDate?: unknown) => {
+  if (!recurrence || typeof recurrence !== "object") return "";
+
+  const currentDateKey = formatBookingDateKey(currentDate as any);
+  const candidates = [
+    recurrence.createdFromAppointmentDate,
+    recurrence.originalGeneratedFromDate,
+    recurrence.generatedFromDate,
+    recurrence.sourceAppointmentDate,
+  ];
+
+  for (const candidate of candidates) {
+    const dateKey = formatBookingDateKey(candidate as any);
+    if (dateKey && dateKey !== currentDateKey) return dateKey;
+  }
+
+  return "";
+};
+
+const getRecurringCreatedFromDateFromText = (value?: unknown) => {
+  const text = String(value || "");
+  const match =
+    /Created from recurring schedule from\s+([^.\n]+)/i.exec(text) ||
+    /Created from\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i.exec(text);
+
+  return match ? formatBookingDateKey(match[1]) : "";
+};
+
+const getRecurringCreatedFromDateFromLogs = (logs: any[], currentDate?: unknown) => {
+  const sortedLogs = logs
+    .slice()
+    .sort((left, right) =>
+      new Date(left?.changedAt || left?.createdAt || 0).getTime() -
+      new Date(right?.changedAt || right?.createdAt || 0).getTime()
+    );
+
+  for (const log of sortedLogs) {
+    const stateCandidates = [log?.newState, log?.previousState, log];
+
+    for (const state of stateCandidates) {
+      const recurrenceDate = getRecurringCreatedFromDate(state?.recurrence, currentDate);
+      if (recurrenceDate) return recurrenceDate;
+    }
+
+    const noteDate = getRecurringCreatedFromDateFromText(log?.notes);
+    if (noteDate && noteDate !== formatBookingDateKey(currentDate as any)) return noteDate;
+  }
+
+  return "";
+};
+
 const isPatientChange = (snapshot: any) => {
   const prev = snapshot?.previousState;
   const next = snapshot?.newState;
@@ -311,6 +370,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
+  const [recurringSourceDateFromLogs, setRecurringSourceDateFromLogs] = useState("");
   const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
@@ -466,6 +526,40 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     appointmentSnapshot,
   ]);
 
+  useEffect(() => {
+    setRecurringSourceDateFromLogs("");
+
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId) return;
+
+    const controller = new AbortController();
+    const loadRecurringCreatedFromDate = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+        const createdFromDate = getRecurringCreatedFromDateFromLogs(logs, displayedSnapshot?.date);
+        setRecurringSourceDateFromLogs(createdFromDate);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load recurring source log:", error);
+        }
+      }
+    };
+
+    loadRecurringCreatedFromDate();
+
+    return () => controller.abort();
+  }, [
+    open,
+    displayedAppointmentId,
+    displayedSnapshot?.date,
+  ]);
+
   if (!displayedSnapshot) return null;
 
   const appointmentDate = new Date(displayedSnapshot.date);
@@ -487,6 +581,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
   const patientName = getAppointmentPatientDisplayName(displayedSnapshot, patientRecord);
   const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
+  const snapshotPatientDob =
+    displayedSnapshot?.patientDateOfBirth ||
+    displayedSnapshot?.patient?.dateOfBirth ||
+    displayedSnapshot?.patient?.birthDate ||
+    displayedSnapshot?.patient?.dob ||
+    displayedSnapshot?.patient?.birthday ||
+    displayedSnapshot?.patientBirthDate ||
+    displayedSnapshot?.patientBirthday;
   const rawDisplayedDoctorName = resolveDoctorName(displayedSnapshot.doctor || displayedSnapshot.doctorName || displayedSnapshot.doctorId);
   const doctorRecord = findDoctorForSnapshot(doctors, displayedSnapshot) || doctors.find((doctor: any) =>
     String(doctor.id) === String(displayedSnapshot.doctorId || rawDisplayedDoctorName) ||
@@ -510,6 +612,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // Prepare previous / next state values for explicit change lines
   const prevState = displayedSnapshot?.previousState || null;
   const nextState = displayedSnapshot?.newState || displayedSnapshot || null;
+  const recurrenceState = getBookingRecurrenceState(displayedSnapshot, displayedSnapshot ? [displayedSnapshot] : []);
+  const recurrenceNextDate = recurrenceState.generatedAppointmentDate ||
+    getBookingRecurringNextDate({
+      appointmentDate: nextState?.date || displayedSnapshot.date,
+      recurrenceOption: recurrenceState.recurrenceOption,
+      customRecurrenceDate: recurrenceState.customRecurrenceDate,
+    });
+  const recurrenceNextDateLabel = formatBookingRecurringDate(recurrenceNextDate);
+  const recurrenceSourceDate = getRecurringCreatedFromDate(
+    recurrenceState.recurrence,
+    nextState?.date || displayedSnapshot.date
+  ) || recurringSourceDateFromLogs;
+  const recurrenceSourceDateLabel = formatBookingRecurringDate(recurrenceSourceDate);
+  const shouldShowRecurrenceSummary = Boolean(
+    recurrenceState.isRecurring ||
+    recurrenceState.recurrence ||
+    recurrenceState.generatedAppointmentId ||
+    recurrenceState.generatedAppointmentDate ||
+    recurrenceSourceDate
+  );
 
   const prevPatientName = prevState ? resolvePatientName(prevState) : null;
   const nextPatientName = nextState ? resolvePatientName(nextState) : patientName;
@@ -1031,7 +1153,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           {/* Participants - More compact */}
           <div className="bg-white p-3 rounded-[1.25rem] border border-slate-200/50 shadow-sm grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2.5">
-              <PatientAvatar src={resolvedPatientImage} name={patientName} dob={patientDateOfBirth || patientDob || patientBirthDate || patientBirthday} className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0" sizeClass="h-9 w-9 rounded-xl" />
+              <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0" sizeClass="h-9 w-9 rounded-xl" />
               <div className="min-w-0">
                 <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest mb-0.5 block">Patient</Label>
                 <div className="flex min-w-0 items-center gap-1">
@@ -1127,6 +1249,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               ) : null}
             </div>
           </div>
+
+          {shouldShowRecurrenceSummary && (
+            <div className="bg-white p-3 rounded-[1.25rem] border border-slate-200/50 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <RefreshCw className="w-2.5 h-2.5 text-cyan-500 shrink-0" />
+                  <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest leading-none">Recurring</Label>
+                </div>
+                <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${recurrenceState.isRecurring ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>
+                  {recurrenceState.isRecurring ? "Yes" : "No"}
+                </span>
+              </div>
+              {recurrenceState.isRecurring && recurrenceNextDateLabel ? (
+                <p className="mt-2 text-[11px] font-black text-slate-800">
+                  Next schedule: {recurrenceNextDateLabel}
+                </p>
+              ) : recurrenceSourceDateLabel ? (
+                <p className="mt-2 text-[10px] font-bold text-slate-400">
+                  Created from {recurrenceSourceDateLabel}
+                </p>
+              ) : null}
+            </div>
+          )}
 
           {/* Service & Financials - Sleeker */}
           <div className="bg-white rounded-[1.25rem] border border-slate-200/50 shadow-sm overflow-hidden">

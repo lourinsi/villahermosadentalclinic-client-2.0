@@ -4,38 +4,38 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { parseBackendDateToLocal } from "../lib/utils";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 interface VisitStatisticsProps {
   appointments: Appointment[];
-  filteredAppointments: Appointment[];
   colorPalette: string[];
-  viewMode?: "day" | "week" | "month";
 }
 
 export function VisitStatistics({
   appointments,
-  filteredAppointments,
-  colorPalette,
-  viewMode
+  colorPalette
 }: VisitStatisticsProps) {
-  const appointmentsToAnalyze = filteredAppointments.length === 0 ? appointments : filteredAppointments;
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  monthStart.setHours(0, 0, 0, 0);
 
-  const getDescription = () => {
-    if (filteredAppointments.length === 0) return "All Time";
-    switch (viewMode) {
-      case "day": return "Today";
-      case "week": return "This Week";
-      case "month": return "This Month";
-      default: return "All Time";
-    }
-  };
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  monthEnd.setHours(23, 59, 59, 999);
+
+  const appointmentsToAnalyze = appointments
+    .filter((apt: Appointment) => {
+      const aptDate = parseBackendDateToLocal(apt.date);
+      return aptDate >= monthStart && aptDate <= monthEnd;
+    })
+    .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
 
   if (appointmentsToAnalyze.length === 0) {
     return (
       <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl flex flex-col h-full">
         <CardHeader className="border-b border-gray-50 p-8">
           <CardTitle className="text-xl font-black text-gray-900 tracking-tight">Visit Statistics</CardTitle>
-          <p className="text-sm font-medium text-gray-500 mt-1">{getDescription()}</p>
+          <p className="text-sm font-medium text-gray-500 mt-1">This Month</p>
         </CardHeader>
         <CardContent className="p-8 flex-1 flex items-center justify-center">
           <div className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">No data available</div>
@@ -61,7 +61,7 @@ export function VisitStatistics({
     <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl flex flex-col h-full">
       <CardHeader className="border-b border-gray-50 p-8">
         <CardTitle className="text-xl font-black text-gray-900 tracking-tight">Visit Statistics</CardTitle>
-        <p className="text-sm font-medium text-gray-500 mt-1">{getDescription()}</p>
+        <p className="text-sm font-medium text-gray-500 mt-1">This Month</p>
       </CardHeader>
       <CardContent className="p-8 flex-1 flex flex-col justify-between">
         <div className="space-y-8 h-full flex flex-col">

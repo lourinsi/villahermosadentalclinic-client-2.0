@@ -3,28 +3,42 @@
 import React from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
+import { Cake, PartyPopper } from "lucide-react";
 
 interface PatientAvatarProps {
   src?: string | undefined;
   name?: string | undefined;
   dob?: string | undefined; // ISO date or any parseable date string
+  birthdayReferenceDate?: string | Date | undefined;
   className?: string;
   sizeClass?: string;
 }
 
-export default function PatientAvatar({ src, name, dob, className = "", sizeClass = "h-10 w-10" }: PatientAvatarProps) {
-  const now = new Date();
+const parseDateOnly = (value?: string | Date) => {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+
+  const valueStr = String(value);
+  const datePart = valueStr.split("T")[0];
+  const parts = datePart.split("-").map(Number);
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+
+  const parsed = new Date(valueStr);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
+export default function PatientAvatar({ src, name, dob, birthdayReferenceDate, className = "", sizeClass = "h-10 w-10" }: PatientAvatarProps) {
+  const referenceDate = parseDateOnly(birthdayReferenceDate) || new Date();
   let hasBirthdayThisMonth = false;
   let isExactBirthday = false;
 
   try {
-    const dobStr = dob || undefined;
-    if (dobStr) {
-      const d = new Date(dobStr);
-      if (!isNaN(d.getTime())) {
-        hasBirthdayThisMonth = d.getMonth() === now.getMonth();
-        isExactBirthday = hasBirthdayThisMonth && d.getDate() === now.getDate();
-      }
+    const birthDate = parseDateOnly(dob);
+    if (birthDate) {
+      hasBirthdayThisMonth = birthDate.getMonth() === referenceDate.getMonth();
+      isExactBirthday = hasBirthdayThisMonth && birthDate.getDate() === referenceDate.getDate();
     }
   } catch (e) {
     hasBirthdayThisMonth = false;
@@ -40,8 +54,8 @@ export default function PatientAvatar({ src, name, dob, className = "", sizeClas
     return (first + last).toUpperCase();
   })();
 
-  // Hat size/position tweaks
-  const hatClass = isExactBirthday ? "w-8 h-8 -top-2 -right-2" : "w-7 h-7 -top-1 -right-1";
+  // Birthday badge: small corner badge
+  const hatClass = "w-4 h-4 -top-1 -right-1";
 
   return (
     <div className={`relative inline-block ${className}`}>
@@ -58,14 +72,14 @@ export default function PatientAvatar({ src, name, dob, className = "", sizeClas
       {hasBirthdayThisMonth && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className={`absolute z-20 ${hatClass}`} aria-hidden>
-              {/* Simple party hat SVG */}
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-md">
-                <path d="M12 2L5 20H19L12 2Z" fill="#FF6B6B" />
-                <circle cx="11.5" cy="8.5" r="0.9" fill="#FFD166" />
-                <circle cx="13.5" cy="10.5" r="0.9" fill="#FFD166" />
-                <circle cx="10" cy="13" r="0.8" fill="#FFF" />
-              </svg>
+            <span className={`absolute z-20 ${hatClass} flex items-center justify-center`} aria-hidden>
+              <span className={`rounded-full flex items-center justify-center w-full h-full drop-shadow-md ${isExactBirthday ? 'bg-rose-500 text-white' : 'bg-amber-500 text-white'}`}>
+                {isExactBirthday ? (
+                  <PartyPopper className="w-2.5 h-2.5" />
+                ) : (
+                  <Cake className="w-2.5 h-2.5" />
+                )}
+              </span>
             </span>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={6} className="text-center">

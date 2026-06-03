@@ -28,6 +28,7 @@ export type PublicBookingPatient = {
 export type PublicBookingAppointment = Omit<Appointment, "paymentStatus"> & {
   paymentStatus?: Appointment["paymentStatus"];
   paymentMethod?: string;
+  recurrence?: any;
   publicToken?: string;
   publicAccessToken?: string;
   publicPatient?: PublicBookingPatient;
@@ -277,6 +278,8 @@ export async function createPublicBookingAppointment({
   paymentMethod,
   totalPaid = 0,
   balance,
+  recurrence,
+  isRecurring,
 }: {
   patient: PublicBookingPatient;
   date: string;
@@ -293,6 +296,8 @@ export async function createPublicBookingAppointment({
   paymentMethod?: string;
   totalPaid?: number;
   balance?: number;
+  recurrence?: any;
+  isRecurring?: boolean;
 }) {
   const nameParts = String(patient.name || "").trim().split(/\s+/);
   const firstName = patient.firstName || nameParts[0] || "Patient";
@@ -305,6 +310,8 @@ export async function createPublicBookingAppointment({
   const appointmentPrice = price ?? getAppointmentPrice(type);
   const appointmentBalance =
     balance ?? Math.max(0, appointmentPrice - discount - totalPaid);
+  const appointmentIsRecurring =
+    typeof isRecurring === "boolean" ? isRecurring : Boolean(recurrence?.enabled);
   const appointment: PublicBookingAppointment = {
     id: makeCacheId("public_apt"),
     patientId: publicPatient.id,
@@ -325,6 +332,8 @@ export async function createPublicBookingAppointment({
     paymentMethod,
     totalPaid,
     balance: appointmentBalance,
+    recurrence,
+    isRecurring: appointmentIsRecurring,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     publicPatient,
