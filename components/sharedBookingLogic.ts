@@ -62,6 +62,27 @@ export function parseLocalDateOnly(dateInput?: Date | string | null): Date | nul
     return null;
   }
 
+  const slashDateMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+
+  if (slashDateMatch) {
+    const first = Number(slashDateMatch[1]);
+    const second = Number(slashDateMatch[2]);
+    const year = Number(slashDateMatch[3]);
+    const day = first > 12 ? first : second > 12 ? second : first;
+    const month = first > 12 ? second : second > 12 ? first : second;
+    const date = new Date(year, month - 1, day);
+
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+
+    return null;
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -234,7 +255,7 @@ const normalizeRecurrenceOption = (option?: unknown): RecurringAppointmentOption
 
 const normalizeRecurrenceDate = (date?: unknown) => {
   const value = String(date || "").trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+  return formatBookingDateKey(value);
 };
 
 const addMonthsClamped = (date: Date, months: number) => {
@@ -558,6 +579,56 @@ export function getBookingRecurringNextDate({
   };
 
   return formatBookingDateKey(addMonthsClamped(sourceDate, monthsByOption[option] || 1));
+}
+
+export function getBookingCustomRecurrenceMinDate(
+  appointmentDate?: Date | string | null,
+  now: Date = new Date()
+) {
+  const sourceDate = parseLocalDateOnly(appointmentDate);
+  const today = parseLocalDateOnly(now) ?? new Date();
+  const dayAfterSource = sourceDate
+    ? new Date(sourceDate.getFullYear(), sourceDate.getMonth(), sourceDate.getDate() + 1)
+    : today;
+  const minimumDate = dayAfterSource.getTime() > today.getTime() ? dayAfterSource : today;
+
+  return formatBookingDateKey(minimumDate);
+}
+
+export function getBookingCustomRecurrenceDefaultDate(
+  appointmentDate?: Date | string | null,
+  now: Date = new Date()
+) {
+  const sourceDate = parseLocalDateOnly(appointmentDate);
+  const minimumDate = parseLocalDateOnly(getBookingCustomRecurrenceMinDate(appointmentDate, now));
+  const defaultDate = sourceDate
+    ? new Date(sourceDate.getFullYear(), sourceDate.getMonth(), sourceDate.getDate() + 6)
+    : minimumDate || parseLocalDateOnly(now) || new Date();
+
+  if (minimumDate && defaultDate.getTime() < minimumDate.getTime()) {
+    return formatBookingDateKey(minimumDate);
+  }
+
+  return formatBookingDateKey(defaultDate);
+}
+
+export function isBookingCustomRecurrenceDateAllowed({
+  appointmentDate,
+  customRecurrenceDate,
+  now = new Date(),
+}: {
+  appointmentDate?: Date | string | null;
+  customRecurrenceDate?: Date | string | null;
+  now?: Date;
+}) {
+  const customDate = parseLocalDateOnly(customRecurrenceDate);
+  const minimumDate = parseLocalDateOnly(getBookingCustomRecurrenceMinDate(appointmentDate, now));
+
+  return Boolean(
+    customDate &&
+    minimumDate &&
+    customDate.getTime() >= minimumDate.getTime()
+  );
 }
 
 export function buildBookingRecurrencePayload({
@@ -1312,6 +1383,40 @@ export function getBookingSummaryNotes(notes?: string | null) {
   return {
     hasNotes: text.length > 0,
     text: text || 'No notes added.',
+  };
+}
+
+export function normalizeBookingTreatmentNotes(notes?: unknown) {
+  return String(notes ?? '').trim();
+}
+
+export function getBookingTreatmentNotesValue(appointment?: any) {
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+
+    if (source.treatmentNotes !== undefined && source.treatmentNotes !== null) {
+      return normalizeBookingTreatmentNotes(source.treatmentNotes);
+    }
+
+    if (source.treatment_notes !== undefined && source.treatment_notes !== null) {
+      return normalizeBookingTreatmentNotes(source.treatment_notes);
+    }
+  }
+
+  return "";
+}
+
+export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown) {
+  return {
+    treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),
   };
 }
 

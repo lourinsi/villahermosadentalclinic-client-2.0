@@ -3,12 +3,15 @@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Calendar as CalendarIcon, Clock, Loader2 } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
-import { RECURRING_APPOINTMENT_OPTIONS, type BookingRecurringDeletionItem } from "./sharedBookingLogic";
+import {
+  RECURRING_APPOINTMENT_OPTIONS,
+  parseLocalDateOnly,
+  type BookingRecurringDeletionItem,
+} from "./sharedBookingLogic";
 
 export type RecurringAppointmentDeletionItem = BookingRecurringDeletionItem;
 
@@ -32,6 +35,7 @@ interface ConfirmAppointmentModalProps {
   selectedDate: Date;
   selectedTime: string;
   duration: string;
+  treatmentNotes?: string;
   notes: string;
   onNotesChange: (notes: string) => void;
   durationConflict?: string;
@@ -64,6 +68,8 @@ interface ConfirmAppointmentModalProps {
   onRecurrenceOptionChange: (option: string) => void;
   customRecurrenceDate: string;
   onCustomRecurrenceDateChange: (date: string) => void;
+  onOpenCustomRecurrenceDatePicker?: () => void;
+  isCustomRecurrenceDateLoading?: boolean;
   canCreateRecurringAppointment?: boolean;
   recurringAppointmentDate?: string | null;
   recurringAppointmentDates?: string[];
@@ -99,6 +105,7 @@ export function ConfirmAppointmentModal({
   selectedDate,
   selectedTime,
   duration,
+  treatmentNotes = "",
   notes,
   onNotesChange,
   durationConflict,
@@ -122,6 +129,8 @@ export function ConfirmAppointmentModal({
   onRecurrenceOptionChange,
   customRecurrenceDate,
   onCustomRecurrenceDateChange,
+  onOpenCustomRecurrenceDatePicker,
+  isCustomRecurrenceDateLoading = false,
   canCreateRecurringAppointment = true,
   recurringAppointmentDate,
   recurringAppointmentDates = [],
@@ -140,6 +149,14 @@ export function ConfirmAppointmentModal({
   isCartAppointmentStatus,
   userRole,
 }: ConfirmAppointmentModalProps) {
+  const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
+  const treatmentNotesText = String(treatmentNotes || "").trim();
+  const customRecurrenceDateValue = parseLocalDateOnly(customRecurrenceDate);
+  const customRecurrenceDateLabel = customRecurrenceDateValue
+    ? customRecurrenceDateValue.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "Choose recurrence date";
+  const inheritedRecurrenceTimeLabel = selectedTime ? formatTimeTo12h(selectedTime) : "Same time";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
@@ -157,9 +174,9 @@ export function ConfirmAppointmentModal({
 
         <div className="space-y-5 bg-white p-6">
           <div className="rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
-            <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-6">
               {/* Patient */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Patient</p>
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
@@ -173,7 +190,7 @@ export function ConfirmAppointmentModal({
               </div>
 
               {/* Doctor */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Doctor</p>
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
@@ -187,15 +204,23 @@ export function ConfirmAppointmentModal({
               </div>
 
               {/* Service */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Service</p>
                 <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
-                  {appointmentType === "Other" ? customAppointmentTypeName : appointmentType}
+                  {treatmentName}
+                </p>
+              </div>
+
+              {/* Treatment Notes */}
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Treatment Notes</p>
+                <p className={`line-clamp-3 text-sm font-bold leading-snug ${treatmentNotesText ? "text-gray-900" : "text-gray-400"}`}>
+                  {treatmentNotesText || "No treatment notes added."}
                 </p>
               </div>
 
               {/* Schedule */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Schedule</p>
                 <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
                   {selectedDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} at {selectedTime ? formatTimeTo12h(selectedTime) : "—"}
@@ -203,7 +228,7 @@ export function ConfirmAppointmentModal({
               </div>
 
               {/* Duration */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Duration</p>
                 <div className="flex items-center gap-2">
                   <p className="text-base font-black text-gray-900 tracking-tight">{duration} mins</p>
@@ -216,7 +241,7 @@ export function ConfirmAppointmentModal({
               </div>
 
               {/* Status */}
-              <div className="min-w-0">
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Status</p>
                 {canEditAppointmentStatus ? (
                   <Select value={appointmentStatus} onValueChange={onAppointmentStatusChange} disabled={appointmentStatusOptions.length === 0}>
@@ -302,12 +327,30 @@ export function ConfirmAppointmentModal({
                   {recurrenceOption === "Custom" && (
                     <div>
                       <Label className="text-sm font-semibold text-gray-700">Custom recurrence date</Label>
-                      <Input
-                        type="date"
-                        value={customRecurrenceDate}
-                        onChange={(event) => onCustomRecurrenceDateChange(event.target.value)}
-                        className="mt-2 w-full rounded-full border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
-                      />
+                      <button
+                        type="button"
+                        onClick={onOpenCustomRecurrenceDatePicker}
+                        disabled={isCustomRecurrenceDateLoading || !onOpenCustomRecurrenceDatePicker}
+                        className="mt-2 flex min-h-[58px] w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                            <CalendarIcon className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-black text-gray-900">{customRecurrenceDateLabel}</span>
+                            <span className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                              <Clock className="h-3.5 w-3.5" />
+                              {inheritedRecurrenceTimeLabel} for {duration} mins
+                            </span>
+                          </span>
+                        </span>
+                        {isCustomRecurrenceDateLoading ? (
+                          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600" />
+                        ) : (
+                          <CalendarIcon className="h-5 w-5 shrink-0 text-gray-400" />
+                        )}
+                      </button>
                     </div>
                   )}
                 </div>

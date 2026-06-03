@@ -24,7 +24,10 @@ import useSharedBookingLogic, {
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
+  formatBookingDateKey,
   formatBookingDoctorName as formatDoctorName,
+  getBookingCustomRecurrenceDefaultDate,
+  getBookingCustomRecurrenceMinDate,
   formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
   getBookingAppointmentStatusConfig,
@@ -42,12 +45,15 @@ import useSharedBookingLogic, {
   getBookingDefaultTime,
   getBookingEditDate,
   getBookingEditTime,
+  getBookingTreatmentNotesValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   fetchBookingRecurringDeletionItems,
   buildBookingRecurrencePayload,
+  buildBookingTreatmentNotesPayload,
   getBookingRecurrenceState,
+  isBookingCustomRecurrenceDateAllowed,
   hasActiveBookingRecurringChild,
   logBookingRecurringCancelPreview,
   normalizeBookingRecurringDeletionItems,
@@ -60,6 +66,7 @@ import useSharedBookingLogic, {
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizePastAppointmentStatus,
+  parseLocalDateOnly,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
   type BookingRecurringDeletionItem as RecurringAppointmentDeletionItem,
@@ -224,6 +231,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
+  const [treatmentNotes, setTreatmentNotes] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date>(getBookingDefaultDate(defaultDate));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
@@ -255,6 +263,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [isCustomRecurrenceDatePickerOpen, setIsCustomRecurrenceDatePickerOpen] = useState(false);
+  const [isPreparingCustomRecurrenceDate, setIsPreparingCustomRecurrenceDate] = useState(false);
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
@@ -619,10 +629,75 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     recurringAppointmentDeletionItems,
   ]);
 
+  const prepareCustomRecurrenceDate = useCallback(async () => {
+    recurrenceTouchedRef.current = true;
+    const fallbackDate = getBookingCustomRecurrenceDefaultDate(selectedDate);
+    let nextDate = fallbackDate;
+
+    if (selectedDoctor && selectedTime) {
+      setIsPreparingCustomRecurrenceDate(true);
+      try {
+        const slot = await findNextAvailableBookingSlot({
+          startDate: parseLocalDateOnly(fallbackDate) || new Date(`${fallbackDate}T00:00:00`),
+          doctorToCheck: selectedDoctor,
+          durationToCheck: duration,
+          patientToCheck: selectedPatient,
+          timeSlots: [selectedTime],
+          maxDaysToCheck: 90,
+          logPrefix: "BookingModal Custom Recurrence",
+          availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+          localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+        });
+
+        if (slot) {
+          nextDate = formatBookingDateKey(slot.date);
+        } else {
+          toast.info("No free recurrence date was found for the same time. Choose an available date.");
+        }
+      } catch (err) {
+        console.warn("[BookingModal] Could not preselect custom recurrence date:", err);
+      } finally {
+        setIsPreparingCustomRecurrenceDate(false);
+      }
+    }
+
+    setCustomRecurrenceDate(nextDate);
+    return nextDate;
+  }, [
+    duration,
+    isPublicBookingMode,
+    publicBlockingAppointments,
+    selectedDate,
+    selectedDoctor,
+    selectedPatient,
+    selectedTime,
+  ]);
+
+  const handleOpenCustomRecurrenceDatePicker = useCallback(async () => {
+    if (recurrenceOption !== "Custom") {
+      setRecurrenceOption("Custom");
+    }
+
+    if (!customRecurrenceDate) {
+      await prepareCustomRecurrenceDate();
+    }
+
+    setIsCustomRecurrenceDatePickerOpen(true);
+  }, [customRecurrenceDate, prepareCustomRecurrenceDate, recurrenceOption]);
+
   const handleRecurrenceOptionChange = useCallback((option: string) => {
     recurrenceTouchedRef.current = true;
     setRecurrenceOption(option);
-  }, []);
+
+    if (option === "Custom") {
+      void prepareCustomRecurrenceDate().then(() => {
+        setIsCustomRecurrenceDatePickerOpen(true);
+      });
+      return;
+    }
+
+    setCustomRecurrenceDate("");
+  }, [prepareCustomRecurrenceDate]);
 
   const handleCustomRecurrenceDateChange = useCallback((date: string) => {
     recurrenceTouchedRef.current = true;
@@ -1366,6 +1441,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // Notes from history remain visible in the AppointmentHistoryView below,
   // but they are not auto-copied into the editable notes field.
   setNotes('');
+      setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
       setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
@@ -1395,6 +1471,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
+      setTreatmentNotes('');
       setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setAmountToPay('');
@@ -1555,6 +1632,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
+      treatmentNotes,
       recurrence: isRecurring ? {
         option: recurrenceOption,
         customDate: customRecurrenceDate || null,
@@ -1574,15 +1652,38 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
+      const normalizedCustomRecurrenceDate = recurrenceOption === "Custom"
+        ? formatBookingDateKey(customRecurrenceDate)
+        : customRecurrenceDate;
+      if (isRecurring && recurrenceOption === "Custom" && !normalizedCustomRecurrenceDate) {
+        toast.error("Choose a valid custom recurrence date.");
+        setIsBooking(false);
+        setIsConfirmSummaryOpen(true);
+        return;
+      }
+      if (
+        isRecurring &&
+        recurrenceOption === "Custom" &&
+        !isBookingCustomRecurrenceDateAllowed({
+          appointmentDate: selectedDate,
+          customRecurrenceDate: normalizedCustomRecurrenceDate,
+        })
+      ) {
+        toast.error(`Choose a custom recurrence date on or after ${getBookingCustomRecurrenceMinDate(selectedDate)}.`);
+        setIsBooking(false);
+        setIsConfirmSummaryOpen(true);
+        return;
+      }
       const recurrencePayload = isRecurring
         ? buildBookingRecurrencePayload({
             isRecurring,
             recurrenceOption,
-            customRecurrenceDate,
+            customRecurrenceDate: normalizedCustomRecurrenceDate,
             existingRecurrence: undefined,
           })
         : null;
       const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
+      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1647,6 +1748,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               paymentMethod,
@@ -1668,6 +1770,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               totalPaid: newTotalPaid,
@@ -1743,6 +1846,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || "",
               notes,
+              ...treatmentNotesUpdate,
               price: finalPrice,
               discount: Number(discount) || 0,
               status: autoStatus as any,
@@ -1772,6 +1876,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
                 notes,
+                ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
                 status: autoStatus,
                 paymentStatus: paymentStatus,
@@ -1814,6 +1919,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
                   notes,
+                  ...treatmentNotesUpdate,
                   price: finalPrice,
                   discount: Number(discount) || 0,
                   status: autoStatus as any,
@@ -1836,6 +1942,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
                 notes,
+                ...treatmentNotesUpdate,
                 price: finalPrice,
                 discount: Number(discount) || 0,
                 status: autoStatus as any,
@@ -1860,6 +1967,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             price: finalPrice,
             discount: Number(discount) || 0,
             notes,
+            ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
             totalPaid: amountPaid,
@@ -2255,6 +2363,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </div>
                       </div>
                     )}
+
+                    <CompactNotesField
+                      id="booking-treatment-notes"
+                      label="Treatment Notes"
+                      placeholder="Add treatment-specific notes..."
+                      value={treatmentNotes}
+                      onChange={setTreatmentNotes}
+                      disabled={isPatientReadonly}
+                      textareaClassName="min-h-[100px]"
+                    />
                   </div>
 
                   <div className="space-y-2">
@@ -2848,6 +2966,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedDate={selectedDate}
         selectedTime={selectedTime}
         duration={duration}
+        treatmentNotes={treatmentNotes}
         notes={notes}
         onNotesChange={setNotes}
         durationConflict={durationConflict}
@@ -2871,6 +2990,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onRecurrenceOptionChange={handleRecurrenceOptionChange}
         customRecurrenceDate={customRecurrenceDate}
         onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
+        onOpenCustomRecurrenceDatePicker={handleOpenCustomRecurrenceDatePicker}
+        isCustomRecurrenceDateLoading={isPreparingCustomRecurrenceDate}
         canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
           appointmentId: appointmentToEdit?.id,
           recurrenceState: bookingRecurrenceState,
@@ -2938,6 +3059,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedTime={selectedTime}
         duration={duration}
         dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"}
+        appointmentSource={isPublicBookingMode ? "cache" : "server"}
+        cachedAppointments={publicBlockingAppointments as any}
+      />
+
+      <DatePickerModal
+        open={isCustomRecurrenceDatePickerOpen}
+        onOpenChange={setIsCustomRecurrenceDatePickerOpen}
+        selectedDate={customRecurrenceDate || getBookingCustomRecurrenceDefaultDate(selectedDate)}
+        onDateSelect={(date) => handleCustomRecurrenceDateChange(formatBookingDateKey(date))}
+        doctorName={selectedDoctor}
+        patientId={selectedPatient}
+        selectedTime={selectedTime}
+        duration={duration}
+        minDate={getBookingCustomRecurrenceMinDate(selectedDate)}
+        title="Select Recurrence Date"
+        subtitle={selectedTime ? `Keeps ${formatTimeTo12h(selectedTime)} for ${duration} mins` : undefined}
+        disableDatesWithTimeConflict
+        timeConflictMessage="That date is already booked for this appointment time. Choose another date."
         appointmentSource={isPublicBookingMode ? "cache" : "server"}
         cachedAppointments={publicBlockingAppointments as any}
       />

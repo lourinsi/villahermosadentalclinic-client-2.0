@@ -20,6 +20,7 @@ import {
   formatBookingRecurringDate,
   getBookingRecurrenceState,
   getBookingRecurringNextDate,
+  getBookingTreatmentNotesValue,
   normalizeBookingHistoryStatus,
   isSignificantBookingPaymentStatus,
 } from "./sharedBookingLogic";
@@ -788,6 +789,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? latestStateForComparison.notes || (latestStateForComparison.status === 'cancelled' ? latestStateForComparison.cancellationReason || "" : "")
     : undefined;
   const displayedNotesText = displayedNotesComparisonText || "No additional notes provided for this snapshot.";
+  const displayedTreatmentNotesComparisonText = getBookingTreatmentNotesValue(displayedSnapshot);
+  const latestTreatmentNotesComparisonText = latestStateForComparison
+    ? getBookingTreatmentNotesValue(latestStateForComparison)
+    : undefined;
+  const displayedTreatmentNotesText = displayedTreatmentNotesComparisonText || "No treatment notes provided for this snapshot.";
 
   const statusCurrentChange = createCurrentFieldChange(
     "status",
@@ -880,6 +886,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     displayedNotesComparisonText || "No notes",
     latestNotesComparisonText || "No notes"
   );
+  const treatmentNotesCurrentChange = createCurrentFieldChange(
+    "treatment notes",
+    displayedTreatmentNotesComparisonText,
+    latestTreatmentNotesComparisonText,
+    displayedTreatmentNotesComparisonText || "No treatment notes",
+    latestTreatmentNotesComparisonText || "No treatment notes"
+  );
 
   const currentFieldChanges = [
     statusCurrentChange,
@@ -894,6 +907,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     totalPaidCurrentChange,
     cancellationReasonCurrentChange,
     notesCurrentChange,
+    treatmentNotesCurrentChange,
   ];
   const hasLaterChanges = Boolean(
     latestStateForComparison &&
@@ -1319,7 +1333,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </div>
               )}
 
-              {totalPaidAmount !== null ? (
+              {/* {totalPaidAmount !== null ? (
                 <div className="flex justify-between items-center pt-1.5 border-t border-slate-50">
                   <span className="inline-flex items-center gap-1.5 text-slate-400 font-bold text-[9px] uppercase tracking-wider">
                     Total Paid
@@ -1327,7 +1341,20 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </span>
                   <span className="font-black text-slate-800 text-[12px]">₱{Number(totalPaidAmount).toLocaleString()}</span>
                 </div>
-              ) : null}
+              ) : null} */}
+
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-2.5">
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <History className="w-2.5 h-2.5 text-blue-400" />
+                  <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest">Treatment Notes</Label>
+                  <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
+                </div>
+                <p className={`max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-[10px] font-medium leading-relaxed custom-scrollbar ${
+                  displayedTreatmentNotesComparisonText ? "text-slate-600" : "text-slate-400 italic"
+                }`}>
+                  {displayedTreatmentNotesText}
+                </p>
+              </div>
             </div>
           </div>
 

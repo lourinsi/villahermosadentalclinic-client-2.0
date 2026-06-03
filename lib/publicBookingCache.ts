@@ -271,6 +271,7 @@ export async function createPublicBookingAppointment({
   customType,
   doctor,
   notes,
+  treatmentNotes,
   price,
   discount = 0,
   status = CART_APPOINTMENT_STATUS,
@@ -289,6 +290,7 @@ export async function createPublicBookingAppointment({
   customType?: string;
   doctor: string;
   notes?: string;
+  treatmentNotes?: string;
   price?: number;
   discount?: number;
   status?: string;
@@ -327,6 +329,7 @@ export async function createPublicBookingAppointment({
     discount,
     doctor,
     notes: notes || "",
+    treatmentNotes: treatmentNotes || "",
     status,
     paymentStatus,
     paymentMethod,

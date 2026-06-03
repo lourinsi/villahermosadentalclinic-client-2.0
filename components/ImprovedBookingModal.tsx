@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,7 +26,10 @@ import useSharedBookingLogic, {
   PAST_APPOINTMENT_STATUS_VALUES,
   getPastAppointmentStatusOptions,
   findNextAvailableBookingSlot,
+  formatBookingDateKey,
   formatBookingDoctorName as formatDoctorName,
+  getBookingCustomRecurrenceDefaultDate,
+  getBookingCustomRecurrenceMinDate,
   formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
   getBookingAppointmentStatusConfig,
@@ -44,13 +48,16 @@ import useSharedBookingLogic, {
   getBookingEditDate,
   parseLocalDateOnly,
   getBookingEditTime,
+  getBookingTreatmentNotesValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   getBookingDoctorInitials as getDoctorInitials,
   fetchBookingRecurringDeletionItems,
   buildBookingRecurrencePayload,
+  buildBookingTreatmentNotesPayload,
   getBookingRecurrenceState,
+  isBookingCustomRecurrenceDateAllowed,
   hasActiveBookingRecurringChild,
   logBookingRecurringCancelPreview,
   normalizeBookingRecurringDeletionItems,
@@ -455,6 +462,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
+  const [treatmentNotes, setTreatmentNotes] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date>(() => toDate(defaultDate ?? new Date()));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
@@ -487,6 +495,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [isCustomRecurrenceDatePickerOpen, setIsCustomRecurrenceDatePickerOpen] = useState(false);
+  const [isPreparingCustomRecurrenceDate, setIsPreparingCustomRecurrenceDate] = useState(false);
   const [activeTourStepId, setActiveTourStepId] = useState(getCurrentTourStepId);
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [dailyAppointmentsDateKey, setDailyAppointmentsDateKey] = useState("");
@@ -893,10 +903,75 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     recurringAppointmentDeletionItems,
   ]);
 
+  const prepareCustomRecurrenceDate = useCallback(async () => {
+    recurrenceTouchedRef.current = true;
+    const fallbackDate = getBookingCustomRecurrenceDefaultDate(selectedDate);
+    let nextDate = fallbackDate;
+
+    if (selectedDoctor && selectedTime) {
+      setIsPreparingCustomRecurrenceDate(true);
+      try {
+        const slot = await findNextAvailableBookingSlot({
+          startDate: parseLocalDateOnly(fallbackDate) || new Date(`${fallbackDate}T00:00:00`),
+          doctorToCheck: selectedDoctor,
+          durationToCheck: duration,
+          patientToCheck: selectedPatient,
+          timeSlots: [selectedTime],
+          maxDaysToCheck: 90,
+          logPrefix: "ImprovedBookingModal Custom Recurrence",
+          availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+          localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+        });
+
+        if (slot) {
+          nextDate = formatBookingDateKey(slot.date);
+        } else {
+          toast.info("No free recurrence date was found for the same time. Choose an available date.");
+        }
+      } catch (err) {
+        console.warn("[ImprovedBookingModal] Could not preselect custom recurrence date:", err);
+      } finally {
+        setIsPreparingCustomRecurrenceDate(false);
+      }
+    }
+
+    setCustomRecurrenceDate(nextDate);
+    return nextDate;
+  }, [
+    duration,
+    isPublicBookingMode,
+    publicBlockingAppointments,
+    selectedDate,
+    selectedDoctor,
+    selectedPatient,
+    selectedTime,
+  ]);
+
+  const handleOpenCustomRecurrenceDatePicker = useCallback(async () => {
+    if (recurrenceOption !== "Custom") {
+      setRecurrenceOption("Custom");
+    }
+
+    if (!customRecurrenceDate) {
+      await prepareCustomRecurrenceDate();
+    }
+
+    setIsCustomRecurrenceDatePickerOpen(true);
+  }, [customRecurrenceDate, prepareCustomRecurrenceDate, recurrenceOption]);
+
   const handleRecurrenceOptionChange = useCallback((option: string) => {
     recurrenceTouchedRef.current = true;
     setRecurrenceOption(option);
-  }, []);
+
+    if (option === "Custom") {
+      void prepareCustomRecurrenceDate().then(() => {
+        setIsCustomRecurrenceDatePickerOpen(true);
+      });
+      return;
+    }
+
+    setCustomRecurrenceDate("");
+  }, [prepareCustomRecurrenceDate]);
 
   const handleCustomRecurrenceDateChange = useCallback((date: string) => {
     recurrenceTouchedRef.current = true;
@@ -1745,6 +1820,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Notes from history remain visible in the AppointmentHistoryView below,
       // but they are not auto-copied into the editable notes field.
       setNotes('');
+      setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
       setSelectedDate(toDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate })));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
@@ -1778,6 +1854,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
+      setTreatmentNotes('');
       setSelectedDate(toDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode })));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
@@ -2137,6 +2214,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
+      treatmentNotes,
       recurrence: isRecurring ? {
         option: recurrenceOption,
         customDate: customRecurrenceDate || null,
@@ -2156,15 +2234,38 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
+      const normalizedCustomRecurrenceDate = recurrenceOption === "Custom"
+        ? formatBookingDateKey(customRecurrenceDate)
+        : customRecurrenceDate;
+      if (isRecurring && recurrenceOption === "Custom" && !normalizedCustomRecurrenceDate) {
+        toast.error("Choose a valid custom recurrence date.");
+        setIsBooking(false);
+        setIsConfirmSummaryOpen(true);
+        return;
+      }
+      if (
+        isRecurring &&
+        recurrenceOption === "Custom" &&
+        !isBookingCustomRecurrenceDateAllowed({
+          appointmentDate: selectedDate,
+          customRecurrenceDate: normalizedCustomRecurrenceDate,
+        })
+      ) {
+        toast.error(`Choose a custom recurrence date on or after ${getBookingCustomRecurrenceMinDate(selectedDate)}.`);
+        setIsBooking(false);
+        setIsConfirmSummaryOpen(true);
+        return;
+      }
       const recurrencePayload = isRecurring
         ? buildBookingRecurrencePayload({
             isRecurring,
             recurrenceOption,
-            customRecurrenceDate,
+            customRecurrenceDate: normalizedCustomRecurrenceDate,
             existingRecurrence: undefined,
           })
         : null;
       const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
+      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
       
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
       const amountPaid = parseFloat(amountPaidRaw) || 0;
@@ -2225,6 +2326,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               paymentMethod,
@@ -2246,6 +2348,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               totalPaid: newTotalPaid,
@@ -2317,6 +2420,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || '',
               notes,
+              ...treatmentNotesUpdate,
               price: finalPrice,
               discount: Number(discount) || 0,
               status: autoStatus as any,
@@ -2346,6 +2450,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
                 notes,
+                ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
                 status: autoStatus,
                 paymentStatus: paymentStatus,
@@ -2388,6 +2493,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
                   notes,
+                  ...treatmentNotesUpdate,
                   price: finalPrice,
                   discount: Number(discount) || 0,
                   status: autoStatus as any,
@@ -2410,6 +2516,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
                 notes,
+                ...treatmentNotesUpdate,
                 price: finalPrice,
                 discount: Number(discount) || 0,
                 status: autoStatus as any,
@@ -2434,6 +2541,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             price: finalPrice,
             discount: Number(discount) || 0,
             notes,
+            ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
             totalPaid: amountPaid,
@@ -2974,9 +3082,9 @@ return (
                   </div>
 
                   {/* Financials & Duration */}
-                  <div className="grid grid-cols-1 gap-6 pt-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-1">
-                      <div className="rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                  <div className="grid grid-cols-1 gap-4 pt-2 lg:grid-cols-2">
+                    <div className="order-2 grid grid-cols-1 gap-4">
+                      <div className="flex min-h-[11rem] flex-col justify-between rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                             <Clock className="h-5 w-5" />
@@ -3001,8 +3109,7 @@ return (
                         </div>
                       </div>
 
-                      {canManagePricing && (
-                        <div className="rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                      <div className="flex min-h-[11rem] flex-col justify-between rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
                           <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
                               <Award className="h-5 w-5" />
@@ -3015,22 +3122,23 @@ return (
                               type="number"
                               value={discount}
                               onChange={(e) => setDiscount(e.target.value)}
+                              disabled={!canManagePricing}
                               className="h-12 rounded-2xl border-0 bg-gray-50 pl-8 pr-4 text-base font-black text-orange-600 shadow-none focus-visible:ring-0"
                             />
                           </div>
                         </div>
-                      )}
                     </div>
 
-                    {/* Blue Estimated Cost Card */}
-                    <div 
+                    <div className="order-1 grid grid-cols-1 gap-4">
+                      {/* Blue Estimated Cost Card */}
+                      <div 
                       onClick={(e) => {
                         if (isPriceEditable && e.target === e.currentTarget) setIsPriceEditable(false);
                       }}
-                      className="bg-blue-600 rounded-[2rem] p-8 text-white shadow-2xl shadow-blue-200/50 flex flex-col justify-between relative overflow-hidden cursor-default group"
+                      className="relative flex min-h-[11rem] cursor-default flex-col justify-between overflow-hidden rounded-[2rem] bg-blue-600 p-5 text-white shadow-2xl shadow-blue-200/50 group"
                     >
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
-                      <CreditCard className="absolute top-6 right-6 h-10 w-10 text-white/10" />
+                      <div className="absolute top-0 right-0 h-28 w-28 rounded-full bg-white/5 -mr-14 -mt-14 transition-transform group-hover:scale-110" />
+                      <CreditCard className="absolute top-5 right-5 h-9 w-9 text-white/10" />
                       
                       <div className="relative z-10">
                         <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest mb-1">Estimated Cost</p>
@@ -3051,7 +3159,7 @@ return (
                         </div>
                       </div>
 
-                      <div className="relative z-10 mt-8 flex flex-col items-end">
+                        <div className="relative z-10 mt-4 flex flex-col items-end">
                         {/* Upper small text logic */}
                         {isPriceEditable ? (
                           <p className="text-xs text-blue-100 font-bold opacity-90 mb-2 bg-white/10 px-3 py-1 rounded-full">
@@ -3075,11 +3183,26 @@ return (
                               autoFocus
                             />
                           ) : (
-                            <span className="text-5xl font-black tracking-tighter">
+                            <span className="text-4xl font-black tracking-tighter">
                               {Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
                             </span>
                           )}
                         </div>
+                      </div>
+                    </div>
+
+                      <div className="flex min-h-[11rem] flex-col rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                        <Label htmlFor="improved-booking-treatment-notes" className="text-[11px] font-black uppercase tracking-widest text-gray-500">
+                          Treatment Notes
+                        </Label>
+                        <Textarea
+                          id="improved-booking-treatment-notes"
+                          value={treatmentNotes}
+                          onChange={(event) => setTreatmentNotes(event.target.value)}
+                          placeholder="Add treatment-specific notes..."
+                          disabled={isPatientReadonly}
+                          className="mt-4 min-h-0 flex-1 resize-none rounded-2xl border-0 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 shadow-none focus-visible:ring-2 focus-visible:ring-blue-200 focus-visible:ring-offset-0"
+                        />
                       </div>
                     </div>
                   </div>
@@ -3377,6 +3500,7 @@ return (
         selectedDate={selectedDate}
         selectedTime={selectedTime}
         duration={duration}
+        treatmentNotes={treatmentNotes}
         notes={notes}
         onNotesChange={setNotes}
         durationConflict={durationConflict}
@@ -3400,6 +3524,8 @@ return (
         onRecurrenceOptionChange={handleRecurrenceOptionChange}
         customRecurrenceDate={customRecurrenceDate}
         onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
+        onOpenCustomRecurrenceDatePicker={handleOpenCustomRecurrenceDatePicker}
+        isCustomRecurrenceDateLoading={isPreparingCustomRecurrenceDate}
         canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
           appointmentId: appointmentToEdit?.id,
           recurrenceState: bookingRecurrenceState,
@@ -3440,6 +3566,23 @@ return (
       />
 
       <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={handleManualDateSelect} doctorName={selectedDoctor} patientId={selectedPatient} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <DatePickerModal
+        open={isCustomRecurrenceDatePickerOpen}
+        onOpenChange={setIsCustomRecurrenceDatePickerOpen}
+        selectedDate={customRecurrenceDate || getBookingCustomRecurrenceDefaultDate(selectedDate)}
+        onDateSelect={(date) => handleCustomRecurrenceDateChange(formatBookingDateKey(date))}
+        doctorName={selectedDoctor}
+        patientId={selectedPatient}
+        selectedTime={selectedTime}
+        duration={duration}
+        minDate={getBookingCustomRecurrenceMinDate(selectedDate)}
+        title="Select Recurrence Date"
+        subtitle={selectedTime ? `Keeps ${formatTimeTo12h(selectedTime)} for ${duration} mins` : undefined}
+        disableDatesWithTimeConflict
+        timeConflictMessage="That date is already booked for this appointment time. Choose another date."
+        appointmentSource={isPublicBookingMode ? "cache" : "server"}
+        cachedAppointments={publicBlockingAppointments as any}
+      />
       <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={handleManualTimeSelect} onDateChange={handleManualDateSelect} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
     </>
   );
