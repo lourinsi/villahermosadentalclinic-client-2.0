@@ -36,6 +36,17 @@ export interface Appointment {
   recurrence?: any;
   isRecurring?: boolean;
   recurringSeriesId?: string | null;
+  recurringSeriesRootAppointmentId?: string | null;
+  recurringSeriesStatus?: string | null;
+  recurringSeriesActiveOccurrenceCount?: number;
+  recurringSeriesActiveChildCount?: number;
+  hasActiveRecurringChildren?: boolean;
+  recurringOccurrenceId?: string | null;
+  recurringOccurrenceStatus?: string | null;
+  recurringOccurrenceSequence?: number | null;
+  recurringParentAppointmentId?: string | null;
+  isRecurringSeriesHead?: boolean;
+  isRecurringGeneratedAppointment?: boolean;
   patientDateOfBirth?: string;
   patientDob?: string;
   patientBirthDate?: string;
@@ -100,16 +111,25 @@ export const useAppointments = (
       try {
         setIsLoading(true);
         const queryParams = new URLSearchParams();
-        if (filters?.startDate) queryParams.append("startDate", filters.startDate);
-        if (filters?.endDate) queryParams.append("endDate", filters.endDate);
-        if (filters?.search) queryParams.append("search", filters.search);
-        if (filters?.doctor) queryParams.append("doctor", filters.doctor);
-        if (filters?.patientId) queryParams.append("patientId", filters.patientId);
-        if (filters?.parentId) queryParams.append("parentId", filters.parentId);
-        if (filters?.type) queryParams.append("type", filters.type);
-        if (filters?.status) queryParams.append("status", filters.status);
-        if (filters?.anonymize) queryParams.append("anonymize", "true");
-        if (filters?.includeUnpaid) queryParams.append("includeUnpaid", "true");
+        const appendQueryParam = (key: string, value?: string | boolean) => {
+          if (typeof value === 'string' && value.trim() !== '' && value !== 'all') {
+            queryParams.append(key, value.trim());
+          }
+          if (value === true) {
+            queryParams.append(key, 'true');
+          }
+        };
+
+        appendQueryParam("startDate", filters?.startDate);
+        appendQueryParam("endDate", filters?.endDate);
+        appendQueryParam("search", filters?.search);
+        appendQueryParam("doctor", filters?.doctor);
+        appendQueryParam("patientId", filters?.patientId);
+        appendQueryParam("parentId", filters?.parentId);
+        appendQueryParam("type", filters?.type);
+        appendQueryParam("status", filters?.status);
+        appendQueryParam("anonymize", filters?.anonymize);
+        appendQueryParam("includeUnpaid", filters?.includeUnpaid);
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
         

@@ -312,7 +312,7 @@ const getRecurringCreatedFromDate = (recurrence?: any, currentDate?: unknown) =>
 const getRecurringCreatedFromDateFromText = (value?: unknown) => {
   const text = String(value || "");
   const match =
-    /Created from recurring schedule from\s+([^.\n]+)/i.exec(text) ||
+    /Created from (?:recurring|repeating) schedule from\s+([^.\n]+)/i.exec(text) ||
     /Created from\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i.exec(text);
 
   return match ? formatBookingDateKey(match[1]) : "";

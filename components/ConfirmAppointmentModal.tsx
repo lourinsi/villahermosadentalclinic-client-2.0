@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,10 +9,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AlertCircle, Calendar as CalendarIcon, Clock, Loader2 } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
 import {
-  RECURRING_APPOINTMENT_OPTIONS,
+  BOOKING_REPEAT_NONE_OPTION,
+  BOOKING_REPEAT_COUNT_OPTIONS,
+  formatBookingDateKey,
+  getBookingRepeatOptionLabel,
+  getBookingRepeatOptionItems,
   parseLocalDateOnly,
   type BookingRecurringDeletionItem,
 } from "./sharedBookingLogic";
+import { RecurringScheduleChangeDialog } from "./RecurringScheduleChangeDialog";
 
 export type RecurringAppointmentDeletionItem = BookingRecurringDeletionItem;
 
@@ -20,6 +26,8 @@ interface ConfirmAppointmentModalProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
   isBooking: boolean;
+  shouldWarnBeforeRecurringScheduleChange?: boolean;
+  recurringScheduleChangeMode?: "cancel" | "update";
 
   // Patient info
   patientName: string;
@@ -66,11 +74,12 @@ interface ConfirmAppointmentModalProps {
   onRecurringChange: (isRecurring: boolean) => void;
   recurrenceOption: string;
   onRecurrenceOptionChange: (option: string) => void;
+  repeatCount: number;
+  onRepeatCountChange: (count: number) => void;
   customRecurrenceDate: string;
   onCustomRecurrenceDateChange: (date: string) => void;
   onOpenCustomRecurrenceDatePicker?: () => void;
   isCustomRecurrenceDateLoading?: boolean;
-  canCreateRecurringAppointment?: boolean;
   recurringAppointmentDate?: string | null;
   recurringAppointmentDates?: string[];
   recurringAppointmentDeletionItems?: RecurringAppointmentDeletionItem[];
@@ -127,16 +136,19 @@ export function ConfirmAppointmentModal({
   onRecurringChange,
   recurrenceOption,
   onRecurrenceOptionChange,
+  repeatCount,
+  onRepeatCountChange,
   customRecurrenceDate,
   onCustomRecurrenceDateChange,
   onOpenCustomRecurrenceDatePicker,
   isCustomRecurrenceDateLoading = false,
-  canCreateRecurringAppointment = true,
   recurringAppointmentDate,
   recurringAppointmentDates = [],
   recurringAppointmentDeletionItems = [],
   selectedRecurringAppointmentDeletionIds = [],
   onRecurringAppointmentDeletionIdsChange,
+  shouldWarnBeforeRecurringScheduleChange: shouldWarnRecurringScheduleChangeProp,
+  recurringScheduleChangeMode,
   getPersonInitials,
   getDoctorInitials,
   getBookingStatusLabel,
@@ -149,15 +161,181 @@ export function ConfirmAppointmentModal({
   isCartAppointmentStatus,
   userRole,
 }: ConfirmAppointmentModalProps) {
+  const [isRecurringScheduleChangeOpen, setIsRecurringScheduleChangeOpen] = useState(false);
+
+  const formatRecurringDebugItem = (item: any) => ({
+    id: item.id,
+    date: item.date,
+    time: item.time,
+    status: item.status,
+    paymentStatus: item.paymentStatus,
+    recurringSeriesId: item.recurringSeriesId,
+    recurrenceId: item.recurringId ?? item.seriesId ?? item.recurrenceId,
+    sequence: item.sequence,
+    recurrenceOption: item.recurrenceOption,
+    isHead: item.sequence === 1 || item.isHead,
+  });
+
+  // Log recurrence data when modal opens or recurrence changes
+  useEffect(() => {
+    if (!open) return;
+
+    console.log(`[CONFIRM MODAL] Modal opened with recurrence state:`, {
+      isRecurring,
+      recurrenceOption,
+      repeatCount,
+      customRecurrenceDate,
+      selectedDate: selectedDate.toISOString().split('T')[0],
+      recurringAppointmentDate,
+      recurringAppointmentDates,
+      selectedRecurringAppointmentDeletionIds,
+    });
+
+    if (recurringAppointmentDate) {
+      console.log(`[CONFIRM MODAL] Recurring appointment head date:`, recurringAppointmentDate);
+    }
+
+    if (recurringAppointmentDates?.length) {
+      console.log(`[CONFIRM MODAL] Recurring appointment dates:`, recurringAppointmentDates);
+    }
+
+    if (recurringAppointmentDeletionItems.length > 0) {
+      console.log(
+        `[CONFIRM MODAL] Recurring deletion items (${recurringAppointmentDeletionItems.length} total):`,
+        recurringAppointmentDeletionItems.map(formatRecurringDebugItem)
+      );
+    }
+
+    // Try to extract series IDs from the items
+    const seriesIds = [...new Set(
+      recurringAppointmentDeletionItems
+        .map((item: any) => item.recurringSeriesId)
+        .filter(Boolean)
+    )];
+    if (seriesIds.length > 0) {
+      console.log(`[CONFIRM MODAL] Series IDs found:`, seriesIds);
+    }
+  }, [
+    open,
+    isRecurring,
+    recurrenceOption,
+    recurringAppointmentDeletionItems,
+    recurringAppointmentDate,
+    recurringAppointmentDates,
+    selectedRecurringAppointmentDeletionIds,
+    selectedDate,
+  ]);
+
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
   const treatmentNotesText = String(treatmentNotes || "").trim();
   const customRecurrenceDateValue = parseLocalDateOnly(customRecurrenceDate);
   const customRecurrenceDateLabel = customRecurrenceDateValue
     ? customRecurrenceDateValue.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : "Choose recurrence date";
+    : "Choose repeat date";
   const inheritedRecurrenceTimeLabel = selectedTime ? formatTimeTo12h(selectedTime) : "Same time";
+  const repeatOptionItems = getBookingRepeatOptionItems(selectedDate);
+  const repeatSelectValue = isRecurring ? recurrenceOption : BOOKING_REPEAT_NONE_OPTION;
+  const displayedRepeatOptionItems = repeatOptionItems.some((item) => item.value === repeatSelectValue)
+    ? repeatOptionItems
+    : [
+        ...repeatOptionItems,
+        { value: repeatSelectValue, label: getBookingRepeatOptionLabel(repeatSelectValue, selectedDate) },
+      ];
+  const handleRepeatSelectChange = (value: string) => {
+    console.log(`[CONFIRM MODAL] Recurrence changed to: ${value}`);
+    console.log(`[CONFIRM MODAL] Repeat option chosen: ${
+      value === BOOKING_REPEAT_NONE_OPTION ? "DO NOT REPEAT" : value
+    }`);
+    if (value === BOOKING_REPEAT_NONE_OPTION) {
+      console.log(`[CONFIRM MODAL] Disabling recurrence`);
+      onRecurringChange(false);
+      onRepeatCountChange(1);
+      onCustomRecurrenceDateChange("");
+      return;
+    }
+
+    console.log(`[CONFIRM MODAL] Enabling recurrence with option: ${value}`);
+    onRecurringChange(true);
+    onRecurrenceOptionChange(value);
+    if (value !== "Custom") {
+      onCustomRecurrenceDateChange("");
+    }
+  };
+  const futureRecurringChangeItems = useMemo(() => {
+    const selectedDateKey = formatBookingDateKey(selectedDate);
+    const inactiveStatuses = new Set(["cancelled", "canceled", "deleted", "stopped"]);
+    const seen = new Set<string>();
+
+    return recurringAppointmentDeletionItems
+      .filter((item) => {
+        const date = formatBookingDateKey(item.date);
+        const status = String(item.status || "").trim().toLowerCase();
+        if (!date || date <= selectedDateKey || inactiveStatuses.has(status)) return false;
+
+        const key = item.id || `${date}|${item.time || ""}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((left, right) => {
+        const dateCompare = String(left.date || "").localeCompare(String(right.date || ""));
+        if (dateCompare !== 0) return dateCompare;
+        return String(left.time || "").localeCompare(String(right.time || ""));
+      });
+  }, [recurringAppointmentDeletionItems, selectedDate]);
+
+  const shouldWarnRecurringScheduleChange =
+    typeof shouldWarnRecurringScheduleChangeProp === "boolean"
+      ? shouldWarnRecurringScheduleChangeProp
+      : isRecurring && futureRecurringChangeItems.length > 0;
+
+  const isRepeatNoneSelected = !isRecurring || recurrenceOption === BOOKING_REPEAT_NONE_OPTION;
+  const recurringScheduleChangeDialogMode =
+    recurringScheduleChangeMode ??
+    (futureRecurringChangeItems.length > 0
+      ? isRepeatNoneSelected
+        ? "update"
+        : "cancel"
+      : "update");
+
+  const handleConfirmClick = () => {
+    if (shouldWarnRecurringScheduleChange) {
+      console.log(`[CONFIRM MODAL] Showing recurring schedule change dialog`);
+      console.log(`[CONFIRM MODAL] Future recurring items to be affected:`, 
+        futureRecurringChangeItems.map((item: any) => ({
+          id: item.id,
+          date: item.date,
+          time: item.time,
+          status: item.status,
+          // Backend populated fields:
+          recurringSeriesId: item.recurringSeriesId,
+          sequence: item.sequence,
+        }))
+      );
+      setIsRecurringScheduleChangeOpen(true);
+      return;
+    }
+
+    console.log(`[CONFIRM MODAL] Repeat option chosen on confirm: ${
+      isRepeatNoneSelected ? "DO NOT REPEAT" : recurrenceOption
+    }`);
+
+    console.log(`[CONFIRM MODAL] Confirming appointment with recurrence:`, {
+      isRecurring,
+      recurrenceOption,
+      repeatCount,
+      customRecurrenceDate,
+      recurringAppointmentDate,
+      recurringAppointmentDates,
+      selectedRecurringAppointmentDeletionIds,
+      deletionItemsCount: recurringAppointmentDeletionItems.length,
+      deletionItems: recurringAppointmentDeletionItems.map(formatRecurringDebugItem),
+    });
+    return onConfirm();
+  };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
         <DialogHeader className="border-b bg-gray-50 px-6 py-5">
@@ -282,83 +460,74 @@ export function ConfirmAppointmentModal({
             textareaClassName="min-h-[58px] resize-none rounded-xl border border-gray-100 bg-white p-3 text-sm font-medium transition-all focus:border-blue-500 focus:bg-white"
           />
 
-          {canCreateRecurringAppointment ? (
-            <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Recurring appointment</p>
-                  <p className="text-sm text-gray-500">Choose whether this booking should repeat.</p>
-                </div>
-                <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={isRecurring}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      onRecurringChange(checked);
-                      if (!checked) {
-                        onCustomRecurrenceDateChange("");
-                      }
-                    }}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  Yes
-                </label>
-              </div>
+          <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4">
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm font-semibold text-gray-700">Repeat</Label>
+                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_88px] gap-2">
+                  <Select value={repeatSelectValue} onValueChange={handleRepeatSelectChange}>
+                    <SelectTrigger className="h-10 w-full rounded-full border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-2xl border-none shadow-2xl">
+                      {displayedRepeatOptionItems.map((option) => (
+                        <SelectItem key={option.value} value={option.value} className="rounded-xl my-1 mx-2">
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-              {isRecurring ? (
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700">Repeat interval</Label>
-                    <Select value={recurrenceOption} onValueChange={onRecurrenceOptionChange}>
+                  {isRecurring ? (
+                    <Select value={`${repeatCount || 1}`} onValueChange={(value) => onRepeatCountChange(Number(value) || 1)}>
                       <SelectTrigger className="h-10 w-full rounded-full border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        {RECURRING_APPOINTMENT_OPTIONS.map((option: string) => (
-                          <SelectItem key={option} value={option} className="rounded-xl my-1 mx-2">
-                            {option}
+                      <SelectContent className="min-w-[88px] rounded-2xl border-none shadow-2xl">
+                        {BOOKING_REPEAT_COUNT_OPTIONS.map((count) => (
+                          <SelectItem key={count} value={`${count}`} className="rounded-xl my-1 mx-2">
+                            {count}x
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  {recurrenceOption === "Custom" && (
-                    <div>
-                      <Label className="text-sm font-semibold text-gray-700">Custom recurrence date</Label>
-                      <button
-                        type="button"
-                        onClick={onOpenCustomRecurrenceDatePicker}
-                        disabled={isCustomRecurrenceDateLoading || !onOpenCustomRecurrenceDatePicker}
-                        className="mt-2 flex min-h-[58px] w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                            <CalendarIcon className="h-5 w-5" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-black text-gray-900">{customRecurrenceDateLabel}</span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                              <Clock className="h-3.5 w-3.5" />
-                              {inheritedRecurrenceTimeLabel} for {duration} mins
-                            </span>
-                          </span>
-                        </span>
-                        {isCustomRecurrenceDateLoading ? (
-                          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600" />
-                        ) : (
-                          <CalendarIcon className="h-5 w-5 shrink-0 text-gray-400" />
-                        )}
-                      </button>
-                    </div>
+                  ) : (
+                    <div className="h-10 rounded-full border border-transparent" />
                   )}
                 </div>
-              ) : (
-                <p className="mt-4 text-sm text-gray-500">This appointment will not recur.</p>
+              </div>
+
+              {isRecurring && recurrenceOption === "Custom" && (
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">Custom repeat date</Label>
+                  <button
+                    type="button"
+                    onClick={onOpenCustomRecurrenceDatePicker}
+                    disabled={isCustomRecurrenceDateLoading || !onOpenCustomRecurrenceDatePicker}
+                    className="mt-2 flex min-h-[58px] w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                        <CalendarIcon className="h-5 w-5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black text-gray-900">{customRecurrenceDateLabel}</span>
+                        <span className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                          <Clock className="h-3.5 w-3.5" />
+                          {inheritedRecurrenceTimeLabel} for {duration} mins
+                        </span>
+                      </span>
+                    </span>
+                    {isCustomRecurrenceDateLoading ? (
+                      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600" />
+                    ) : (
+                      <CalendarIcon className="h-5 w-5 shrink-0 text-gray-400" />
+                    )}
+                  </button>
+                </div>
               )}
             </div>
-          ) : null}
+          </div>
 
           {/* Conflict warnings */}
           {bookingConflictWarnings.length > 0 && (
@@ -451,12 +620,22 @@ export function ConfirmAppointmentModal({
           <Button data-tour-id="booking-summary-back" variant="outline" onClick={() => onOpenChange(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
             Back to Edit
           </Button>
-          <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={onConfirm} disabled={isBooking}>
+          <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmClick} disabled={isBooking}>
             {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
             {isCartAppointmentStatus(appointmentStatus) ? "Add to Cart" : "Confirm & Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <RecurringScheduleChangeDialog
+      open={isRecurringScheduleChangeOpen}
+      onOpenChange={setIsRecurringScheduleChangeOpen}
+      onConfirm={onConfirm}
+      isProcessing={isBooking}
+      items={futureRecurringChangeItems}
+      formatTimeTo12h={formatTimeTo12h}
+      mode={recurringScheduleChangeDialogMode}
+    />
+    </>
   );
 }

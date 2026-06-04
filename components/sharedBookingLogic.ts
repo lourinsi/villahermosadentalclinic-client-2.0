@@ -204,8 +204,14 @@ export type BookingSlot = {
   time: string;
 };
 
-export const RECURRING_APPOINTMENT_OPTIONS = ["1 month", "3 months", "6 months", "Custom"] as const;
-export type RecurringAppointmentOption = typeof RECURRING_APPOINTMENT_OPTIONS[number];
+export const BOOKING_REPEAT_NONE_OPTION = "Does Not Repeat" as const;
+export const RECURRING_APPOINTMENT_OPTIONS = ["Weekly", "Monthly", "Every 2 months", "Every 3 months", "Every 6 months", "Custom"] as const;
+export const BOOKING_REPEAT_COUNT_OPTIONS = [1, 2, 3, 4] as const;
+export type BookingRepeatCount = typeof BOOKING_REPEAT_COUNT_OPTIONS[number];
+const LEGACY_RECURRING_APPOINTMENT_OPTIONS = ["1 month", "3 months", "6 months"] as const;
+export type RecurringAppointmentOption =
+  | typeof RECURRING_APPOINTMENT_OPTIONS[number]
+  | typeof LEGACY_RECURRING_APPOINTMENT_OPTIONS[number];
 
 export type BookingRecurrencePayload = {
   enabled: boolean;
@@ -213,6 +219,7 @@ export type BookingRecurrencePayload = {
   customDate?: string | null;
   generatedAppointmentId?: string | null;
   generatedAppointmentDate?: string | null;
+  repeatCount?: BookingRepeatCount;
   generatedFromId?: string | null;
   generatedFromDate?: string | null;
   sourceAppointmentId?: string | null;
@@ -228,6 +235,7 @@ export type BookingRecurrenceState = {
   isRecurring: boolean;
   recurrenceOption: RecurringAppointmentOption;
   customRecurrenceDate: string;
+  repeatCount: BookingRepeatCount;
   generatedAppointmentId?: string | null;
   generatedAppointmentDate?: string | null;
   recurrence?: BookingRecurrencePayload | null;
@@ -238,24 +246,54 @@ export type BookingRecurringDeletionItem = {
   date: string;
   time?: string | null;
   status?: string | null;
+  paymentStatus?: string | null;
   generatedFromId?: string | null;
 };
 
-const DEFAULT_RECURRING_APPOINTMENT_OPTION: RecurringAppointmentOption = RECURRING_APPOINTMENT_OPTIONS[0];
+const DEFAULT_RECURRING_APPOINTMENT_OPTION: RecurringAppointmentOption = "Monthly";
 
 const isRecord = (value: unknown): value is Record<string, any> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 const normalizeRecurrenceOption = (option?: unknown): RecurringAppointmentOption => {
   const value = String(option || "").trim();
-  return RECURRING_APPOINTMENT_OPTIONS.includes(value as RecurringAppointmentOption)
-    ? (value as RecurringAppointmentOption)
-    : DEFAULT_RECURRING_APPOINTMENT_OPTION;
+  const lowerValue = value.toLowerCase();
+  const aliases: Record<string, RecurringAppointmentOption> = {
+    weekly: "Weekly",
+    "every week": "Weekly",
+    monthly: "Monthly",
+    "1 month": "Monthly",
+    "every month": "Monthly",
+    "2 months": "Every 2 months",
+    "every 2 months": "Every 2 months",
+    "3 months": "Every 3 months",
+    "every 3 months": "Every 3 months",
+    "6 months": "Every 6 months",
+    "every 6 months": "Every 6 months",
+    custom: "Custom",
+  };
+
+  if (aliases[lowerValue]) return aliases[lowerValue];
+  if (RECURRING_APPOINTMENT_OPTIONS.includes(value as typeof RECURRING_APPOINTMENT_OPTIONS[number])) {
+    return value as RecurringAppointmentOption;
+  }
+  if (LEGACY_RECURRING_APPOINTMENT_OPTIONS.includes(value as typeof LEGACY_RECURRING_APPOINTMENT_OPTIONS[number])) {
+    return value as RecurringAppointmentOption;
+  }
+
+  return DEFAULT_RECURRING_APPOINTMENT_OPTION;
 };
 
 const normalizeRecurrenceDate = (date?: unknown) => {
   const value = String(date || "").trim();
   return formatBookingDateKey(value);
+};
+
+export const normalizeBookingRepeatCount = (value?: unknown): BookingRepeatCount => {
+  const count = Number(value);
+  return BOOKING_REPEAT_COUNT_OPTIONS.includes(count as BookingRepeatCount)
+    ? (count as BookingRepeatCount)
+    : 1;
 };
 
 const addMonthsClamped = (date: Date, months: number) => {
@@ -265,6 +303,28 @@ const addMonthsClamped = (date: Date, months: number) => {
   const day = Math.min(date.getDate(), lastDayOfTargetMonth);
   return new Date(targetYear, targetMonth, day);
 };
+
+export function getBookingRepeatOptionItems(appointmentDate?: Date | string | null) {
+  return [
+    { value: BOOKING_REPEAT_NONE_OPTION, label: BOOKING_REPEAT_NONE_OPTION },
+    { value: "Weekly", label: "Weekly" },
+    { value: "Monthly", label: "Monthly" },
+    { value: "Every 2 months", label: "Every 2 months" },
+    { value: "Every 3 months", label: "Every 3 months" },
+    { value: "Every 6 months", label: "Every 6 months" },
+    { value: "Custom", label: "Custom..." },
+  ] as Array<{ value: typeof BOOKING_REPEAT_NONE_OPTION | RecurringAppointmentOption; label: string }>;
+}
+
+export function getBookingRepeatOptionLabel(
+  recurrenceOption?: string | null,
+  appointmentDate?: Date | string | null
+) {
+  const option = normalizeRecurrenceOption(recurrenceOption);
+  const optionItem = getBookingRepeatOptionItems(appointmentDate).find((item) => item.value === option);
+  if (optionItem) return optionItem.label;
+  return option;
+}
 
 export function normalizeBookingRecurrence(
   recurrence?: unknown,
@@ -283,6 +343,7 @@ export function normalizeBookingRecurrence(
       enabled: false,
       option: normalizeRecurrenceOption(fallbackRecord.option),
       customDate: normalizeRecurrenceDate(fallbackRecord.customDate) || null,
+      repeatCount: normalizeBookingRepeatCount(fallbackRecord.repeatCount),
     };
   }
 
@@ -300,6 +361,7 @@ export function normalizeBookingRecurrence(
     enabled,
     option,
     customDate: customDate || null,
+    repeatCount: normalizeBookingRepeatCount(record.repeatCount ?? fallbackRecord.repeatCount),
     generatedAppointmentId:
       record.generatedAppointmentId ?? fallbackRecord.generatedAppointmentId ?? null,
     generatedAppointmentDate:
@@ -376,6 +438,7 @@ export function getBookingRecurrenceState(
     isRecurring: normalized ? Boolean(normalized.enabled) : Boolean(recurringFlag),
     recurrenceOption: normalizeRecurrenceOption(normalized?.option),
     customRecurrenceDate: normalizeRecurrenceDate(normalized?.customDate),
+    repeatCount: normalizeBookingRepeatCount(normalized?.repeatCount),
     generatedAppointmentId: normalized?.generatedAppointmentId || null,
     generatedAppointmentDate: normalized?.generatedAppointmentDate || null,
     recurrence: normalized,
@@ -405,11 +468,12 @@ export function normalizeBookingRecurringDeletionItems(
 
       map.set(id ? `id:${id}` : `date:${date}:${time || "no-time"}`, {
         ...item,
-        id: id || undefined,
-        date,
-        time: time || undefined,
-        generatedFromId: item.generatedFromId || undefined,
-      });
+      id: id || undefined,
+      date,
+      time: time || undefined,
+      paymentStatus: item.paymentStatus || undefined,
+      generatedFromId: item.generatedFromId || undefined,
+    });
       return map;
     }, new Map<string, BookingRecurringDeletionItem>()).values()
   );
@@ -424,6 +488,7 @@ export function mapBookingRecurringChainResponse(data: unknown): BookingRecurrin
       date: String(appointment?.date || "").trim(),
       time: String(appointment?.time || "").trim() || undefined,
       status: String(appointment?.status || "").trim() || undefined,
+      paymentStatus: String(appointment?.paymentStatus || "").trim() || undefined,
       generatedFromId: String(
         appointment?.recurrence?.generatedFromId ||
         appointment?.recurrence?.sourceAppointmentId ||
@@ -474,7 +539,12 @@ export async function fetchBookingRecurringDeletionItems({
       return directItems;
     }
 
-    return mapBookingRecurringChainResponse(json.data);
+    const mapped = mapBookingRecurringChainResponse(json.data);
+    console.info("[Recurring Cancel] recurrence-chain fetched and mapped", {
+      appointmentId: appointment.id,
+      items: mapped,
+    });
+    return mapped;
   } catch (error) {
     console.warn("[Recurring Cancel] recurrence-chain fetch failed", {
       appointmentId: appointment.id,
@@ -571,11 +641,20 @@ export function getBookingRecurringNextDate({
   const sourceDate = parseLocalDateOnly(appointmentDate);
   if (!sourceDate) return "";
 
-  const monthsByOption: Record<RecurringAppointmentOption, number> = {
+  if (option === "Weekly") {
+    const targetDate = new Date(sourceDate);
+    targetDate.setDate(sourceDate.getDate() + 7);
+    return formatBookingDateKey(targetDate);
+  }
+
+  const monthsByOption: Partial<Record<RecurringAppointmentOption, number>> = {
+    Monthly: 1,
+    "Every 2 months": 2,
+    "Every 3 months": 3,
+    "Every 6 months": 6,
     "1 month": 1,
     "3 months": 3,
     "6 months": 6,
-    Custom: 1,
   };
 
   return formatBookingDateKey(addMonthsClamped(sourceDate, monthsByOption[option] || 1));
@@ -635,22 +714,26 @@ export function buildBookingRecurrencePayload({
   isRecurring,
   recurrenceOption,
   customRecurrenceDate,
+  repeatCount,
   existingRecurrence,
 }: {
   isRecurring: boolean;
   recurrenceOption?: string | null;
   customRecurrenceDate?: string | null;
+  repeatCount?: unknown;
   existingRecurrence?: unknown;
 }): BookingRecurrencePayload {
   const existing = normalizeBookingRecurrence(existingRecurrence);
   const option = normalizeRecurrenceOption(recurrenceOption ?? existing?.option);
   const customDate = normalizeRecurrenceDate(customRecurrenceDate ?? existing?.customDate);
+  const normalizedRepeatCount = normalizeBookingRepeatCount(repeatCount ?? existing?.repeatCount);
 
   return {
     ...(existing || {}),
     enabled: isRecurring,
     option,
     customDate: customDate || null,
+    repeatCount: normalizedRepeatCount,
   };
 }
 
@@ -678,22 +761,22 @@ export function getBookingRecurringDescription({
     return "One-time appointment";
   }
 
-  const normalizedOption = String(recurrenceOption || "").trim();
-  if (normalizedOption.toLowerCase() === "custom") {
+  const option = normalizeRecurrenceOption(recurrenceOption);
+  if (option === "Custom") {
     if (customRecurrenceDate) {
-      const date = new Date(customRecurrenceDate);
-      if (!Number.isNaN(date.getTime())) {
-        return `Reoccurs on ${date.toLocaleDateString("en-US", {
+      const date = parseLocalDateOnly(customRecurrenceDate);
+      if (date) {
+        return `Repeats on ${date.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
         })}`;
       }
     }
-    return "Reoccurs on a custom date";
+    return "Repeats on a custom date";
   }
 
-  return `Reoccurs every ${normalizedOption}`;
+  return `Repeats ${getBookingRepeatOptionLabel(option)}`;
 }
 
 export function getBookingAppointmentTypeIndex(typeName: string): number {
@@ -1324,6 +1407,27 @@ export function getBookingCancellationConfig({
   return {
     isCancelled,
     canCancelAppointment: Boolean(appointmentToEdit) && !isCancelled,
+  };
+}
+
+export function getBookingCancelDialogConfig({
+  appointmentToEdit,
+  recurringAppointmentDeletionItems = [],
+  selectedRecurringAppointmentDeletionIds = [],
+}: {
+  appointmentToEdit?: any;
+  recurringAppointmentDeletionItems?: BookingRecurringDeletionItem[];
+  selectedRecurringAppointmentDeletionIds?: string[];
+}) {
+  return {
+    mode: "cancel" as const,
+    appointment: appointmentToEdit || null,
+    recurringAppointmentDeletionItems,
+    selectedRecurringAppointmentDeletionIds,
+    title: "Cancel Appointment?",
+    description: "This releases the time slot. This action is permanent.",
+    cancelLabel: "No, Keep It",
+    confirmLabel: "Yes, Cancel",
   };
 }
 

@@ -96,8 +96,90 @@ const resolveImageSource = (source?: string) => {
 
 const getRecurringAppointmentIconVariant = (appointment: Appointment): "source" | "generated" | null => {
   const recurrence = appointment.recurrence || {};
+  const appointmentId = String(appointment.id || "").trim();
+  const occurrenceSequence =
+    appointment.recurringOccurrenceSequence != null
+      ? Number(appointment.recurringOccurrenceSequence)
+      : recurrence?.recurringOccurrenceSequence != null
+        ? Number(recurrence.recurringOccurrenceSequence)
+        : null;
+  const parentAppointmentId = String(
+    appointment.recurringParentAppointmentId ||
+      recurrence?.recurringParentAppointmentId ||
+      recurrence?.parentAppointmentId ||
+      ""
+  ).trim();
+  const rootAppointmentId = String(
+    appointment.recurringSeriesRootAppointmentId ||
+      recurrence?.recurringSeriesRootAppointmentId ||
+      recurrence?.rootAppointmentId ||
+      ""
+  ).trim();
+  const recurringSeriesStatus = String(
+    appointment.recurringSeriesStatus ||
+      recurrence?.recurringSeriesStatus ||
+      ""
+  ).trim().toLowerCase();
+  const hasOccurrenceMetadata = Boolean(
+    appointment.recurringOccurrenceId ||
+      recurrence?.recurringOccurrenceId ||
+      occurrenceSequence != null
+  );
+  const activeChildCount =
+    appointment.recurringSeriesActiveChildCount != null
+      ? Number(appointment.recurringSeriesActiveChildCount)
+      : recurrence?.recurringSeriesActiveChildCount != null
+        ? Number(recurrence.recurringSeriesActiveChildCount)
+        : null;
+  const activeOccurrenceCount =
+    appointment.recurringSeriesActiveOccurrenceCount != null
+      ? Number(appointment.recurringSeriesActiveOccurrenceCount)
+      : recurrence?.recurringSeriesActiveOccurrenceCount != null
+        ? Number(recurrence.recurringSeriesActiveOccurrenceCount)
+        : null;
+  const hasBackendRecurringCount = activeChildCount != null || activeOccurrenceCount != null;
+  const hasActiveRecurringChildren =
+    appointment.hasActiveRecurringChildren ??
+    recurrence?.hasActiveRecurringChildren ??
+    (activeChildCount != null
+      ? activeChildCount > 0
+      : activeOccurrenceCount != null
+        ? activeOccurrenceCount > 1
+        : null);
+  if (hasActiveRecurringChildren === false) return null;
+
+  const hasEnabledRecurrence = Boolean(appointment.isRecurring || recurrence?.enabled);
+  const hasStoppedSeries = Boolean(recurringSeriesStatus && recurringSeriesStatus !== "active");
+  const hasActiveSeries = !recurringSeriesStatus || recurringSeriesStatus === "active";
+  if (!hasActiveSeries) return null;
+
+  const isTableHead = Boolean(
+    appointment.isRecurringSeriesHead ||
+      recurrence?.isRecurringSeriesHead ||
+      recurrence?.isSeriesHead ||
+      (
+        hasActiveSeries &&
+        (
+          (appointmentId && rootAppointmentId === appointmentId && (hasOccurrenceMetadata || hasEnabledRecurrence)) ||
+          (occurrenceSequence === 0 && !parentAppointmentId)
+        )
+      )
+  );
+  if (isTableHead) return "source";
+
+  const isTableGenerated = Boolean(
+    appointment.isRecurringGeneratedAppointment ||
+      recurrence?.isRecurringGeneratedAppointment ||
+      (hasOccurrenceMetadata && (Boolean(parentAppointmentId) || (occurrenceSequence != null && occurrenceSequence > 0)))
+  );
+  if (isTableGenerated) {
+    return "generated";
+  }
+
+  if (hasStoppedSeries && !hasEnabledRecurrence) return null;
   if (recurrence?.generatedFromId || recurrence?.generatedFromDate) return "generated";
   if (appointment.isRecurring) return "source";
+  if (appointment.recurringSeriesId || recurrence?.recurringSeriesId) return "generated";
   return null;
 };
 
@@ -154,6 +236,8 @@ export function CalendarView({
   const [selectedStatus, setSelectedStatus] = useState(defaultStatusFilter ? defaultStatusFilter[0] : (portal === 'patient' ? "scheduled" : "my-calendar"));
   const statusFilterList = defaultStatusFilter || [];
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const lastCalendarFetchKeyRef = useRef("");
+  const lastCalendarFiltersRef = useRef<AppointmentFilters | undefined>(undefined);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   
@@ -187,6 +271,7 @@ export function CalendarView({
     appointments, 
     deleteAppointment, 
     refreshAppointments, 
+    isLoading,
     openEditModal,
     isEditModalOpen,
     selectedAppointment
@@ -423,14 +508,14 @@ export function CalendarView({
 
     if (searchTerm) {
       filters.search = searchTerm;
-    } else {
+    } else if (viewMode !== 'all') {
       let fetchStartStr = "";
       let fetchEndStr = "";
 
       if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
         fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
         fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-      } else if (viewMode !== 'all') {
+      } else {
         const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
         const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
         monthEnd.setHours(23, 59, 59, 999);
@@ -438,30 +523,58 @@ export function CalendarView({
         fetchEndStr = formatDateToYYYYMMDD(monthEnd);
       }
 
-      filters.startDate = fetchStartStr;
-      filters.endDate = fetchEndStr;
+      if (fetchStartStr) filters.startDate = fetchStartStr;
+      if (fetchEndStr) filters.endDate = fetchEndStr;
     }
 
-    // Always apply other filters
-    filters.doctor = selectedDoctor;
-    filters.type = selectedType;
-    // Don't send status to backend - we'll filter on the client side
-    // Only send a single status for admin/doctor portals
-    if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
-      // For patient/public or when no specific status filter, fetch all and filter client-side
-      filters.status = 'all';
-    } else {
-      // For admin/doctor with single status filter
+    // Always apply other filters when they are meaningful
+    if (selectedDoctor && selectedDoctor !== 'all') {
+      filters.doctor = selectedDoctor;
+    }
+    if (selectedType && selectedType !== 'all') {
+      filters.type = selectedType;
+    }
+
+    // Don't send status to backend unless it is a real filter.
+    if (portal !== 'patient' && portal !== 'public' && statusFilterList.length > 0 && selectedStatus && selectedStatus !== 'all') {
       filters.status = selectedStatus;
     }
 
+    const fetchKey = JSON.stringify(filters);
+    if (lastCalendarFetchKeyRef.current === fetchKey) {
+      return;
+    }
+
+    lastCalendarFetchKeyRef.current = fetchKey;
+    lastCalendarFiltersRef.current = filters;
     setIsLoadingView(true);
     refreshAppointments(filters);
-    const timer = setTimeout(() => setIsLoadingView(false), 500);
-    return () => clearTimeout(timer);
   // Only re-run when relevant values change. For custom view we only care about
   // changes to the actual start/end dates (not the whole range object reference).
   }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, defaultStatusFilter, getViewRange, refreshAppointments, portal, usesExternalAppointments]);
+
+  useEffect(() => {
+    if (usesExternalAppointments) return;
+    if (!isLoading) {
+      setIsLoadingView(false);
+    }
+  }, [isLoading, usesExternalAppointments]);
+
+  useEffect(() => {
+    if (usesExternalAppointments || typeof window === "undefined") return;
+
+    const handleAppointmentsUpdated = () => {
+      lastCalendarFetchKeyRef.current = "";
+      if (!lastCalendarFiltersRef.current) return;
+
+      setIsLoadingView(true);
+      refreshAppointments(lastCalendarFiltersRef.current);
+      window.setTimeout(() => setIsLoadingView(false), 500);
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentsUpdated);
+    return () => window.removeEventListener("appointments:updated", handleAppointmentsUpdated);
+  }, [refreshAppointments, usesExternalAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -548,6 +661,7 @@ export function CalendarView({
   const activePrimaryViewMode = PRIMARY_VIEW_OPTIONS.some((option) => option.value === viewMode)
     ? viewMode
     : "";
+  const isCalendarLoading = isLoadingOverride ?? (isLoadingView || isLoading);
 
   // NOTE: Convert time string to minutes since midnight for easier comparison
   const timeToMinutes = (time: string): number => {
@@ -1330,7 +1444,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         </CardHeader>
         <CardContent className="p-0">
           <div className="max-h-[70vh] overflow-y-auto xl:max-h-[700px]">
-            {(isLoadingOverride ?? isLoadingView) ? (
+            {isCalendarLoading ? (
               <div className="flex flex-col items-center justify-center py-24 space-y-4">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
                 <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading schedule...</p>
@@ -1352,7 +1466,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     )}
                     {viewMode === "all" && (
                       <div className="p-4">
-                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} onOpenAppointment={handleOpenAppointment} />
+                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isCalendarLoading} onOpenAppointment={handleOpenAppointment} />
                       </div>
                     )}
                   </>

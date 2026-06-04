@@ -34,6 +34,7 @@ import useSharedBookingLogic, {
   getBookingAutoPreselectConfig,
   getBookingActor,
   getBookingCancellationConfig,
+  getBookingCancelDialogConfig,
   getBookingConflictWarnings,
   getBookingHistoryPaymentStatusChange,
   getBookingHistoryNotes,
@@ -54,7 +55,6 @@ import useSharedBookingLogic, {
   buildBookingTreatmentNotesPayload,
   getBookingRecurrenceState,
   isBookingCustomRecurrenceDateAllowed,
-  hasActiveBookingRecurringChild,
   logBookingRecurringCancelPreview,
   normalizeBookingRecurringDeletionItems,
   RECURRING_APPOINTMENT_OPTIONS,
@@ -65,6 +65,7 @@ import useSharedBookingLogic, {
   isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
+  normalizeBookingRepeatCount,
   normalizePastAppointmentStatus,
   parseLocalDateOnly,
   shouldShowBookingHistoryLog,
@@ -75,7 +76,7 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
-import { RecurringAppointmentCancelSelector } from "./RecurringAppointmentCancelSelector";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -250,6 +251,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceOption, setRecurrenceOption] = useState<string>(RECURRING_APPOINTMENT_OPTIONS[0]);
+  const [repeatCount, setRepeatCount] = useState<number>(1);
   const [customRecurrenceDate, setCustomRecurrenceDate] = useState<string>("");
   const [recurringAppointmentDeletionDates, setRecurringAppointmentDeletionDates] = useState<string[]>([]);
   const [recurringAppointmentDeletionItems, setRecurringAppointmentDeletionItems] = useState<RecurringAppointmentDeletionItem[]>([]);
@@ -510,6 +512,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     [appointmentToEdit, appointmentLogs]
   );
 
+  const cancelDialogConfig = useMemo(
+    () => getBookingCancelDialogConfig({
+      appointmentToEdit,
+      recurringAppointmentDeletionItems,
+      selectedRecurringAppointmentDeletionIds,
+    }),
+    [
+      appointmentToEdit,
+      recurringAppointmentDeletionItems,
+      selectedRecurringAppointmentDeletionIds,
+    ]
+  );
+
   const applyRecurringDeletionItems = useCallback((items: RecurringAppointmentDeletionItem[]) => {
     const uniqueItems = normalizeBookingRecurringDeletionItems(items);
 
@@ -536,6 +551,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     applyRecurringDeletionItems(items);
     return items;
   }, [applyRecurringDeletionItems, fetchRecurringDeletionItems]);
+
+  // When editing a recurring appointment and changing recurrence settings, refresh deletion items
+  // This is needed to show the split dialog warning before confirming
+  useEffect(() => {
+    if (!appointmentToEdit?.id) return;
+
+    // Only refresh if recurrence state differs from original
+    const originalIsRecurring = bookingRecurrenceState.isRecurring;
+    const originalOption = bookingRecurrenceState.recurrenceOption;
+    const hasRecurrenceChanged = isRecurring !== originalIsRecurring || recurrenceOption !== originalOption;
+
+    if (hasRecurrenceChanged) {
+      refreshRecurringDeletionItems();
+    }
+  }, [isRecurring, recurrenceOption, appointmentToEdit?.id, bookingRecurrenceState, refreshRecurringDeletionItems]);
 
   const openCancelDialogWithRecurringPreview = useCallback(async () => {
     if (isLoadingRecurringCancelPreview) return;
@@ -576,58 +606,28 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     if (!open || recurrenceTouchedRef.current) return;
 
-    if (!appointmentToEdit) {
-      setIsRecurring(false);
-      setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
-      setCustomRecurrenceDate("");
-      return;
-    }
-
-    setIsRecurring(false);
-    setRecurrenceOption(RECURRING_APPOINTMENT_OPTIONS[0]);
-    setCustomRecurrenceDate("");
+    setIsRecurring(bookingRecurrenceState.isRecurring || false);
+    setRecurrenceOption(
+      bookingRecurrenceState.recurrenceOption || RECURRING_APPOINTMENT_OPTIONS[0]
+    );
+    setRepeatCount(bookingRecurrenceState.repeatCount || 1);
+    setCustomRecurrenceDate(bookingRecurrenceState.customRecurrenceDate || "");
   }, [
     open,
-    appointmentToEdit,
+    appointmentToEdit?.id,
     bookingRecurrenceState.isRecurring,
     bookingRecurrenceState.recurrenceOption,
     bookingRecurrenceState.customRecurrenceDate,
+    bookingRecurrenceState.repeatCount,
   ]);
 
   const handleRecurringChange = useCallback((nextIsRecurring: boolean) => {
     recurrenceTouchedRef.current = true;
-    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
-      appointmentId: appointmentToEdit?.id,
-      recurrenceState: bookingRecurrenceState,
-      items: recurringAppointmentDeletionItems,
-    });
-    if (nextIsRecurring && hasActiveRecurringChild) {
-      toast.info("This appointment already has a recurring appointment.");
-      setIsRecurring(false);
-      return;
-    }
     setIsRecurring(nextIsRecurring);
-  }, [
-    appointmentToEdit?.id,
-    bookingRecurrenceState,
-    recurringAppointmentDeletionItems,
-  ]);
-
-  useEffect(() => {
-    const hasActiveRecurringChild = hasActiveBookingRecurringChild({
-      appointmentId: appointmentToEdit?.id,
-      recurrenceState: bookingRecurrenceState,
-      items: recurringAppointmentDeletionItems,
-    });
-    if (hasActiveRecurringChild && isRecurring) {
-      setIsRecurring(false);
+    if (!nextIsRecurring) {
+      setRepeatCount(1);
     }
-  }, [
-    appointmentToEdit?.id,
-    bookingRecurrenceState,
-    isRecurring,
-    recurringAppointmentDeletionItems,
-  ]);
+  }, []);
 
   const prepareCustomRecurrenceDate = useCallback(async () => {
     recurrenceTouchedRef.current = true;
@@ -652,10 +652,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         if (slot) {
           nextDate = formatBookingDateKey(slot.date);
         } else {
-          toast.info("No free recurrence date was found for the same time. Choose an available date.");
+          toast.info("No free repeat date was found for the same time. Choose an available date.");
         }
       } catch (err) {
-        console.warn("[BookingModal] Could not preselect custom recurrence date:", err);
+        console.warn("[BookingModal] Could not preselect custom repeat date:", err);
       } finally {
         setIsPreparingCustomRecurrenceDate(false);
       }
@@ -702,6 +702,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const handleCustomRecurrenceDateChange = useCallback((date: string) => {
     recurrenceTouchedRef.current = true;
     setCustomRecurrenceDate(date);
+  }, []);
+
+  const handleRepeatCountChange = useCallback((count: number) => {
+    recurrenceTouchedRef.current = true;
+    setRepeatCount(normalizeBookingRepeatCount(count));
   }, []);
 
   useEffect(() => {
@@ -1505,6 +1510,72 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   });
   const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
 
+  const futureRecurringChangeItemsForWarning = useMemo(() => {
+    const selectedDateKey = formatBookingDateKey(selectedDate);
+    const inactiveStatuses = new Set(['cancelled', 'canceled', 'deleted', 'stopped']);
+    const seen = new Set<string>();
+
+    return recurringAppointmentDeletionItems
+      .filter((item) => {
+        const date = formatBookingDateKey(item.date);
+        const status = String(item.status || '').trim().toLowerCase();
+        if (!date || date <= selectedDateKey || inactiveStatuses.has(status)) return false;
+
+        const key = item.id || `${date}|${item.time || ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((left, right) => {
+        const dateCompare = String(left.date || '').localeCompare(String(right.date || ''));
+        if (dateCompare !== 0) return dateCompare;
+        return String(left.time || '').localeCompare(String(right.time || ''));
+      });
+  }, [recurringAppointmentDeletionItems, selectedDate]);
+
+  const hasRecurringScheduleValueChanges = useMemo(() => {
+    if (!appointmentToEdit) return false;
+
+    const originalTypeName = getAppointmentTypeName(appointmentToEdit.type, appointmentToEdit.customType);
+    const originalCustomType = String(appointmentToEdit.customType || '').trim();
+    const originalDoctor = String(appointmentToEdit.doctor || '').trim();
+    const originalDate = String(appointmentToEdit.date || '').trim();
+    const originalTime = String(appointmentToEdit.time || '').trim();
+    const originalDuration = String(normalizeBookingDuration(appointmentToEdit.duration));
+    const originalPrice = Number(appointmentToEdit.price || 0);
+    const originalNotes = String(getBookingTreatmentNotesValue(appointmentToEdit) || '').trim();
+
+    return (
+      String(selectedDoctor || '').trim() !== originalDoctor
+      || appointmentType !== originalTypeName
+      || String(customAppointmentTypeName || '').trim() !== originalCustomType
+      || formatBookingDateKey(selectedDate) !== originalDate
+      || String(selectedTime || '').trim() !== originalTime
+      || String(normalizeBookingDuration(duration)) !== originalDuration
+      || Number(finalPrice) !== originalPrice
+      || String(treatmentNotes || '').trim() !== originalNotes
+    );
+  }, [appointmentToEdit, selectedDoctor, appointmentType, customAppointmentTypeName, selectedDate, selectedTime, duration, finalPrice, treatmentNotes]);
+
+  const hasRecurringStateChanges = useMemo(() => {
+    if (!appointmentToEdit) return false;
+    return (
+      isRecurring !== bookingRecurrenceState.isRecurring ||
+      recurrenceOption !== bookingRecurrenceState.recurrenceOption
+    );
+  }, [appointmentToEdit, isRecurring, recurrenceOption, bookingRecurrenceState]);
+
+  const shouldWarnBeforeRecurringScheduleChange =
+    futureRecurringChangeItemsForWarning.length > 0 &&
+    (hasRecurringStateChanges || hasRecurringScheduleValueChanges || !isRecurring);
+
+  const recurringScheduleChangeMode =
+    futureRecurringChangeItemsForWarning.length > 0
+      ? isRecurring
+        ? 'cancel'
+        : 'update'
+      : 'update';
+
   useBookingPaymentPrefill({
     open,
     modalStep,
@@ -1635,6 +1706,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       treatmentNotes,
       recurrence: isRecurring ? {
         option: recurrenceOption,
+        repeatCount,
         customDate: customRecurrenceDate || null,
       } : { enabled: false },
       payment: {
@@ -1656,7 +1728,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         ? formatBookingDateKey(customRecurrenceDate)
         : customRecurrenceDate;
       if (isRecurring && recurrenceOption === "Custom" && !normalizedCustomRecurrenceDate) {
-        toast.error("Choose a valid custom recurrence date.");
+        toast.error("Choose a valid custom repeat date.");
         setIsBooking(false);
         setIsConfirmSummaryOpen(true);
         return;
@@ -1669,17 +1741,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           customRecurrenceDate: normalizedCustomRecurrenceDate,
         })
       ) {
-        toast.error(`Choose a custom recurrence date on or after ${getBookingCustomRecurrenceMinDate(selectedDate)}.`);
+        toast.error(`Choose a custom repeat date on or after ${getBookingCustomRecurrenceMinDate(selectedDate)}.`);
         setIsBooking(false);
         setIsConfirmSummaryOpen(true);
         return;
       }
-      const recurrencePayload = isRecurring
+      const recurrencePayload = isRecurring || appointmentToEdit
         ? buildBookingRecurrencePayload({
             isRecurring,
             recurrenceOption,
+            repeatCount,
             customRecurrenceDate: normalizedCustomRecurrenceDate,
-            existingRecurrence: undefined,
+            existingRecurrence: appointmentToEdit?.recurrence,
           })
         : null;
       const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
@@ -1794,6 +1867,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             paymentStatus: updated?.paymentStatus,
           },
           appointmentStatus: updated?.status,
+          recurrence: updated?.recurrence ?? null,
+          recurringSeriesId: updated?.recurringSeriesId ?? updated?.recurrence?.recurringSeriesId ?? null,
           timestamp: new Date().toISOString(),
         });
 
@@ -2030,6 +2105,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             paymentStatus: newApt?.paymentStatus,
           },
           appointmentStatus: newApt?.status,
+          recurrence: newApt?.recurrence ?? null,
+          recurringSeriesId: newApt?.recurringSeriesId ?? newApt?.recurrence?.recurringSeriesId ?? null,
           timestamp: new Date().toISOString(),
         });
 
@@ -2914,44 +2991,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       </Dialog>
 
       {/* Cancel confirmation dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-[2rem]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5 text-red-600" />
-              Cancel Appointment
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
-              <CalendarIcon className="h-8 w-8" />
-            </div>
-            <div className="text-center space-y-2">
-              <p className="font-semibold text-gray-900">Cancel this appointment?</p>
-              <p className="text-sm text-gray-600">
-                Are you sure you want to cancel this appointment? This will mark it as <strong>Cancelled</strong> and release the time slot, but the record will remain in the system history.
-              </p>
-            </div>
-            <RecurringAppointmentCancelSelector
-              items={recurringAppointmentDeletionItems}
-              selectedIds={selectedRecurringAppointmentDeletionIds}
-              onSelectedIdsChange={setSelectedRecurringAppointmentDeletionIds}
-              formatTimeTo12h={formatTimeTo12h}
-            />
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isBooking} className="flex-1">
-              Keep Appointment
-            </Button>
-            <Button variant="destructive" onClick={async () => {
-              setIsDeleteDialogOpen(false);
-              await handleCancel();
-            }} disabled={isBooking} className="flex-1">
-              {isBooking ? "Processing..." : "Yes, Cancel"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ApproveRejectDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        {...cancelDialogConfig}
+        isProcessing={isBooking}
+        onConfirm={handleCancel}
+        onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        formatTimeTo12h={formatTimeTo12h}
+      />
 
       {/* Summary confirmation dialog */}
       <ConfirmAppointmentModal
@@ -2988,20 +3036,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onRecurringChange={handleRecurringChange}
         recurrenceOption={recurrenceOption}
         onRecurrenceOptionChange={handleRecurrenceOptionChange}
+        repeatCount={repeatCount}
+        onRepeatCountChange={handleRepeatCountChange}
         customRecurrenceDate={customRecurrenceDate}
         onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
         onOpenCustomRecurrenceDatePicker={handleOpenCustomRecurrenceDatePicker}
         isCustomRecurrenceDateLoading={isPreparingCustomRecurrenceDate}
-        canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
-          appointmentId: appointmentToEdit?.id,
-          recurrenceState: bookingRecurrenceState,
-          items: recurringAppointmentDeletionItems,
-        })}
         recurringAppointmentDate={bookingRecurrenceState.generatedAppointmentDate}
         recurringAppointmentDates={recurringAppointmentDeletionDates}
         recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
         selectedRecurringAppointmentDeletionIds={selectedRecurringAppointmentDeletionIds}
         onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        shouldWarnBeforeRecurringScheduleChange={shouldWarnBeforeRecurringScheduleChange}
+        recurringScheduleChangeMode={recurringScheduleChangeMode}
         getPersonInitials={(name?: string) => {
           const initials = String(name || "")
             .split(/\s+/)
@@ -3073,7 +3120,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedTime={selectedTime}
         duration={duration}
         minDate={getBookingCustomRecurrenceMinDate(selectedDate)}
-        title="Select Recurrence Date"
+        title="Select Repeat Date"
         subtitle={selectedTime ? `Keeps ${formatTimeTo12h(selectedTime)} for ${duration} mins` : undefined}
         disableDatesWithTimeConflict
         timeConflictMessage="That date is already booked for this appointment time. Choose another date."
