@@ -78,6 +78,7 @@ import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
 import { RecurringAppointmentCancelSelector } from "./RecurringAppointmentCancelSelector";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors, type DoctorOption } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -2256,15 +2257,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         setIsConfirmSummaryOpen(true);
         return;
       }
-      const recurrencePayload = isRecurring
-        ? buildBookingRecurrencePayload({
-            isRecurring,
-            recurrenceOption,
-            customRecurrenceDate: normalizedCustomRecurrenceDate,
-            existingRecurrence: undefined,
-          })
-        : null;
-      const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
+      const recurrencePayload = buildBookingRecurrencePayload({
+        isRecurring,
+        recurrenceOption,
+        customRecurrenceDate: normalizedCustomRecurrenceDate,
+        existingRecurrence: appointmentToEdit?.recurrence,
+        createChild: !appointmentToEdit,
+      });
+      const recurrenceUpdate = { recurrence: recurrencePayload };
       const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
       
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -3382,27 +3382,18 @@ return (
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-3xl p-8">
-          <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><CalendarIcon className="h-10 w-10" /></div>
-          <div className="text-center space-y-2 mb-8">
-            <h3 className="text-xl font-black">Cancel Appointment?</h3>
-            <p className="text-sm text-gray-500">This releases the time slot. This action is permanent.</p>
-          </div>
-          <div className="mb-6">
-            <RecurringAppointmentCancelSelector
-              items={recurringAppointmentDeletionItems}
-              selectedIds={selectedRecurringAppointmentDeletionIds}
-              onSelectedIdsChange={setSelectedRecurringAppointmentDeletionIds}
-              formatTimeTo12h={formatTimeTo12h}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="h-14 rounded-2xl font-bold">No, Keep it</Button>
-            <Button variant="destructive" onClick={handleCancel} className="h-14 rounded-2xl font-black">Yes, Cancel</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ApproveRejectDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        mode="cancel"
+        appointment={appointmentToEdit}
+        isProcessing={isBooking}
+        onConfirm={handleCancel}
+        recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
+        selectedRecurringAppointmentDeletionIds={selectedRecurringAppointmentDeletionIds}
+        onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        formatTimeTo12h={formatTimeTo12h}
+      />
 
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
         <DialogContent className="max-w-xl overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl">
@@ -3526,11 +3517,6 @@ return (
         onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
         onOpenCustomRecurrenceDatePicker={handleOpenCustomRecurrenceDatePicker}
         isCustomRecurrenceDateLoading={isPreparingCustomRecurrenceDate}
-        canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
-          appointmentId: appointmentToEdit?.id,
-          recurrenceState: bookingRecurrenceState,
-          items: recurringAppointmentDeletionItems,
-        })}
         recurringAppointmentDate={bookingRecurrenceState.generatedAppointmentDate}
         recurringAppointmentDates={recurringAppointmentDeletionDates}
         recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}

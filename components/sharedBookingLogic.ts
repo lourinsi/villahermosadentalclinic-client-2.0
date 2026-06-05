@@ -204,7 +204,7 @@ export type BookingSlot = {
   time: string;
 };
 
-export const RECURRING_APPOINTMENT_OPTIONS = ["1 month", "3 months", "6 months", "Custom"] as const;
+export const RECURRING_APPOINTMENT_OPTIONS = ["7 days", "1 month", "3 months", "Custom"] as const;
 export type RecurringAppointmentOption = typeof RECURRING_APPOINTMENT_OPTIONS[number];
 
 export type BookingRecurrencePayload = {
@@ -571,14 +571,20 @@ export function getBookingRecurringNextDate({
   const sourceDate = parseLocalDateOnly(appointmentDate);
   if (!sourceDate) return "";
 
-  const monthsByOption: Record<RecurringAppointmentOption, number> = {
-    "1 month": 1,
-    "3 months": 3,
-    "6 months": 6,
-    Custom: 1,
+  const dateConfig: Record<RecurringAppointmentOption, { type: 'days' | 'months'; value: number }> = {
+    "7 days": { type: 'days', value: 7 },
+    "1 month": { type: 'months', value: 1 },
+    "3 months": { type: 'months', value: 3 },
+    Custom: { type: 'months', value: 1 },
   };
 
-  return formatBookingDateKey(addMonthsClamped(sourceDate, monthsByOption[option] || 1));
+  const config = dateConfig[option] || { type: 'months', value: 1 };
+  if (config.type === 'days') {
+    const result = new Date(sourceDate);
+    result.setDate(sourceDate.getDate() + config.value);
+    return formatBookingDateKey(result);
+  }
+  return formatBookingDateKey(addMonthsClamped(sourceDate, config.value));
 }
 
 export function getBookingCustomRecurrenceMinDate(
@@ -636,22 +642,31 @@ export function buildBookingRecurrencePayload({
   recurrenceOption,
   customRecurrenceDate,
   existingRecurrence,
+  createChild,
 }: {
   isRecurring: boolean;
   recurrenceOption?: string | null;
   customRecurrenceDate?: string | null;
   existingRecurrence?: unknown;
+  createChild?: boolean;
 }): BookingRecurrencePayload {
   const existing = normalizeBookingRecurrence(existingRecurrence);
   const option = normalizeRecurrenceOption(recurrenceOption ?? existing?.option);
   const customDate = normalizeRecurrenceDate(customRecurrenceDate ?? existing?.customDate);
 
-  return {
+  const base = {
     ...(existing || {}),
     enabled: isRecurring,
     option,
     customDate: customDate || null,
-  };
+  } as BookingRecurrencePayload;
+
+  if (createChild) {
+    // Hint to the backend to create the generated child deterministically
+    (base as any).createChild = true;
+  }
+
+  return base;
 }
 
 export function formatBookingRecurringDate(dateInput?: string | null) {

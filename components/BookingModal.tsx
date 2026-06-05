@@ -76,6 +76,7 @@ import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
 import { RecurringAppointmentCancelSelector } from "./RecurringAppointmentCancelSelector";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -1674,15 +1675,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         setIsConfirmSummaryOpen(true);
         return;
       }
-      const recurrencePayload = isRecurring
-        ? buildBookingRecurrencePayload({
-            isRecurring,
-            recurrenceOption,
-            customRecurrenceDate: normalizedCustomRecurrenceDate,
-            existingRecurrence: undefined,
-          })
-        : null;
-      const recurrenceUpdate = recurrencePayload ? { recurrence: recurrencePayload } : {};
+      const recurrencePayload = buildBookingRecurrencePayload({
+        isRecurring,
+        recurrenceOption,
+        customRecurrenceDate: normalizedCustomRecurrenceDate,
+        existingRecurrence: appointmentToEdit?.recurrence,
+        createChild: !appointmentToEdit,
+      });
+      const recurrenceUpdate = { recurrence: recurrencePayload };
       const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
       
       // Handle "Pay at Clinic" - set amount to pay as 0
@@ -2914,44 +2914,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       </Dialog>
 
       {/* Cancel confirmation dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-[2rem]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5 text-red-600" />
-              Cancel Appointment
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
-              <CalendarIcon className="h-8 w-8" />
-            </div>
-            <div className="text-center space-y-2">
-              <p className="font-semibold text-gray-900">Cancel this appointment?</p>
-              <p className="text-sm text-gray-600">
-                Are you sure you want to cancel this appointment? This will mark it as <strong>Cancelled</strong> and release the time slot, but the record will remain in the system history.
-              </p>
-            </div>
-            <RecurringAppointmentCancelSelector
-              items={recurringAppointmentDeletionItems}
-              selectedIds={selectedRecurringAppointmentDeletionIds}
-              onSelectedIdsChange={setSelectedRecurringAppointmentDeletionIds}
-              formatTimeTo12h={formatTimeTo12h}
-            />
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isBooking} className="flex-1">
-              Keep Appointment
-            </Button>
-            <Button variant="destructive" onClick={async () => {
-              setIsDeleteDialogOpen(false);
-              await handleCancel();
-            }} disabled={isBooking} className="flex-1">
-              {isBooking ? "Processing..." : "Yes, Cancel"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ApproveRejectDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        mode="cancel"
+        appointment={appointmentToEdit}
+        isProcessing={isBooking}
+        onConfirm={async () => {
+          setIsDeleteDialogOpen(false);
+          await handleCancel();
+        }}
+        recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
+        selectedRecurringAppointmentDeletionIds={selectedRecurringAppointmentDeletionIds}
+        onRecurringAppointmentDeletionIdsChange={setSelectedRecurringAppointmentDeletionIds}
+        formatTimeTo12h={formatTimeTo12h}
+      />
 
       {/* Summary confirmation dialog */}
       <ConfirmAppointmentModal
@@ -2992,11 +2969,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onCustomRecurrenceDateChange={handleCustomRecurrenceDateChange}
         onOpenCustomRecurrenceDatePicker={handleOpenCustomRecurrenceDatePicker}
         isCustomRecurrenceDateLoading={isPreparingCustomRecurrenceDate}
-        canCreateRecurringAppointment={!hasActiveBookingRecurringChild({
-          appointmentId: appointmentToEdit?.id,
-          recurrenceState: bookingRecurrenceState,
-          items: recurringAppointmentDeletionItems,
-        })}
         recurringAppointmentDate={bookingRecurrenceState.generatedAppointmentDate}
         recurringAppointmentDates={recurringAppointmentDeletionDates}
         recurringAppointmentDeletionItems={recurringAppointmentDeletionItems}
