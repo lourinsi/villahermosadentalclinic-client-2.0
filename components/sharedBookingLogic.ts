@@ -530,26 +530,30 @@ export function hasActiveBookingRecurringChild({
   items: BookingRecurringDeletionItem[];
 }) {
   const inactiveStatuses = new Set(["cancelled", "canceled", "deleted", "stopped"]);
-  const hasActiveLinkedAppointment = items.some((item) => {
-    const status = String(item.status || "").trim().toLowerCase();
-    return !status || !inactiveStatuses.has(status);
-  });
-
-  if (hasActiveLinkedAppointment) return true;
+  const normalizedAppointmentId = String(appointmentId || "").trim() || null;
+  const normalizedGeneratedAppointmentId = String(recurrenceState.generatedAppointmentId || "").trim() || null;
+  const normalizedGeneratedAppointmentDate = String(recurrenceState.generatedAppointmentDate || "").trim() || null;
 
   return items.some((item) => {
     const status = String(item.status || "").trim().toLowerCase();
     if (status && inactiveStatuses.has(status)) return false;
 
-    return Boolean(
-      item.generatedFromId &&
-      appointmentId &&
-      String(item.generatedFromId) === String(appointmentId)
-    ) || Boolean(
-      recurrenceState.generatedAppointmentId
-        ? item.id && String(item.id) === String(recurrenceState.generatedAppointmentId)
-        : recurrenceState.generatedAppointmentDate && item.date === recurrenceState.generatedAppointmentDate
-    );
+    const itemGeneratedFromId = String(item.generatedFromId || "").trim();
+    const itemId = String(item.id || "").trim();
+
+    if (normalizedAppointmentId && itemGeneratedFromId && itemGeneratedFromId === normalizedAppointmentId) {
+      return true;
+    }
+
+    if (normalizedGeneratedAppointmentId && itemId && itemId === normalizedGeneratedAppointmentId) {
+      return true;
+    }
+
+    if (!normalizedGeneratedAppointmentId && normalizedGeneratedAppointmentDate && item.date === normalizedGeneratedAppointmentDate) {
+      return normalizedAppointmentId ? !itemGeneratedFromId || itemGeneratedFromId === normalizedAppointmentId : true;
+    }
+
+    return false;
   });
 }
 

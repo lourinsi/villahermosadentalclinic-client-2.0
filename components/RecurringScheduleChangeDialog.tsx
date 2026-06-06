@@ -12,7 +12,6 @@ interface RecurringScheduleChangeDialogProps {
   isProcessing: boolean;
   items: RecurringAppointmentDeletionItem[];
   formatTimeTo12h: (time: string) => string;
-  mode: "cancel" | "update";
 }
 
 export function RecurringScheduleChangeDialog({
@@ -22,13 +21,9 @@ export function RecurringScheduleChangeDialog({
   isProcessing,
   items,
   formatTimeTo12h,
-  mode,
 }: RecurringScheduleChangeDialogProps) {
-  const modeLabel = mode === "cancel" ? "Cancelled" : "Updated";
-  const modeDescription =
-    mode === "cancel"
-      ? "The following future recurring appointments will be cancelled:"
-      : "The following future recurring appointments will be affected by this change:";
+  const modeLabel = "Updated";
+  const modeDescription = "The following future recurring appointments may be affected by this change:";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

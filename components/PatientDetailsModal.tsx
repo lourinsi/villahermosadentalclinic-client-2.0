@@ -783,8 +783,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     emergencyContact: patient.emergencyContact || '',
     emergencyPhone: patient.emergencyPhone || '',
     notes: patient.notes || '',
-    profilePicture: patient.profilePicture || '',
-    dentalCharts: patient.dentalCharts || []
+    profilePicture: patient.profilePicture || '', // This will now just trigger a clone
+    dentalCharts: patient.dentalCharts || [] // This will now just trigger a clone
   });
 
   const [loadedPatient, setLoadedPatient] = useState<Patient>(patient);

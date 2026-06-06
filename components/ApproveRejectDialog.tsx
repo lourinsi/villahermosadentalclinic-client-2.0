@@ -18,10 +18,6 @@ import { getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { getAppointmentStatusOptionWithColors } from "@/lib/status-colors";
-import {
-  RecurringAppointmentCancelSelector,
-  type RecurringAppointmentDeletionItem,
-} from "./RecurringAppointmentCancelSelector";
 
 interface Props {
   open: boolean;
@@ -32,12 +28,12 @@ interface Props {
   onConfirm: () => void | Promise<void>;
   title?: string;
   description?: string;
-  cancelLabel?: string;
-  confirmLabel?: string;
-  recurringAppointmentDeletionItems?: RecurringAppointmentDeletionItem[];
-  selectedRecurringAppointmentDeletionIds?: string[];
-  onRecurringAppointmentDeletionIdsChange?: (ids: string[]) => void;
-  formatTimeTo12h?: (time: string) => string;
+  cancelLabel?: string; // This will now just trigger a clone
+  confirmLabel?: string; // This will now just trigger a clone
+  recurringAppointmentDeletionItems?: any[]; // Recurrence deprecated
+  selectedRecurringAppointmentDeletionIds?: string[]; // Recurrence deprecated
+  onRecurringAppointmentDeletionIdsChange?: (ids: string[]) => void; // Recurrence deprecated
+  formatTimeTo12h?: (time: string) => string; // Recurrence deprecated
 }
 
 export default function ApproveRejectDialog({
@@ -49,12 +45,12 @@ export default function ApproveRejectDialog({
   onConfirm,
   title: titleOverride,
   description: descriptionOverride,
-  cancelLabel,
-  confirmLabel,
-  recurringAppointmentDeletionItems = [],
-  selectedRecurringAppointmentDeletionIds = [],
-  onRecurringAppointmentDeletionIdsChange,
-  formatTimeTo12h = (time: string) => time,
+  cancelLabel, // This will now just trigger a clone
+  confirmLabel, // This will now just trigger a clone
+  recurringAppointmentDeletionItems = [], // Recurrence deprecated
+  selectedRecurringAppointmentDeletionIds = [], // Recurrence deprecated
+  onRecurringAppointmentDeletionIdsChange, // Recurrence deprecated
+  formatTimeTo12h = (time: string) => time, // Recurrence deprecated
 }: Props) {
   const { statuses } = useAppointmentStatuses();
   const { openEditModal } = useAppointmentModal();
@@ -158,17 +154,6 @@ export default function ApproveRejectDialog({
           </div>
         </div>
         )}
-
-        {isCancelMode && recurringAppointmentDeletionItems.length > 0 ? (
-          <div className="mt-8">
-            <RecurringAppointmentCancelSelector
-              items={recurringAppointmentDeletionItems}
-              selectedIds={selectedRecurringAppointmentDeletionIds}
-              onSelectedIdsChange={onRecurringAppointmentDeletionIdsChange || (() => undefined)}
-              formatTimeTo12h={formatTimeTo12h}
-            />
-          </div>
-        ) : null}
 
         {isCancelMode ? (
           <div className="mt-8 grid grid-cols-2 gap-3">

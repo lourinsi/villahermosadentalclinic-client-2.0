@@ -3000,6 +3000,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         isCancelled={isCancelled}
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
+        hasChildAppointment={Boolean(appointmentToEdit?.childAppointmentId)}
         userRole={user?.role}
       />
 

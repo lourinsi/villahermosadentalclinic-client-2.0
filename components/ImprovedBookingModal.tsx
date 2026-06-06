@@ -3532,6 +3532,7 @@ return (
         isCancelled={isCancelled}
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
+        hasChildAppointment={Boolean(appointmentToEdit?.childAppointmentId)}
         userRole={user?.role}
       />
 
