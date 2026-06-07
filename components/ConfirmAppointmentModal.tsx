@@ -1,20 +1,16 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { AlertCircle, Calendar as CalendarIcon, Clock, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, Clock, Calendar as CalendarIcon } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
-import {
-  formatBookingDateKey,
-  parseLocalDateOnly,
-  type BookingRecurringDeletionItem,
-} from "./sharedBookingLogic";
-
-export type RecurringAppointmentDeletionItem = BookingRecurringDeletionItem;
+import { DatePickerModal } from "./DatePickerModal";
+import { parseLocalDateOnly } from "./sharedBookingLogic";
+import { formatDateToYYYYMMDD } from "@/lib/utils";
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
 const REPEAT_OPTIONS = [
@@ -27,10 +23,8 @@ const REPEAT_OPTIONS = [
 interface ConfirmAppointmentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => void | Promise<void>;
+  onConfirm: (repeatPayload?: { repeatOption: string; customRepeatDate?: string }) => void | Promise<void>;
   isBooking: boolean;
-  shouldWarnBeforeRecurringScheduleChange?: boolean;
-  recurringScheduleChangeMode?: "cancel" | "update";
 
   // Patient info
   patientName: string;
@@ -72,20 +66,11 @@ interface ConfirmAppointmentModalProps {
   previouslyPaidAmount: number;
   paymentAmountNow: number;
 
-  // Recurrence
-  isRecurring: boolean;
-  onRecurringChange: (isRecurring: boolean) => void;
-  recurrenceOption: string;
-  onRecurrenceOptionChange: (option: string) => void;
-  customRecurrenceDate: string;
-  onCustomRecurrenceDateChange: (date: string) => void;
-  onOpenCustomRecurrenceDatePicker?: () => void;
-  isCustomRecurrenceDateLoading?: boolean;
-  recurringAppointmentDate?: string | null;
-  recurringAppointmentDates?: string[];
-  recurringAppointmentDeletionItems?: RecurringAppointmentDeletionItem[];
-  selectedRecurringAppointmentDeletionIds?: string[];
-  onRecurringAppointmentDeletionIdsChange?: (ids: string[]) => void;
+  // Repeat / follow-up clone
+  repeatOption: string;
+  customRepeatDate: string;
+  onRepeatOptionChange: (option: string) => void;
+  onCustomRepeatDateChange: (date: string) => void;
 
   // Utilities
   getPersonInitials: (name?: string) => string;
@@ -133,20 +118,6 @@ export function ConfirmAppointmentModal({
   discountedPrice,
   previouslyPaidAmount,
   paymentAmountNow,
-  isRecurring,
-  onRecurringChange,
-  recurrenceOption,
-  onRecurrenceOptionChange,
-  customRecurrenceDate,
-  onCustomRecurrenceDateChange,
-  onOpenCustomRecurrenceDatePicker,
-  isCustomRecurrenceDateLoading = false,
-  recurringAppointmentDate,
-  recurringAppointmentDates = [],
-  recurringAppointmentDeletionItems = [],
-  selectedRecurringAppointmentDeletionIds = [],
-  onRecurringAppointmentDeletionIdsChange,
-  shouldWarnBeforeRecurringScheduleChange: shouldWarnRecurringScheduleChangeProp,
   getPersonInitials,
   getDoctorInitials,
   getBookingStatusLabel,
@@ -158,57 +129,76 @@ export function ConfirmAppointmentModal({
   isPatientLevelBookingMode = false,
   isCartAppointmentStatus,
   userRole,
+  repeatOption: repeatOptionProp = REPEAT_NONE_OPTION,
+  customRepeatDate: customRepeatDateProp = "",
+  onRepeatOptionChange,
+  onCustomRepeatDateChange,
 }: ConfirmAppointmentModalProps) {
-  // Map recurrence options to relative labels
-  const mapRecurrenceOptionToLabel = (option: string) => {
-    const mapping: Record<string, string> = {
-      "7 days": "next-week",
-      "1 month": "next-month",
-      "3 months": "3-months",
-      "Custom": "custom",
-    };
-    return mapping[option] || option;
+  const [repeatOption, setRepeatOption] = useState<string>(repeatOptionProp);
+  const [customRepeatDate, setCustomRepeatDate] = useState<string>(customRepeatDateProp);
+  const [customRepeatDatePickerOpen, setCustomRepeatDatePickerOpen] = useState(false);
+
+  useEffect(() => {
+    setRepeatOption(repeatOptionProp);
+  }, [repeatOptionProp]);
+
+  useEffect(() => {
+    setCustomRepeatDate(customRepeatDateProp);
+  }, [customRepeatDateProp]);
+
+  const handleRepeatOptionChange = (value: string) => {
+    setRepeatOption(value);
+    onRepeatOptionChange?.(value);
+
+    if (value === "custom") {
+      setCustomRepeatDatePickerOpen(true);
+    } else {
+      setCustomRepeatDatePickerOpen(false);
+    }
   };
 
-  const mapLabelToRecurrenceOption = (label: string) => {
-    const mapping: Record<string, string> = {
-      "next-week": "7 days",
-      "next-month": "1 month",
-      "3-months": "3 months",
-      "custom": "Custom",
-    };
-    return mapping[label] || label;
+  const handleCustomRepeatDateChange = (value: string) => {
+    setCustomRepeatDate(value);
+    onCustomRepeatDateChange?.(value);
   };
+
+  const computedRepeatTarget = useMemo(() => {
+    if (repeatOption === REPEAT_NONE_OPTION) {
+      return null;
+    }
+
+    const baseDate = new Date(selectedDate);
+    const target = new Date(baseDate);
+
+    switch (repeatOption) {
+      case "next-week":
+        target.setDate(baseDate.getDate() + 7);
+        return target;
+      case "next-month":
+        target.setMonth(baseDate.getMonth() + 1);
+        return target;
+      case "3-months":
+        target.setMonth(baseDate.getMonth() + 3);
+        return target;
+          case "custom":
+        if (!customRepeatDate) {
+          return null;
+        }
+        const parsed = parseLocalDateOnly(customRepeatDate);
+        return parsed;
+      default:
+        return null;
+    }
+  }, [customRepeatDate, repeatOption, selectedDate]);
+
+  const repeatDateLabel = computedRepeatTarget
+    ? computedRepeatTarget.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : undefined;
 
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
   const treatmentNotesText = String(treatmentNotes || "").trim();
-  const customRecurrenceDateValue = parseLocalDateOnly(customRecurrenceDate);
-  const customRecurrenceDateLabel = customRecurrenceDateValue
-    ? customRecurrenceDateValue.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : "Choose repeat date";
-  const inheritedRecurrenceTimeLabel = selectedTime ? formatTimeTo12h(selectedTime) : "Same time";
-
-  const repeatSelectValue = isRecurring ? mapRecurrenceOptionToLabel(recurrenceOption) : REPEAT_NONE_OPTION;
-
-  const handleRepeatSelectChange = (value: string) => {
-    if (value === REPEAT_NONE_OPTION) {
-      onRecurringChange(false);
-      onCustomRecurrenceDateChange("");
-      return;
-    }
-
-    onRecurringChange(true);
-    const recOption = mapLabelToRecurrenceOption(value);
-    onRecurrenceOptionChange(recOption);
-    if (value !== "custom") {
-      onCustomRecurrenceDateChange("");
-    }
-  };
-
-  const canShowRepeatOptions = true;
-
   const handleConfirmClick = () => {
-    return onConfirm();
+    return onConfirm({ repeatOption, customRepeatDate });
   };
 
   return (
@@ -321,6 +311,76 @@ export function ConfirmAppointmentModal({
                   </span>
                 )}
               </div>
+
+              {/* Repeat / Clone */}
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-6">
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Repeat this appointment</p>
+                    <p className="text-sm text-gray-500">Pick a follow-up clone date without creating a linked recurrence.</p>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <Select value={repeatOption} onValueChange={handleRepeatOptionChange}>
+                      <SelectTrigger className="h-10 min-w-[200px] rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-gray-100 text-gray-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        <SelectItem value={REPEAT_NONE_OPTION} className="rounded-xl my-1 mx-2">
+                          Do not repeat
+                        </SelectItem>
+                        {REPEAT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="rounded-xl my-1 mx-2">
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    {repeatOption === "custom" && (
+                      <>
+                        <Button
+                          variant="outline"
+                          className="h-10 min-w-[200px] rounded-full border border-gray-200 bg-white px-4 text-xs font-black uppercase tracking-tighter text-gray-700 shadow-sm hover:bg-gray-50"
+                          onClick={() => setCustomRepeatDatePickerOpen(true)}
+                        >
+                          {customRepeatDate
+                            ? `Custom date: ${parseLocalDateOnly(customRepeatDate)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? customRepeatDate}`
+                            : "Select a follow-up date"}
+                        </Button>
+                        <DatePickerModal
+                          open={customRepeatDatePickerOpen}
+                          onOpenChange={setCustomRepeatDatePickerOpen}
+                          selectedDate={customRepeatDate || selectedDate}
+                          onDateSelect={(date) => {
+                            const formatted = formatDateToYYYYMMDD(date);
+                            handleCustomRepeatDateChange(formatted);
+                          }}
+                          doctorName={doctorName}
+                          selectedTime={selectedTime}
+                          duration={duration}
+                          minDate={selectedDate}
+                          title="Choose follow-up date"
+                          subtitle="Pick a date for the cloned appointment."
+                          disableDatesWithTimeConflict={true}
+                          timeConflictMessage="This doctor already has an appointment at the selected time on this day."
+                          disableDatesOnOrBeforeMinDate={true}
+                        />
+                      </>
+                    )}
+                  </div>
+
+                  {repeatOption !== REPEAT_NONE_OPTION && (
+                    <p className="text-sm text-gray-600">
+                      {repeatOption === "custom"
+                        ? customRepeatDate
+                          ? `This appointment will be cloned to ${repeatDateLabel}.`
+                          : "Choose a custom clone date to schedule the follow-up."
+                        : `This appointment will be cloned to ${repeatDateLabel}.`}
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -336,63 +396,6 @@ export function ConfirmAppointmentModal({
             labelClassName="mb-2 text-[9px] font-black uppercase tracking-widest text-gray-400 opacity-70"
             textareaClassName="min-h-[58px] resize-none rounded-xl border border-gray-100 bg-white p-3 text-sm font-medium transition-all focus:border-blue-500 focus:bg-white"
           />
-
-          {/* Repeat */}
-          {canShowRepeatOptions ? (
-            <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4">
-              <div className="space-y-4">
-                <div>
-                  <Label className="text-sm font-semibold text-gray-700">Repeat</Label>
-                  <Select value={repeatSelectValue} onValueChange={handleRepeatSelectChange}>
-                    <SelectTrigger className="mt-2 h-10 w-full rounded-full border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-2xl border-none shadow-2xl">
-                      <SelectItem value={REPEAT_NONE_OPTION} className="rounded-xl my-1 mx-2">
-                        Do not repeat
-                      </SelectItem>
-                      {REPEAT_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} className="rounded-xl my-1 mx-2">
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {isRecurring && recurrenceOption === "Custom" && (
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700">Custom repeat date</Label>
-                    <button
-                      type="button"
-                      onClick={onOpenCustomRecurrenceDatePicker}
-                      disabled={isCustomRecurrenceDateLoading || !onOpenCustomRecurrenceDatePicker}
-                      className="mt-2 flex min-h-[58px] w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                          <CalendarIcon className="h-5 w-5" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-black text-gray-900">{customRecurrenceDateLabel}</span>
-                          <span className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                            <Clock className="h-3.5 w-3.5" />
-                            {inheritedRecurrenceTimeLabel} for {duration} mins
-                          </span>
-                        </span>
-                      </span>
-                      {isCustomRecurrenceDateLoading ? (
-                        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600" />
-                      ) : (
-                        <CalendarIcon className="h-5 w-5 shrink-0 text-gray-400" />
-                      )}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : null}
-
 
           {/* Conflict warnings */}
           {bookingConflictWarnings.length > 0 && (

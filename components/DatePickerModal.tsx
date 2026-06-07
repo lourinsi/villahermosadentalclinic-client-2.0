@@ -29,6 +29,7 @@ interface DatePickerModalProps {
   title?: string;
   subtitle?: string;
   disableDatesWithTimeConflict?: boolean;
+  disableDatesOnOrBeforeMinDate?: boolean;
   timeConflictMessage?: string;
   excludeAppointmentId?: string | null;
 }
@@ -74,6 +75,7 @@ export function DatePickerModal({
   title = "Select Date",
   subtitle,
   disableDatesWithTimeConflict = false,
+  disableDatesOnOrBeforeMinDate = false,
   timeConflictMessage = "That time and day is already booked. Please select another time or day.",
   excludeAppointmentId,
 }: DatePickerModalProps) {
@@ -97,6 +99,9 @@ export function DatePickerModal({
   const isBeforeMinDate = (date: Date) => {
     if (!normalizedMinDate) return false;
     const candidate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    if (disableDatesOnOrBeforeMinDate) {
+      return candidate.getTime() <= normalizedMinDate.getTime();
+    }
     return candidate.getTime() < normalizedMinDate.getTime();
   };
 

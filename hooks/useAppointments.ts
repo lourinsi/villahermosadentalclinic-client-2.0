@@ -33,9 +33,7 @@ export interface Appointment {
   paymentMethod?: string;
   balance?: number;
   totalPaid?: number;
-  recurrence?: any;
-  isRecurring?: boolean;
-  recurringSeriesId?: string | null;
+  // recurrence fields removed (backend no longer supports recurring appointments)
   patientDateOfBirth?: string;
   patientDob?: string;
   patientBirthDate?: string;

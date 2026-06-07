@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound, AlertTriangle, CheckCircle2, RefreshCw, History, ArrowLeft } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -14,17 +14,13 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Appointment } from "@/hooks/useAppointments";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingDateKey,
-  formatBookingRecurringDate,
-  getBookingRecurrenceState,
-  getBookingRecurringNextDate,
   getBookingTreatmentNotesValue,
   normalizeBookingHistoryStatus,
-  isSignificantBookingPaymentStatus,
 } from "./sharedBookingLogic";
+
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
@@ -291,56 +287,6 @@ const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
 const isLogSnapshot = (snapshot: any) =>
   Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState || snapshot?._isHistorical);
 
-const getRecurringCreatedFromDate = (recurrence?: any, currentDate?: unknown) => {
-  if (!recurrence || typeof recurrence !== "object") return "";
-
-  const currentDateKey = formatBookingDateKey(currentDate as any);
-  const candidates = [
-    recurrence.createdFromAppointmentDate,
-    recurrence.originalGeneratedFromDate,
-    recurrence.generatedFromDate,
-    recurrence.sourceAppointmentDate,
-  ];
-
-  for (const candidate of candidates) {
-    const dateKey = formatBookingDateKey(candidate as any);
-    if (dateKey && dateKey !== currentDateKey) return dateKey;
-  }
-
-  return "";
-};
-
-const getRecurringCreatedFromDateFromText = (value?: unknown) => {
-  const text = String(value || "");
-  const match =
-    /Created from recurring schedule from\s+([^.\n]+)/i.exec(text) ||
-    /Created from\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i.exec(text);
-
-  return match ? formatBookingDateKey(match[1]) : "";
-};
-
-const getRecurringCreatedFromDateFromLogs = (logs: any[], currentDate?: unknown) => {
-  const sortedLogs = logs
-    .slice()
-    .sort((left, right) =>
-      new Date(left?.changedAt || left?.createdAt || 0).getTime() -
-      new Date(right?.changedAt || right?.createdAt || 0).getTime()
-    );
-
-  for (const log of sortedLogs) {
-    const stateCandidates = [log?.newState, log?.previousState, log];
-
-    for (const state of stateCandidates) {
-      const recurrenceDate = getRecurringCreatedFromDate(state?.recurrence, currentDate);
-      if (recurrenceDate) return recurrenceDate;
-    }
-
-    const noteDate = getRecurringCreatedFromDateFromText(log?.notes);
-    if (noteDate && noteDate !== formatBookingDateKey(currentDate as any)) return noteDate;
-  }
-
-  return "";
-};
 
 const parseBookingDateTime = (date?: unknown, time?: unknown) => {
   const dateKey = formatBookingDateKey(date as any);
@@ -384,10 +330,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
-  const [recurringSourceDateFromLogs, setRecurringSourceDateFromLogs] = useState("");
-  const [recurrenceChain, setRecurrenceChain] = useState<Appointment[]>([]);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
-  const recurrenceDataCache = useRef<Record<string, { sourceDate: string; chain: Appointment[] }>>({});
   const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
@@ -563,89 +506,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     appointmentSnapshot,
   ]);
 
-  useEffect(() => {
-    const appointmentId = String(displayedSnapshot?.id || "").trim();
-    if (!open || !appointmentId) {
-      setRecurringSourceDateFromLogs("");
-      setRecurrenceChain([]);
-      return;
-    }
-
-    // Check cache first
-    const cached = recurrenceDataCache.current[appointmentId];
-    if (cached) {
-      setRecurringSourceDateFromLogs(cached.sourceDate);
-      setRecurrenceChain(cached.chain);
-      return;
-    }
-
-    const controller = new AbortController();
-    const loadRecurrenceData = async () => {
-      try {
-        // Fetch both in parallel
-        const [logsResponse, chainResponse] = await Promise.all([
-          fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
-            credentials: "include",
-            headers: getAuthHeaders(),
-            signal: controller.signal,
-          }),
-          fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/recurrence-chain`), {
-            credentials: "include",
-            headers: getAuthHeaders(),
-            signal: controller.signal,
-          }),
-        ]);
-
-        // Process logs for recurring source date
-        const logsResult = await logsResponse.json().catch(() => null);
-        const logs = logsResponse.ok && logsResult?.success && Array.isArray(logsResult.data) ? logsResult.data : [];
-        const createdFromDate = getRecurringCreatedFromDateFromLogs(logs, displayedSnapshot?.date);
-
-        // Process recurrence chain
-        const chainResult = await chainResponse.json().catch(() => null);
-        const chain = chainResponse.ok && chainResult?.success && Array.isArray(chainResult.data) ? chainResult.data : [];
-
-        // Cache results
-        recurrenceDataCache.current[appointmentId] = {
-          sourceDate: createdFromDate,
-          chain: chain,
-        };
-
-        // Update state
-        setRecurringSourceDateFromLogs(createdFromDate);
-        setRecurrenceChain(chain);
-      } catch (error: any) {
-        if (error?.name !== "AbortError") {
-          console.warn("[AppointmentHistoryView] Failed to load recurrence data:", error);
-        }
-        setRecurringSourceDateFromLogs("");
-        setRecurrenceChain([]);
-      }
-    };
-
-    loadRecurrenceData();
-
-    return () => controller.abort();
-  }, [displayedSnapshot?.id, displayedSnapshot?.date]);
-
-
-  const recurrenceChainAppointments = useMemo(() => {
-    const chainItems = Array.isArray(recurrenceChain) ? recurrenceChain.slice() : [];
-    if (displayedSnapshot?.id && !chainItems.some((item) => String(item.id) === String(displayedSnapshot.id))) {
-      chainItems.push(displayedSnapshot as Appointment);
-    }
-    return chainItems;
-  }, [recurrenceChain, displayedSnapshot]);
-
-  const sortedRecurrenceChainAppointments = useMemo(() => {
-    return [...recurrenceChainAppointments].sort((left, right) => {
-      const leftTimestamp = parseBookingDateTime(left.date, left.time);
-      const rightTimestamp = parseBookingDateTime(right.date, right.time);
-      if (leftTimestamp !== rightTimestamp) return leftTimestamp - rightTimestamp;
-      return String(left.id || "").localeCompare(String(right.id || ""));
-    });
-  }, [recurrenceChainAppointments]);
-
   if (!displayedSnapshot) return null;
 
   const appointmentDate = new Date(displayedSnapshot.date);
@@ -699,59 +559,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const prevState = displayedSnapshot?.previousState || null;
   const nextState = displayedSnapshot?.newState || displayedSnapshot || null;
-  const recurrenceState = getBookingRecurrenceState(displayedSnapshot, displayedSnapshot ? [displayedSnapshot] : []);
-  const recurrenceNextDate = recurrenceState.generatedAppointmentDate ||
-    getBookingRecurringNextDate({
-      appointmentDate: nextState?.date || displayedSnapshot.date,
-      recurrenceOption: recurrenceState.recurrenceOption,
-      customRecurrenceDate: recurrenceState.customRecurrenceDate,
-    });
-  const recurrenceNextDateLabel = formatBookingRecurringDate(recurrenceNextDate);
-  const recurrenceSourceDate = getRecurringCreatedFromDate(
-    recurrenceState.recurrence,
-    nextState?.date || displayedSnapshot.date
-  ) || recurringSourceDateFromLogs;
-  const recurrenceSourceDateLabel = formatBookingRecurringDate(recurrenceSourceDate);
-
-  const currentRecurrenceIndex = sortedRecurrenceChainAppointments.findIndex(
-    (item) => String(item.id) === String(displayedSnapshot.id)
-  );
-  const nextRecurrenceAppointment =
-    currentRecurrenceIndex >= 0 && currentRecurrenceIndex < sortedRecurrenceChainAppointments.length - 1
-      ? sortedRecurrenceChainAppointments[currentRecurrenceIndex + 1]
-      : undefined;
-  const prevRecurrenceAppointment =
-    currentRecurrenceIndex > 0 ? sortedRecurrenceChainAppointments[currentRecurrenceIndex - 1] : undefined;
-  const sourceRecurrenceAppointment =
-    sortedRecurrenceChainAppointments.length > 1 ? sortedRecurrenceChainAppointments[0] : undefined;
-
-  const recurrenceChainNextDateLabel = nextRecurrenceAppointment
-    ? formatBookingRecurringDate(nextRecurrenceAppointment.date)
-    : "";
-  const recurrenceChainPreviousDateLabel = prevRecurrenceAppointment
-    ? formatBookingRecurringDate(prevRecurrenceAppointment.date)
-    : "";
-  const recurrenceChainSourceDateLabel = sourceRecurrenceAppointment && String(sourceRecurrenceAppointment.id) !== String(displayedSnapshot.id)
-    ? formatBookingRecurringDate(sourceRecurrenceAppointment.date)
-    : "";
-
-  const recurrenceSummaryTargetAppointment =
-    nextRecurrenceAppointment || prevRecurrenceAppointment;
-
-  const recurrenceSummaryMessage = nextRecurrenceAppointment
-    ? `Next schedule: ${recurrenceChainNextDateLabel}`
-    : prevRecurrenceAppointment
-      ? `Previous schedule: ${recurrenceChainPreviousDateLabel}`
-      : "";
-
-  const shouldShowRecurrenceSummary = Boolean(
-    recurrenceState.isRecurring ||
-    recurrenceState.recurrence ||
-    recurrenceState.generatedAppointmentId ||
-    recurrenceState.generatedAppointmentDate ||
-    recurrenceSourceDate ||
-    recurrenceChainAppointments.length > 1
-  );
 
   const prevPatientName = prevState ? resolvePatientName(prevState) : null;
   const nextPatientName = nextState ? resolvePatientName(nextState) : patientName;
@@ -1049,7 +856,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const appointmentId = displayedAppointmentId;
   const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && onOpenAppointment && !isAppointmentOpen);
-  const canOpenSnapshot = Boolean(recurrenceSummaryTargetAppointment && !isAppointmentOpen);
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
 
   const viewLatestSnapshot = () => {
@@ -1111,13 +917,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       toast.error("Failed to load appointment logs");
     } finally {
       setIsFetchingLogs(false);
-    }
-  };
-
-  const openSnapshot = () => {
-    if (recurrenceSummaryTargetAppointment) {
-      fetchLatestLogSnapshotForAppointment(String(recurrenceSummaryTargetAppointment.id || ""));
-      return;
     }
   };
 
@@ -1456,31 +1255,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               ) : null}
             </div>
           </div>
-
-          {shouldShowRecurrenceSummary && (
-            <div className="bg-white p-3 rounded-[1.25rem] border border-slate-200/50 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <RefreshCw className="w-2.5 h-2.5 text-cyan-500 shrink-0" />
-                  <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest leading-none">Recurring</Label>
-                </div>
-                {recurrenceSummaryTargetAppointment && canOpenSnapshot ? (
-                  <Button size="sm" variant="secondary" className="h-7 px-2.5 text-[10px]" onClick={openSnapshot}>
-                    Open snapshot
-                  </Button>
-                ) : (
-                  <span className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide bg-slate-50 text-slate-400">
-                    Snapshot
-                  </span>
-                )}
-              </div>
-              {recurrenceSummaryMessage ? (
-                <p className={`mt-2 ${recurrenceState.isRecurring ? "text-[11px] font-black text-slate-800" : "text-[10px] font-bold text-slate-400"}`}>
-                  {recurrenceSummaryMessage}
-                </p>
-              ) : null}
-            </div>
-          )}
 
           {/* Service & Financials - Sleeker */}
           <div className="bg-white rounded-[1.25rem] border border-slate-200/50 shadow-sm overflow-hidden">

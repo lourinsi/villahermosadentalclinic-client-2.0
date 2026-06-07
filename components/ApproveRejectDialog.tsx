@@ -30,10 +30,6 @@ interface Props {
   description?: string;
   cancelLabel?: string; // This will now just trigger a clone
   confirmLabel?: string; // This will now just trigger a clone
-  recurringAppointmentDeletionItems?: any[]; // Recurrence deprecated
-  selectedRecurringAppointmentDeletionIds?: string[]; // Recurrence deprecated
-  onRecurringAppointmentDeletionIdsChange?: (ids: string[]) => void; // Recurrence deprecated
-  formatTimeTo12h?: (time: string) => string; // Recurrence deprecated
 }
 
 export default function ApproveRejectDialog({
@@ -47,10 +43,6 @@ export default function ApproveRejectDialog({
   description: descriptionOverride,
   cancelLabel, // This will now just trigger a clone
   confirmLabel, // This will now just trigger a clone
-  recurringAppointmentDeletionItems = [], // Recurrence deprecated
-  selectedRecurringAppointmentDeletionIds = [], // Recurrence deprecated
-  onRecurringAppointmentDeletionIdsChange, // Recurrence deprecated
-  formatTimeTo12h = (time: string) => time, // Recurrence deprecated
 }: Props) {
   const { statuses } = useAppointmentStatuses();
   const { openEditModal } = useAppointmentModal();

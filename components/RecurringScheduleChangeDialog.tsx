@@ -1,16 +1,16 @@
 "use client";
 
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Button } from "./ui/button";
 import { AlertCircle, Calendar as CalendarIcon, Clock, Loader2 } from "lucide-react";
-import { type RecurringAppointmentDeletionItem } from "./ConfirmAppointmentModal";
+// RecurringAppointmentDeletionItem type removed with recurrence deprecation
 
 interface RecurringScheduleChangeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
   isProcessing: boolean;
-  items: RecurringAppointmentDeletionItem[];
+  items: any[];
   formatTimeTo12h: (time: string) => string;
 }
 

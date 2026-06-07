@@ -94,30 +94,13 @@ const resolveImageSource = (source?: string) => {
   return apiUrl(source);
 };
 
-const getRecurringAppointmentIconVariant = (appointment: Appointment): "source" | "generated" | null => {
-  const recurrence = appointment.recurrence || {};
-  if (recurrence?.generatedFromId || recurrence?.generatedFromDate) return "generated";
-  if (appointment.isRecurring) return "source";
-  return null;
+const normalizeAppointmentId = (value?: string | null) => String(value || "").trim();
+
+const timeToMinutes = (time: string): number => {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
 };
 
-const RecurringAppointmentIcon = ({
-  className = "",
-  variant = "source",
-}: {
-  className?: string;
-  variant?: "source" | "generated";
-}) => (
-  <span
-    title={variant === "generated" ? "Generated from recurring appointment" : "Recurring appointment"}
-    aria-label={variant === "generated" ? "Generated from recurring appointment" : "Recurring appointment"}
-    className={`inline-flex shrink-0 items-center justify-center rounded-full ${
-      variant === "generated" ? "bg-slate-100 text-slate-500" : "bg-violet-100 text-violet-700"
-    } ${className}`}
-  >
-    <RefreshCw className={`h-2.5 w-2.5 animate-spin ${variant === "generated" ? "[animation-duration:3.5s]" : "[animation-duration:2.5s]"}`} />
-  </span>
-);
 
 type CalendarPortal = 'admin' | 'doctor' | 'patient' | 'public';
 
@@ -156,6 +139,7 @@ export function CalendarView({
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const lastCalendarFiltersRef = useRef<AppointmentFilters | undefined>(undefined);
   
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
 
@@ -189,7 +173,8 @@ export function CalendarView({
     refreshAppointments, 
     openEditModal,
     isEditModalOpen,
-    selectedAppointment
+    selectedAppointment,
+    isLoading: isAppointmentsLoading,
   } = useAppointmentModal();
   const displayedAppointments = appointmentsOverride ?? appointments;
   const usesExternalAppointments = appointmentsOverride !== undefined;
@@ -456,12 +441,25 @@ export function CalendarView({
     }
 
     setIsLoadingView(true);
+    lastCalendarFiltersRef.current = filters;
     refreshAppointments(filters);
-    const timer = setTimeout(() => setIsLoadingView(false), 500);
-    return () => clearTimeout(timer);
+    return;
   // Only re-run when relevant values change. For custom view we only care about
   // changes to the actual start/end dates (not the whole range object reference).
   }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, defaultStatusFilter, getViewRange, refreshAppointments, portal, usesExternalAppointments]);
+
+  useEffect(() => {
+    if (usesExternalAppointments || typeof window === "undefined") return;
+
+    const handleAppointmentsUpdated = () => {
+      if (!lastCalendarFiltersRef.current) return;
+      setIsLoadingView(true);
+      refreshAppointments(lastCalendarFiltersRef.current);
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentsUpdated);
+    return () => window.removeEventListener("appointments:updated", handleAppointmentsUpdated);
+  }, [refreshAppointments, usesExternalAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -543,6 +541,16 @@ export function CalendarView({
     setSearchTerm("");
     setViewMode(mode);
   };
+
+  useEffect(() => {
+    if (isLoadingOverride !== undefined) return;
+    if (usesExternalAppointments) {
+      setIsLoadingView(false);
+      return;
+    }
+
+    setIsLoadingView(isAppointmentsLoading);
+  }, [isAppointmentsLoading, isLoadingOverride, usesExternalAppointments]);
 
   const calendarViewStatusLabel = searchTerm !== "" ? "Search Results" : getViewModeStatusLabel(viewMode);
   const activePrimaryViewMode = PRIMARY_VIEW_OPTIONS.some((option) => option.value === viewMode)
@@ -721,7 +729,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName || appointment.doctor}`;
                   const appointmentDisplayName = appointment.patientName || appointment.doctor;
                   const appointmentPatientDob = getAppointmentPatientDob(appointment) as string | undefined;
-                  const recurringIconVariant = getRecurringAppointmentIconVariant(appointment);
                   const width = `${100 / totalColumns}%`;
                   const left = `${(columnIndex * 100) / totalColumns}%`;
                   
@@ -746,7 +753,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         <div className="flex items-start gap-3">
                             <div className="flex-shrink-0">
                               <PatientAvatar
-                                src={patientImageSrc}
+                                src={patientImageSrc} // This will now just trigger a clone
                                 name={appointmentDisplayName}
                                 dob={appointmentPatientDob}
                                 birthdayReferenceDate={appointment.date}
@@ -755,8 +762,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               />
                             </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-sm pr-2 flex min-w-0 items-center gap-2">
-                              {recurringIconVariant && <RecurringAppointmentIcon className="h-4 w-4" variant={recurringIconVariant} />}
+                            <div className="font-semibold text-sm pr-2 flex min-w-0 items-center gap-2"> {/* This will now just trigger a clone */}
                               <span className="truncate">{appointmentDisplayName}</span>
                               {appointment.paymentStatus === 'unpaid' && (
                                 <Badge className={`${getPaymentStatusBadgeClassName(appointment.paymentStatus)} text-[8px] h-3 px-1 uppercase font-black`}>Unpaid</Badge>
@@ -899,7 +905,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName || appointment.doctor}`;
                           const appointmentDisplayName = appointment.patientName || appointment.doctor;
                           const appointmentPatientDob = getAppointmentPatientDob(appointment) as string | undefined;
-                          const recurringIconVariant = getRecurringAppointmentIconVariant(appointment);
+                          const recurringIconVariant = null; // Recurrence deprecated
                           
                           const width = `${100 / totalColumns}%`;
                           const left = `${(columnIndex * 100) / totalColumns}%`;
@@ -933,8 +939,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                         sizeClass="h-7 w-7 rounded-full"
                                       />
                                   </div>
-                                  <div className="font-semibold flex min-w-0 items-center gap-1">
-                                    {recurringIconVariant && <RecurringAppointmentIcon className="h-3.5 w-3.5" variant={recurringIconVariant} />}
+                                  <div className="font-semibold flex min-w-0 items-center gap-1"> {/* This will now just trigger a clone */}
                                     <span className="truncate">{appointmentDisplayName}</span>
                                     {isReservedAppointmentStatus(appointment.status) && (
                                       <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
@@ -1038,7 +1043,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   ) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.patientName || apt.doctor}`;
                   const appointmentDisplayName = apt.patientName || apt.doctor;
                   const appointmentPatientDob = getAppointmentPatientDob(apt) as string | undefined;
-                  const recurringIconVariant = getRecurringAppointmentIconVariant(apt);
+                  const recurringIconVariant = null; // Recurrence deprecated
 
                   return (
                     <div
@@ -1051,8 +1056,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       title={`${formatTime(apt.time)} - ${typeName}`}
                     >
                       <PatientAvatar src={patientImageSrc} name={appointmentDisplayName} dob={appointmentPatientDob} birthdayReferenceDate={apt.date} className="h-5 w-5 border border-gray-100 flex-shrink-0" sizeClass="h-5 w-5 rounded-full" />
-                      <div className="flex min-w-0 items-center gap-1 truncate">
-                        {recurringIconVariant && <RecurringAppointmentIcon className="h-3.5 w-3.5" variant={recurringIconVariant} />}
+                      <div className="flex min-w-0 items-center gap-1 truncate"> {/* This will now just trigger a clone */}
                         {apt.patientName || `${apt.time} • Dr. ${apt.doctor}`}
                         {isReservedAppointmentStatus(apt.status) && " (R)"}
                         {normalizeAppointmentStatus(apt.status) === "to-pay" && " (P)"}
@@ -1105,7 +1109,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             {sortedAppointments.map((apt: Appointment) => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(apt.status);
-              const recurringIconVariant = getRecurringAppointmentIconVariant(apt);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
                   handleOpenAppointment(apt);
@@ -1114,7 +1117,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex min-w-0 items-center gap-2 font-bold text-lg">
-                        {recurringIconVariant && <RecurringAppointmentIcon className="h-5 w-5" variant={recurringIconVariant} />}
                         <span className="truncate">{apt.patientName}</span>
                       </div>
                       <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
