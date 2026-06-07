@@ -24,6 +24,7 @@ import useSharedBookingLogic, {
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
+  findNextAvailableRepeatSlot,
   formatBookingDateKey,
   formatBookingDoctorName as formatDoctorName,
   formatBookingHistoryStatusLabel,
@@ -1435,6 +1436,75 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     })}.`;
   };
 
+  const saveFollowUpAppointment = async ({
+    followUpDate,
+    followUpStatus,
+    targetDoctor,
+    targetPatientRecord,
+    bookingDuration: followUpDuration,
+    treatmentNotesUpdate: followUpTreatmentNotesUpdate,
+  }: {
+    followUpDate: Date;
+    followUpStatus: string;
+    targetDoctor: string;
+    targetPatientRecord?: any;
+    bookingDuration: number;
+    treatmentNotesUpdate: any;
+  }) => {
+    const followUpDateStr = formatDateToYYYYMMDD(followUpDate);
+    const followUpPayload: any = {
+      patientId: selectedPatient,
+      patientName: targetPatientRecord?.name || selectedPatient,
+      doctor: targetDoctor || "",
+      date: followUpDateStr,
+      time: selectedTime,
+      type: getAppointmentTypeIndex(appointmentType),
+      customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+      duration: followUpDuration,
+      price: finalPrice,
+      discount: Number(discount) || 0,
+      notes,
+      ...followUpTreatmentNotesUpdate,
+      status: followUpStatus as any,
+      paymentStatus: "unpaid",
+      paymentMethod: "",
+      totalPaid: 0,
+      balance: discountedPrice,
+      logNotes: getFollowUpLogNotes(followUpDate),
+    };
+
+    try {
+      if (isPublicBookingMode) {
+        if (isCartAppointmentStatus(followUpStatus)) {
+          await createPublicBookingAppointment(followUpPayload);
+        } else {
+          const resp = await fetch(apiUrl("/api/appointments/public-book"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              firstName: targetPatientRecord?.firstName || "",
+              lastName: targetPatientRecord?.lastName || "",
+              email: targetPatientRecord?.email || "",
+              phone: targetPatientRecord?.phone || "",
+              patientId: targetPatientRecord?.id,
+              ...followUpPayload,
+            }),
+          });
+          const json = await resp.json();
+          if (!resp.ok || !json.success) {
+            throw new Error(json?.message || "Failed to create follow-up appointment");
+          }
+        }
+      } else {
+        await addAppointment(followUpPayload);
+      }
+      toast.success("Follow-up appointment saved successfully.");
+    } catch (repeatError) {
+      console.error("Failed to save follow-up appointment:", repeatError);
+      toast.error("Could not save the follow-up appointment. Please try again.");
+    }
+  };
+
   // Final step: save after confirmation
   const handleConfirmSummary = async (repeatPayload?: { repeatOption: string; customRepeatDate?: string }) => {
     if (!selectedPatient || !appointmentType) return;
@@ -1589,58 +1659,31 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         if (onBooked) onBooked(updated);
 
         if (repeatTargetDate) {
-          const followUpDateStr = formatDateToYYYYMMDD(repeatTargetDate);
-          const followUpStatus = isCartAppointmentStatus(updateAppointmentStatus) ? updateAppointmentStatus : "scheduled";
-          const followUpPayload: any = {
-            patientId: selectedPatient,
-            patientName: selectedPatientRecord?.name || selectedPatient,
-            doctor: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
-            date: followUpDateStr,
-            time: selectedTime,
-            type: getAppointmentTypeIndex(appointmentType),
-            customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-            duration: bookingDuration,
-            price: finalPrice,
-            discount: Number(discount) || 0,
-            notes,
-            ...treatmentNotesUpdate,
-            status: followUpStatus as any,
-            paymentStatus: "unpaid",
-            paymentMethod: "",
-            totalPaid: 0,
-            balance: discountedPrice,
-            logNotes: getFollowUpLogNotes(repeatTargetDate),
-          };
+          const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+            startDate: repeatTargetDate,
+            doctorToCheck: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+            durationToCheck: bookingDuration,
+            patientToCheck: selectedPatient,
+            timeToCheck: selectedTime,
+            availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+            localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+          });
 
-          try {
-            if (isPublicBookingMode) {
-              if (isCartAppointmentStatus(followUpStatus)) {
-                await createPublicBookingAppointment(followUpPayload);
-              } else {
-                const resp = await fetch(apiUrl("/api/appointments/public-book"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    firstName: selectedPatientRecord?.firstName || "",
-                    lastName: selectedPatientRecord?.lastName || "",
-                    email: selectedPatientRecord?.email || "",
-                    phone: selectedPatientRecord?.phone || "",
-                    patientId: selectedPatientRecord?.id,
-                    ...followUpPayload,
-                  }),
-                });
-                const json = await resp.json();
-                if (!resp.ok || !json.success) {
-                  throw new Error(json?.message || "Failed to create follow-up appointment");
-                }
-              }
-            } else {
-              await addAppointment(followUpPayload);
+          if (resolvedRepeatSlot) {
+            const followUpDate = resolvedRepeatSlot.date;
+            if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
+              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
             }
-            toast.success("Follow-up appointment saved successfully.");
-          } catch (repeatError) {
-            console.error("Failed to save follow-up appointment:", repeatError);
-            toast.error("Could not save the follow-up appointment. Please try again.");
+
+            const followUpStatus = isCartAppointmentStatus(updateAppointmentStatus) ? updateAppointmentStatus : "scheduled";
+            await saveFollowUpAppointment({
+              followUpDate,
+              followUpStatus,
+              targetDoctor: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+              targetPatientRecord: selectedPatientRecord,
+              bookingDuration,
+              treatmentNotesUpdate,
+            });
           }
         }
 
@@ -1810,58 +1853,31 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         }
 
         if (repeatTargetDate) {
-          const followUpDateStr = formatDateToYYYYMMDD(repeatTargetDate);
-          const followUpStatus = isCartAppointmentStatus(autoStatus) ? autoStatus as any : "scheduled";
-          const followUpPayload: any = {
-            patientId: selectedPatient,
-            patientName: selectedPatientRecord?.name || selectedPatient,
-            doctor: selectedDoctor || "",
-            date: followUpDateStr,
-            time: selectedTime,
-            type: getAppointmentTypeIndex(appointmentType),
-            customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-            duration: bookingDuration,
-            price: finalPrice,
-            discount: Number(discount) || 0,
-            notes,
-            ...treatmentNotesUpdate,
-            status: followUpStatus,
-            paymentStatus: "unpaid",
-            paymentMethod: "",
-            totalPaid: 0,
-            balance: discountedPrice,
-            logNotes: getFollowUpLogNotes(repeatTargetDate),
-          };
+          const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+            startDate: repeatTargetDate,
+            doctorToCheck: selectedDoctor || "",
+            durationToCheck: bookingDuration,
+            patientToCheck: selectedPatient,
+            timeToCheck: selectedTime,
+            availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+            localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+          });
 
-          try {
-            if (isPublicBookingMode) {
-              if (isCartAppointmentStatus(followUpStatus)) {
-                await createPublicBookingAppointment(followUpPayload);
-              } else {
-                const resp = await fetch(apiUrl("/api/appointments/public-book"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    firstName: selectedPatientRecord?.firstName || "",
-                    lastName: selectedPatientRecord?.lastName || "",
-                    email: selectedPatientRecord?.email || "",
-                    phone: selectedPatientRecord?.phone || "",
-                    patientId: selectedPatientRecord?.id,
-                    ...followUpPayload,
-                  }),
-                });
-                const json = await resp.json();
-                if (!resp.ok || !json.success) {
-                  throw new Error(json?.message || "Failed to create follow-up appointment");
-                }
-              }
-            } else {
-              await addAppointment(followUpPayload);
+          if (resolvedRepeatSlot) {
+            const followUpDate = resolvedRepeatSlot.date;
+            if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
+              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
             }
-            toast.success("Follow-up appointment saved successfully.");
-          } catch (repeatError) {
-            console.error("Failed to save follow-up appointment:", repeatError);
-            toast.error("Could not save the follow-up appointment. Please try again.");
+
+            const followUpStatus = isCartAppointmentStatus(autoStatus) ? autoStatus as any : "scheduled";
+            await saveFollowUpAppointment({
+              followUpDate,
+              followUpStatus,
+              targetDoctor: selectedDoctor || "",
+              targetPatientRecord: selectedPatientRecord,
+              bookingDuration,
+              treatmentNotesUpdate,
+            });
           }
         }
 

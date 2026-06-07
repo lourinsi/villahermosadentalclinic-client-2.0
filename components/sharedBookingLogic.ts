@@ -641,7 +641,7 @@ export async function findNextAvailableBookingSlot({
 }: {
   startDate: Date;
   doctorToCheck: string;
-  durationToCheck: string;
+  durationToCheck: string | number;
   patientToCheck?: string;
   timeSlots: string[];
   maxDaysToCheck?: number;
@@ -786,6 +786,39 @@ export async function findNextAvailableBookingSlot({
   }
 
   return null;
+}
+
+export async function findNextAvailableRepeatSlot({
+  startDate,
+  doctorToCheck,
+  durationToCheck,
+  patientToCheck,
+  timeToCheck,
+  maxDaysToCheck = 30,
+  availabilityMode = "authenticated",
+  localBlockingAppointments = [],
+}: {
+  startDate: Date;
+  doctorToCheck: string;
+  durationToCheck: string | number;
+  patientToCheck?: string;
+  timeToCheck: string;
+  maxDaysToCheck?: number;
+  availabilityMode?: "authenticated" | "public";
+  localBlockingAppointments?: any[];
+}): Promise<BookingSlot | null> {
+  if (!timeToCheck) return null;
+
+  return findNextAvailableBookingSlot({
+    startDate,
+    doctorToCheck,
+    durationToCheck,
+    patientToCheck,
+    timeSlots: [timeToCheck],
+    maxDaysToCheck,
+    availabilityMode,
+    localBlockingAppointments,
+  });
 }
 
 export function getBookingActor({

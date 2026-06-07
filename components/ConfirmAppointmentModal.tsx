@@ -317,7 +317,6 @@ export function ConfirmAppointmentModal({
                 <div className="flex flex-col gap-3">
                   <div>
                     <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Repeat this appointment</p>
-                    <p className="text-sm text-gray-500">Pick a follow-up clone date without creating a linked recurrence.</p>
                   </div>
 
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -341,12 +340,13 @@ export function ConfirmAppointmentModal({
                       <>
                         <Button
                           variant="outline"
-                          className="h-10 min-w-[200px] rounded-full border border-gray-200 bg-white px-4 text-xs font-black uppercase tracking-tighter text-gray-700 shadow-sm hover:bg-gray-50"
+                          className="h-10 rounded-full border-0 px-4 bg-gradient-to-r from-blue-50 to-blue-50 text-blue-700 font-black text-xs uppercase tracking-tighter shadow-sm hover:from-blue-100 hover:to-blue-100 flex items-center gap-2 transition-all"
                           onClick={() => setCustomRepeatDatePickerOpen(true)}
                         >
+                          <CalendarIcon className="h-4 w-4" />
                           {customRepeatDate
-                            ? `Custom date: ${parseLocalDateOnly(customRepeatDate)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? customRepeatDate}`
-                            : "Select a follow-up date"}
+                            ? parseLocalDateOnly(customRepeatDate)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? "Pick date"
+                            : "Pick date"}
                         </Button>
                         <DatePickerModal
                           open={customRepeatDatePickerOpen}
