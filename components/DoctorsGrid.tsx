@@ -3,6 +3,9 @@
 import { useState, useMemo } from "react";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
+import { useAppointments } from "@/hooks/useAppointments";
+import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -17,8 +20,20 @@ interface DoctorsGridProps {
 
 export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
   const router = useRouter();
+  const { user } = useAuth();
+  const today = new Date();
+  const todayStr = formatDateToYYYYMMDD(today);
+  const { appointments: todaysAppointments } = useAppointments(undefined, {
+    patientId: user?.patientId,
+    startDate: todayStr,
+    endDate: todayStr,
+  }, {
+    enabled: portal === "patient" && Boolean(user?.patientId),
+  });
   const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === "public" });
   const [searchTerm, setSearchTerm] = useState("");
+
+  const hasPatientScheduleToday = portal === "patient" && Boolean(user?.patientId) && todaysAppointments.some((apt) => String(apt.status).toLowerCase() !== "cancelled");
 
   const filteredDoctors = useMemo(() => {
     if (!doctors) return [];
@@ -138,8 +153,10 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
                 <Button
                   data-tour-id="doctor-card-button"
-                  onClick={() => handleDoctorClick(doctor)}
-                  className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
+                  onClick={() => !hasPatientScheduleToday && handleDoctorClick(doctor)}
+                  disabled={hasPatientScheduleToday}
+                  title={hasPatientScheduleToday ? "You already have a schedule today and cannot book another same-day appointment." : undefined}
+                  className={`w-full gap-2 bg-blue-600 hover:bg-blue-700 ${hasPatientScheduleToday ? "opacity-60 cursor-not-allowed hover:bg-blue-600" : ""}`}
                 >
                   <Calendar className="h-4 w-4" />
                   {getButtonText()}

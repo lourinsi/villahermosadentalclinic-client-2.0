@@ -270,6 +270,10 @@ export function CalendarView({
         return;
       }
 
+      if (portal === 'patient' && doesPatientAlreadyHaveAppointmentOnDate(date)) {
+        return;
+      }
+
       if (onCreateAppointment) {
         onCreateAppointment(date, time, doctorName);
         return;
@@ -277,7 +281,7 @@ export function CalendarView({
 
       openCreateModal(date, time, doctorName);
     },
-    [onCreateAppointment, openCreateModal, portal, isPastDateTime]
+    [onCreateAppointment, openCreateModal, portal, isPastDateTime, doesPatientAlreadyHaveAppointmentOnDate]
   );
 
   const handleOpenAppointment = useCallback(
@@ -533,6 +537,14 @@ export function CalendarView({
     return filteredAppointments.filter(apt => apt.date === dateStr);
   };
 
+  function doesPatientAlreadyHaveAppointmentOnDate(date?: Date) {
+    if (portal !== 'patient' || !user || !(user as any).patientId || !date) return false;
+    const dateStr = formatDateToYYYYMMDD(date);
+    return filteredAppointments.some(
+      (apt) => apt.date === dateStr && String(apt.patientId) === String((user as any).patientId)
+    );
+  }
+
   const getColorForType = (type: string) => {
     return getAppointmentCalendarStatusColors(type, APPOINTMENT_STATUSES);
   };
@@ -672,8 +684,15 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
       return false;
     };
 
+    const patientDayBlocked = doesPatientAlreadyHaveAppointmentOnDate(selectedDate);
+
     return (
         <div className="space-y-0 relative">
+    {patientDayBlocked && (
+      <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        You already have an appointment on this day. Same-day scheduling is disabled.
+      </div>
+    )}
     {timeSlots.map((timeSlot) => {
             const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
             const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
@@ -682,7 +701,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             return (
               <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
                 {/* Plus button for occupied slots - upper right */}
-                {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && !patientDayBlocked && (
                   /* Wide position for empty slots: centered in the main area */
                   <div
                     className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
@@ -696,7 +715,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
                 <div>{formatTime(timeSlot)}</div>
                 {/* Plus button for occupied slots - underneath time */}
-                {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && !patientDayBlocked && (
                   <div className="mt-2 opacity-0 group-hover:opacity-100 transition-all pointer-events-auto">
                     <button
                       className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer flex items-center justify-center"
@@ -857,13 +876,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   }
                   const isSlotPast = isPastDateTime(day, timeSlot);
 
+                  const dayBlocked = portal === 'patient' && doesPatientAlreadyHaveAppointmentOnDate(day);
                   return (
                   <div 
                     key={idx} 
                     className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                   >
                     {/* Plus button for occupied slots - upper right */}
-                    {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                    {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && !dayBlocked && (
                       <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-all z-30">
                         <button
                           className=" "
@@ -879,7 +899,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     )}
 
                     {/* Centered plus button for empty slots */}
-                    {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                    {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && !dayBlocked && (
                       <div
                         className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
                         onClick={() => handleCreateAppointment(day, timeSlot)}

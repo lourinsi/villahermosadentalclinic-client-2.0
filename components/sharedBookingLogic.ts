@@ -711,10 +711,22 @@ export async function findNextAvailableBookingSlot({
           patientAppointmentsForDate = localPatientAppointmentsForDate;
         }
 
+        patientAppointmentsForDate = patientAppointmentsForDate.filter(
+          (appointment) => appointment.status !== "cancelled" && !isCartAppointmentStatus(appointment.status)
+        );
+
         console.log(`[${logPrefix}] findNextAvailableSlot fetched patient appointments for`, dateStr, {
           patientToCheck,
           patientCount: patientAppointmentsForDate.length,
         });
+      }
+
+      if (patientAppointmentsForDate.length > 0) {
+        console.log(`[${logPrefix}] Blocking date for patient because an appointment already exists`, dateStr, {
+          patientToCheck,
+          patientCount: patientAppointmentsForDate.length,
+        });
+        return [];
       }
 
       const now = new Date();
@@ -885,6 +897,7 @@ type UseSharedBookingLogicArgs = {
   toast: Toast;
   durationConflict?: string;
   patientConflict?: string;
+  patientDateConflict?: string;
   skipDoctorStep?: boolean;
   allowConflictSummary?: boolean;
   scheduleMode?: BookingCreationMode;
@@ -1076,6 +1089,7 @@ export default function useSharedBookingLogic({
   toast,
   durationConflict,
   patientConflict,
+  patientDateConflict,
   skipDoctorStep = false,
   allowConflictSummary = false,
   scheduleMode = 'standard',
@@ -1108,8 +1122,23 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (patientDateConflict) {
+      safeToastError(toast, patientDateConflict);
+      return false;
+    }
+
     if (patientConflict) {
       safeToastError(toast, patientConflict);
+      return false;
+    }
+
+    return true;
+  }
+
+  function validateSelectedDate() {
+    const appointmentDate = parseLocalDateOnly(selectedDate);
+    if (!appointmentDate) {
+      safeToastError(toast, 'Please choose a valid date for the appointment.');
       return false;
     }
 
@@ -1122,6 +1151,7 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (!validateSelectedDate()) return false;
     if (!validateScheduleWindow()) return false;
 
     return validateScheduleAvailability();
@@ -1133,6 +1163,7 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (!validateSelectedDate()) return false;
     return validateScheduleWindow();
   }
 

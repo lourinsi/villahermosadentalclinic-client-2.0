@@ -777,7 +777,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Get conflict info for patient
   const getPatientConflictInfo = useCallback(() => {
-    if (!selectedTime || !selectedDate) return { hasConflict: false };
+    if (!selectedTime || !selectedDate || !selectedPatient) return { hasConflict: false };
+
+    if (patientAppointments.length > 0) {
+      return {
+        hasConflict: true,
+        conflictMessage: 'Selected patient already has an appointment on this date. Only one appointment is allowed per patient per day.',
+      };
+    }
     
     const durationMins = normalizeBookingDuration(duration);
     const hasConflict = checkPatientConflict(selectedTime, durationMins);
@@ -828,7 +835,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const conflict = getPatientConflictInfo();
     
     if (conflict.hasConflict) {
-      setPatientConflict(`${selectedPatientName} has appointment with ${conflict.conflictDoctor} at ${conflict.conflictTime}`);
+      if (conflict.conflictMessage) {
+        setPatientConflict(conflict.conflictMessage);
+      } else {
+        setPatientConflict(`${selectedPatientName} has appointment with ${conflict.conflictDoctor} at ${conflict.conflictTime}`);
+      }
     } else {
       setPatientConflict("");
     }
@@ -1310,6 +1321,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     toast,
     durationConflict,
     patientConflict,
+    patientDateConflict: patientAppointments.length > 0 && selectedPatient ? `${selectedPatient} already has an appointment on this date. Only one appointment is allowed per patient per day.` : undefined,
     allowConflictSummary: true,
     scheduleMode: isPastAppointmentMode ? 'past' : 'standard',
   });
@@ -2874,6 +2886,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         customRepeatDate={customRepeatDate}
         onRepeatOptionChange={setRepeatOption}
         onCustomRepeatDateChange={setCustomRepeatDate}
+        patientId={selectedPatient}
 
         getPersonInitials={(name?: string) => {
           const initials = String(name || "")

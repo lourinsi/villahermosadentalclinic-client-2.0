@@ -166,6 +166,29 @@ export function DatePickerModal({
     onOpenChange(false);
   };
 
+  const getDayAppointments = (date: Date) => {
+    const dateStr = formatDateToYYYYMMDD(date);
+    return appointments.filter((apt) => {
+      const aptDate = parseLocalDateOnly(apt.date) || new Date(apt.date);
+      const aptDateStr = formatDateToYYYYMMDD(aptDate);
+      return aptDateStr === dateStr
+        && (!excludeAppointmentId || String(apt.id) !== String(excludeAppointmentId))
+        && apt.status !== 'cancelled'
+        && !isCartAppointmentStatus(apt.status);
+    });
+  };
+
+  const handleDayClick = (date: Date) => {
+    if (selectionDisabled || isBeforeMinDate(date)) return;
+
+    const status = getDayStatus(date);
+    if (status === 'patient-booked' || status === 'fully-booked') {
+      return;
+    }
+
+    handleDateSelect(date);
+  };
+
   // Fetch appointments for the entire month being viewed
   useEffect(() => {
     if (!open || (!doctorName && !patientId)) return;
@@ -272,21 +295,18 @@ export function DatePickerModal({
 
   // Check if a day has any available slots
   const getDayStatus = (date: Date) => {
-    const dateStr = formatDateToYYYYMMDD(date);
-    const dayAppointments = appointments.filter(apt => {
-      const aptDate = parseLocalDateOnly(apt.date) || new Date(apt.date);
-      const aptDateStr = formatDateToYYYYMMDD(aptDate);
-      return aptDateStr === dateStr
-        && (!excludeAppointmentId || String(apt.id) !== String(excludeAppointmentId))
-        && apt.status !== 'cancelled'
-        && !isCartAppointmentStatus(apt.status);
-    });
+    const dayAppointments = getDayAppointments(date);
 
-    // Assuming 8 AM - 5 PM with 30-min slots = 18 slots per day
-    // If all slots are booked, mark as fully booked
+    if (patientId) {
+      const patientHasAppointment = dayAppointments.some((apt) =>
+        String(apt.patientId) === String(patientId)
+      );
+      if (patientHasAppointment) return 'patient-booked';
+    }
+
     const totalSlots = 18;
     const bookedSlots = dayAppointments.length;
-    
+
     if (bookedSlots >= totalSlots) {
       return 'fully-booked';
     } else if (bookedSlots > 0) {
@@ -341,7 +361,7 @@ export function DatePickerModal({
             </div>
 
             {/* Legend */}
-            <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
+            <div className="grid grid-cols-4 gap-2 mb-4 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-emerald-100" />
                 <span className="text-gray-600">Available</span>
@@ -349,6 +369,10 @@ export function DatePickerModal({
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-amber-100" />
                 <span className="text-gray-600">Has Bookings</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-yellow-100" />
+                <span className="text-gray-600">Already has booking</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-red-100" />
@@ -374,24 +398,28 @@ export function DatePickerModal({
                 const today = isToday(date);
                 const dayStatus = getDayStatus(date);
                 const isFullyBooked = dayStatus === 'fully-booked';
+                const isPatientBooked = dayStatus === 'patient-booked';
                 const isTooEarly = isBeforeMinDate(date);
                 const hasTimeConflict = Boolean(selectedTime && duration && checkTimeConflict(date));
                 const isTimeConflictDisabled = disableDatesWithTimeConflict && hasTimeConflict;
+                const isBlockedDate = isPatientBooked || isFullyBooked;
                 const isDisabled = selectionDisabled || isTooEarly || isTimeConflictDisabled;
 
                 return (
                   <button
                     key={date.toISOString()}
-                    disabled={isDisabled || isFullyBooked}
-                    onClick={() => !isDisabled && !isFullyBooked && handleDateSelect(date)}
+                    disabled={isDisabled || isBlockedDate}
+                    onClick={() => !isDisabled && !isBlockedDate && handleDayClick(date)}
                     className={cn(
                       "aspect-square flex items-center justify-center rounded-lg text-sm font-medium transition-all border",
                       selectionDisabled || isTooEarly
                         ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
                         : isTimeConflictDisabled
                         ? "bg-red-50 text-red-400 border-red-200 cursor-not-allowed hover:bg-red-50"
+                        : isPatientBooked
+                        ? "bg-yellow-50 text-amber-700 border-amber-200 cursor-pointer hover:bg-yellow-100"
                         : isFullyBooked
-                        ? "bg-red-50 text-red-400 border-red-200 cursor-not-allowed hover:bg-red-50"
+                        ? "bg-red-50 text-red-400 border-red-200 cursor-pointer hover:bg-red-100"
                         : active
                         ? "bg-blue-600 text-white border-blue-700 shadow-lg scale-110"
                         : today
@@ -402,6 +430,7 @@ export function DatePickerModal({
                       selectionDisabled ? "Date selection is disabled during this tour step"
                       : isTooEarly ? "Too early"
                       : disableDatesWithTimeConflict && hasTimeConflict ? "Original time is already booked"
+                      : isPatientBooked ? "Already has a booking"
                       : isFullyBooked ? "Fully booked"
                       : dayStatus === 'has-bookings' ? "Has Bookings"
                       : "Available"
@@ -411,6 +440,9 @@ export function DatePickerModal({
                       <span>{date.getDate()}</span>
                       {dayStatus === 'fully-booked' && (
                         <span className="text-[8px] font-bold">FULL</span>
+                      )}
+                      {dayStatus === 'patient-booked' && (
+                        <span className="text-[8px] font-bold">BOOKED</span>
                       )}
                       {dayStatus === 'has-bookings' && (
                         <span className="text-[8px]">◐</span>

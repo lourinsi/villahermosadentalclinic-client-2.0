@@ -186,6 +186,10 @@ export function TimePickerModal({
       apt.status !== 'cancelled' && apt.id !== excludeAppointmentId
     );
 
+    const patientDayAppointment = patientId
+      ? activeAppointments.find((apt) => String(apt.patientId) === String(patientId)) || null
+      : null;
+
     return TIME_SLOTS.map(slot => {
       const [hour, minute] = slot.split(':').map(Number);
       const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
@@ -200,49 +204,51 @@ export function TimePickerModal({
       let isTentative = false;
       let isPending = false;
       let isPatientConflict = false;
+      let isPatientDayBlocked = false;
       let appointment: Appointment | null = null;
-      
+
       for (const apt of activeAppointments) {
         const aptStart = timeToMinutes(apt.time);
         const aptEnd = aptStart + normalizeBookingDuration(apt.duration);
         
         if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
-          // Check if this is a doctor conflict or a patient conflict
           const isDoctorConflict = apt.doctor === doctorName;
           const isPatientSpecificConflict = patientId && String(apt.patientId) === String(patientId);
 
-          if (isDoctorConflict) {
+          if (isDoctorConflict || isPatientSpecificConflict) {
             isBooked = true;
-            appointment = apt;
+            appointment = appointment || apt;
+
             if (isReservedAppointmentStatus(apt.status)) {
               isTentative = true;
             } else if (isCartAppointmentStatus(apt.status)) {
               isPending = true;
             }
-          }
 
-          if (isPatientSpecificConflict) {
-            isPatientConflict = true;
-            // If it's the patient's own appointment with another doctor, 
-            // we should also block the slot even if this doctor is free
-            isBooked = true;
-            // Only set appointment if not already set by doctor conflict
-            if (!appointment) appointment = apt;
+            if (isPatientSpecificConflict) {
+              isPatientConflict = true;
+            }
+            
+            break;
           }
-          
-          if (isBooked) break;
         }
+      }
+
+      if (!isBooked && patientDayAppointment) {
+        isPatientDayBlocked = true;
+        appointment = patientDayAppointment;
       }
 
       const isSelected = selectedTime === slot && formatDateToYYYYMMDD(viewDate) === formatDateToYYYYMMDD(selectedDate);
       
       return {
         time: slot,
-        isAvailable: (!isBooked || isPending),
+        isAvailable: !isBooked && !isPatientDayBlocked,
         isBooked,
         isTentative,
         isPending,
         isPatientConflict,
+        isPatientDayBlocked,
         isPast,
         isFuture,
         isBlockedByDateMode: false,
@@ -303,21 +309,21 @@ export function TimePickerModal({
                 <button
                   key={slot.time}
                   onClick={() => {
-                    if (selectionDisabled) return;
+                    if (selectionDisabled || slot.isPatientDayBlocked) return;
                     if (slot.isAvailable) {
                       handleTimeSelect(slot.time);
-                    } else if (slot.appointment) {
+                    } else if (slot.isBooked && slot.appointment) {
                       setSelectedAppointment(slot.appointment);
                       setSnapshotOpen(true);
                     }
                   }}
-                  disabled={selectionDisabled}
+                  disabled={selectionDisabled || slot.isPatientDayBlocked}
                   className={cn(
                     "px-2 py-2 rounded-lg font-semibold text-xs transition-all border",
                     selectionDisabled
                       ? "bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed"
-                    : slot.isPatientConflict && !slot.isPending
-                      ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
+                    : slot.isPatientDayBlocked
+                      ? "bg-yellow-50 text-amber-700 border-amber-200 cursor-not-allowed"
                     : slot.isSelected && slot.isAvailable
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
                       : slot.isAvailable && (!slot.isBooked || slot.isPending)
@@ -328,7 +334,7 @@ export function TimePickerModal({
                   ) }
                   title={
                     selectionDisabled ? "Time selection is disabled during this tour step"
-                    : slot.isPatientConflict ? "Patient is busy (Click to view details)"
+                    : slot.isPatientDayBlocked ? "Patient already has a booking on this day"
                     : slot.isTentative ? "Reserved (Click to view details)"
                     : slot.isBooked && !slot.isPending ? "Booked (Click to view details)"
                     : "Available"
@@ -336,7 +342,7 @@ export function TimePickerModal({
                 >
                   <div>{formatTimeTo12h(slot.time)}</div>
                   <div className="text-[8px] opacity-70">
-                    {slot.isPatientConflict ? "Busy"
+                    {slot.isPatientDayBlocked ? "Blocked"
                     : slot.isTentative ? "Rsrvd"
                     : slot.isBooked && !slot.isPending ? "Booked"
                     : "Open"}

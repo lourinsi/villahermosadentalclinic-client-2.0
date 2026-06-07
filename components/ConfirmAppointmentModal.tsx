@@ -29,6 +29,7 @@ interface ConfirmAppointmentModalProps {
   // Patient info
   patientName: string;
   patientAvatar?: string;
+  patientId?: string;
 
   // Doctor info
   doctorName: string;
@@ -93,6 +94,7 @@ export function ConfirmAppointmentModal({
   isBooking,
   patientName,
   patientAvatar,
+  patientId,
   doctorName,
   doctorAvatar,
   appointmentType,
@@ -357,6 +359,7 @@ export function ConfirmAppointmentModal({
                             handleCustomRepeatDateChange(formatted);
                           }}
                           doctorName={doctorName}
+                          patientId={patientId}
                           selectedTime={selectedTime}
                           duration={duration}
                           minDate={selectedDate}
