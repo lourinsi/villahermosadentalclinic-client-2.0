@@ -1436,6 +1436,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     })}.`;
   };
 
+  const buildRepeatAppointmentNotes = (baseNotes: string, sourceDate: Date, nextDate: Date) => {
+    const repeatDateLabel = nextDate.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    const repeatNote = `Repeats on ${repeatDateLabel}`;
+    const trimmed = String(baseNotes || "").trim();
+    return trimmed ? `${trimmed}\n${repeatNote}` : repeatNote;
+  };
+
+  const buildFollowUpAppointmentNotes = (baseNotes: string, sourceDate: Date, sourceDateForLabel: Date) => {
+    const sourceDateLabel = sourceDateForLabel.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    const followUpNote = `Created as a repeating schedule from ${sourceDateLabel}`;
+    const trimmed = String(baseNotes || "").trim();
+    return trimmed ? `${trimmed}\n${followUpNote}` : followUpNote;
+  };
+
   const saveFollowUpAppointment = async ({
     followUpDate,
     followUpStatus,
@@ -1463,7 +1483,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       duration: followUpDuration,
       price: finalPrice,
       discount: Number(discount) || 0,
-      notes,
+      notes: buildFollowUpAppointmentNotes(notes, selectedDate, followUpDate),
       ...followUpTreatmentNotesUpdate,
       status: followUpStatus as any,
       paymentStatus: "unpaid",
@@ -1537,6 +1557,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
       const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
+      const originalAppointmentNotes = repeatTargetDate
+        ? buildRepeatAppointmentNotes(notes, selectedDate, repeatTargetDate)
+        : notes;
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1600,7 +1623,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
-              notes,
+              notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
@@ -1621,7 +1644,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
-              notes,
+              notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
@@ -1726,7 +1749,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || "",
-              notes,
+              notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               price: finalPrice,
               discount: Number(discount) || 0,
@@ -1755,7 +1778,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
-                notes,
+                notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
                 status: autoStatus,
@@ -1797,7 +1820,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
-                  notes,
+                  notes: originalAppointmentNotes,
                   ...treatmentNotesUpdate,
                   price: finalPrice,
                   discount: Number(discount) || 0,
@@ -1819,7 +1842,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
-                notes,
+                notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 price: finalPrice,
                 discount: Number(discount) || 0,
@@ -1843,7 +1866,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             duration: bookingDuration,
             price: finalPrice,
             discount: Number(discount) || 0,
-            notes,
+            notes: originalAppointmentNotes,
             ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
