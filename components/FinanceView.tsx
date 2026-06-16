@@ -23,6 +23,8 @@ import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./Finan
 import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
 import { FinanceInventoryReorderModal } from "./FinanceInventoryReorderModal";
 import { FinancePayrollModal, type FinancePayrollModalMode } from "./FinancePayrollModal";
+import { FinancePayrollBonusModal, type PayrollBonusForm } from "./FinancePayrollBonusModal";
+import { FinancePayrollEditModal, type PayrollEditForm } from "./FinancePayrollEditModal";
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
@@ -52,12 +54,14 @@ import {
   Eye,
   Edit,
   Plus,
-  Receipt,
   Filter,
   User,
   PackagePlus,
   RotateCcw,
-  Wallet
+  Wallet,
+  Gift,
+  CreditCard,
+  CheckCircle2
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -305,15 +309,9 @@ export interface DetailedExpense {
   paymentMethod: string;
   status: string;
   recurring: boolean;
+  inventoryItemId?: string;
+  inventoryQuantity?: number;
   notes?: string;
-}
-
-export interface RecurringExpense {
-  category: string;
-  description: string;
-  amount: number;
-  frequency: string;
-  nextDue: string;
 }
 
 export interface InventoryItem {
@@ -332,13 +330,119 @@ export interface PayrollEntry {
   name: string;
   role: string;
   baseSalary: number;
+  staffBaseSalary?: number;
   bonus: number;
+  managedAdjustment?: number;
   total: number;
   status: string;
   salaryRecordId?: string;
   paymentDate?: string;
   month?: string;
 }
+
+type StaffFinancialRecord = {
+  id: string;
+  staffId: string;
+  staffName: string;
+  type: string;
+  amount: number;
+  date: string;
+  status: string;
+  notes?: string;
+  repaymentSchedule?: string;
+};
+
+type StaffRecordUpdate = {
+  baseSalary?: number;
+};
+
+const MANAGED_PAYROLL_ADJUSTMENT_PREFIX = "[payroll-adjustment]";
+
+const resolvePayrollFormDate = (payrollMonth: string, entry?: PayrollEntry | null) =>
+  entry?.paymentDate?.startsWith(`${payrollMonth}-`)
+    ? entry.paymentDate
+    : getDefaultPayrollPaymentDate(payrollMonth);
+
+const createPayrollBonusForm = (payrollMonth: string, staffId = ""): PayrollBonusForm => ({
+  staffId,
+  amount: 0,
+  date: getDefaultPayrollPaymentDate(payrollMonth),
+  notes: "",
+  existingAdjustmentTotal: 0,
+});
+
+const createPayrollEditFormFromEntry = (entry: PayrollEntry, payrollMonth: string): PayrollEditForm => ({
+  baseSalary: Number(entry.staffBaseSalary ?? entry.baseSalary) || 0,
+  date: resolvePayrollFormDate(payrollMonth, entry),
+  salaryNotes: "",
+});
+
+const isPayrollMonthDate = (date: string, payrollMonth: string) =>
+  String(date || "").startsWith(`${payrollMonth}-`);
+
+const isSalaryFinancialRecord = (record: StaffFinancialRecord) =>
+  normalizeFilterValue(record.type) === "salary" ||
+  normalizeFilterValue(record.type) === "payroll" ||
+  normalizeFilterValue(record.type) === "monthlysalary";
+
+const isPayrollBonusFinancialRecord = (record: StaffFinancialRecord) => {
+  const type = normalizeFilterValue(record.type);
+  const status = normalizeFilterValue(record.status);
+  if (["cancelled", "canceled", "void", "voided"].includes(status)) return false;
+  return (
+    type === "bonus" ||
+    type === "commission" ||
+    type === "overtime" ||
+    String(record.notes || "").includes(MANAGED_PAYROLL_ADJUSTMENT_PREFIX)
+  );
+};
+
+const payrollAdjustmentMarker = (payrollMonth: string) =>
+  `${MANAGED_PAYROLL_ADJUSTMENT_PREFIX} ${payrollMonth}`;
+
+const payrollAdjustmentNotes = (payrollMonth: string, notes: string) => {
+  const cleanNotes = notes.trim();
+  return `${payrollAdjustmentMarker(payrollMonth)}${cleanNotes ? ` ${cleanNotes}` : " Current month payroll adjustment"}`;
+};
+
+const findManagedPayrollAdjustment = (
+  records: StaffFinancialRecord[],
+  staffId: string,
+  payrollMonth: string
+) => {
+  const marker = payrollAdjustmentMarker(payrollMonth);
+  return records.find(
+    (record) =>
+      record.staffId === staffId &&
+      isPayrollMonthDate(record.date, payrollMonth) &&
+      normalizeFilterValue(record.type) === "bonus" &&
+      String(record.notes || "").includes(marker)
+  );
+};
+
+const getPayrollBonusRecords = (
+  records: StaffFinancialRecord[],
+  staffId: string,
+  payrollMonth: string
+) =>
+  records.filter(
+    (record) =>
+      record.staffId === staffId &&
+      isPayrollMonthDate(record.date, payrollMonth) &&
+      isPayrollBonusFinancialRecord(record)
+  );
+
+const findPayrollSalaryRecord = (
+  records: StaffFinancialRecord[],
+  staffId: string,
+  payrollMonth: string
+) =>
+  records.find(
+    (record) =>
+      record.staffId === staffId &&
+      isPayrollMonthDate(record.date, payrollMonth) &&
+      isSalaryFinancialRecord(record)
+  );
 
 export interface RecentTransaction {
   id: string; // Changed from number for consistency
@@ -378,6 +482,14 @@ export function FinanceView() {
   const [payrollModalMode, setPayrollModalMode] = useState<FinancePayrollModalMode | null>(null);
   const [selectedPayrollEntry, setSelectedPayrollEntry] = useState<PayrollEntry | null>(null);
   const [payrollPaymentDate, setPayrollPaymentDate] = useState(todayDate());
+  const [isPayrollBonusModalOpen, setIsPayrollBonusModalOpen] = useState(false);
+  const [payrollBonusForm, setPayrollBonusForm] = useState(() => createPayrollBonusForm(currentPayrollMonthKey()));
+  const [payrollEntryToEdit, setPayrollEntryToEdit] = useState<PayrollEntry | null>(null);
+  const [payrollEditForm, setPayrollEditForm] = useState<PayrollEditForm>({
+    baseSalary: 0,
+    date: todayDate(),
+    salaryNotes: "",
+  });
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -389,7 +501,6 @@ export function FinanceView() {
   const [revenueData, setRevenueData] = useState<RevenueEntry[]>([]);
   const [expenseBreakdown, setExpenseBreakdown] = useState<ExpenseBreakdownEntry[]>([]);
   const [detailedExpenses, setDetailedExpenses] = useState<DetailedExpense[]>([]);
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
@@ -420,7 +531,6 @@ export function FinanceView() {
         revenueData,
         expenseBreakdownData,
         detailedExpensesData,
-        recurringExpensesData,
         inventoryData,
         payrollData,
         transactionsData,
@@ -428,7 +538,6 @@ export function FinanceView() {
         fetchApiData<RevenueEntry[]>("/api/finance/revenue", "revenue data"),
         fetchApiData<ExpenseBreakdownEntry[]>("/api/finance/expense-breakdown", "expense breakdown"),
         fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
-        fetchApiData<RecurringExpense[]>("/api/finance/recurring-expenses", "recurring expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
         fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data"),
         fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions"),
@@ -437,7 +546,6 @@ export function FinanceView() {
       setRevenueData(revenueData || []);
       setExpenseBreakdown(expenseBreakdownData || []);
       setDetailedExpenses(detailedExpensesData || []);
-      setRecurringExpenses(recurringExpensesData || []);
       setInventoryData(inventoryData || []);
       setPayrollData(payrollData || []);
       setRecentTransactions(transactionsData || []);
@@ -482,7 +590,6 @@ export function FinanceView() {
       setRevenueData([]);
       setExpenseBreakdown([]);
       setDetailedExpenses([]);
-      setRecurringExpenses([]);
       setInventoryData([]);
       setPayrollData([]);
       setRecentTransactions([]);
@@ -533,7 +640,37 @@ export function FinanceView() {
     })
   ), [inventoryData, inventoryStockFilter]);
 
+  const expenseVendorOptions = useMemo(() => {
+    const vendors = new Map<string, string>();
+    [...detailedExpenses.map((expense) => expense.vendor), ...inventoryData.map((item) => item.supplier)]
+      .map((vendor) => String(vendor || "").trim())
+      .filter(Boolean)
+      .forEach((vendor) => {
+        const key = normalizeFilterValue(vendor);
+        if (!vendors.has(key)) {
+          vendors.set(key, vendor);
+        }
+      });
+
+    return Array.from(vendors.values()).sort((left, right) => left.localeCompare(right));
+  }, [detailedExpenses, inventoryData]);
+
   const payrollMonthOptions = useMemo(() => getPayrollMonthOptions(), []);
+  const payrollStats = useMemo(() => {
+    const paidCount = payrollData.filter((employee) => normalizeFilterValue(employee.status) === "paid").length;
+    const total = payrollData.reduce((sum, employee) => sum + (Number(employee.total) || 0), 0);
+    const baseTotal = payrollData.reduce((sum, employee) => sum + (Number(employee.baseSalary) || 0), 0);
+    const bonusTotal = payrollData.reduce((sum, employee) => sum + (Number(employee.bonus) || 0), 0);
+
+    return {
+      employeeCount: payrollData.length,
+      paidCount,
+      pendingCount: payrollData.length - paidCount,
+      baseTotal,
+      bonusTotal,
+      total,
+    };
+  }, [payrollData]);
 
   const openExpenseModal = (mode: FinanceExpenseModalMode, expense?: DetailedExpense) => {
     setSelectedExpense(expense || null);
@@ -558,12 +695,12 @@ export function FinanceView() {
       return;
     }
 
-    if (expenseModalMode === "create" && expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
+    if (expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
       toast.error("Enter the stock quantity to add");
       return;
     }
 
-    if (expenseModalMode === "create" && expenseForm.inventoryItemId && normalizeFilterValue(expenseForm.status) === "cancelled") {
+    if (expenseForm.inventoryItemId && normalizeFilterValue(expenseForm.status) === "cancelled") {
       toast.error("Linked stock expenses must be pending or paid");
       return;
     }
@@ -651,6 +788,22 @@ export function FinanceView() {
     );
   };
 
+  const handleExportPayroll = () => {
+    downloadCsv(
+      `payroll-${selectedPayrollMonth}.csv`,
+      payrollData.map((employee) => ({
+        Month: formatPayrollMonthLabel(selectedPayrollMonth),
+        Employee: employee.name,
+        Role: employee.role,
+        "Base Salary": employee.baseSalary,
+        "Bonus / Adjustment": employee.bonus,
+        Total: employee.total,
+        Status: employee.status || "pending",
+        "Payment Date": employee.paymentDate || "",
+      }))
+    );
+  };
+
   const handleGenerateInvoices = () => {
     const invoiceRows = recentTransactions
       .filter((transaction) => transaction.type === "income")
@@ -686,8 +839,6 @@ export function FinanceView() {
   const buildInventoryChanges = (current: InventoryItem, form: typeof inventoryForm): InventoryChange[] => {
     const nextQuantity = Number(form.quantity) || 0;
     const nextCostPerUnit = Number(form.costPerUnit) || 0;
-    const currentStockValue = Number(current.totalValue) || (Number(current.quantity) || 0) * (Number(current.costPerUnit) || 0);
-    const nextStockValue = nextQuantity * nextCostPerUnit;
     const textValue = (value?: string | number | null) => String(value ?? "").trim() || "-";
     const quantityValue = (quantity: number, unit?: string | null) => `${quantity} ${textValue(unit)}`.trim();
     const changedText = (before?: string | number | null, after?: string | number | null) => textValue(before) !== textValue(after);
@@ -705,9 +856,6 @@ export function FinanceView() {
         : []),
       ...(changedNumber(current.costPerUnit, nextCostPerUnit)
         ? [{ label: "Unit cost", before: formatCurrency(current.costPerUnit), after: formatCurrency(nextCostPerUnit), important: true }]
-        : []),
-      ...(changedNumber(currentStockValue, nextStockValue)
-        ? [{ label: "Stock value", before: formatCurrency(currentStockValue), after: formatCurrency(nextStockValue), important: true }]
         : []),
       ...(changedText(current.supplier, form.supplier)
         ? [{ label: "Supplier", before: textValue(current.supplier), after: textValue(form.supplier) }]
@@ -829,20 +977,140 @@ export function FinanceView() {
     setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
   };
 
+  const openPayrollBonusModal = (entry?: PayrollEntry) => {
+    setPayrollBonusForm(createPayrollBonusForm(selectedPayrollMonth, entry?.id || ""));
+    setIsPayrollBonusModalOpen(true);
+    if (entry?.id) {
+      loadPayrollBonusDetails(entry.id);
+    }
+  };
+
+  const closePayrollBonusModal = () => {
+    setIsPayrollBonusModalOpen(false);
+    setPayrollBonusForm(createPayrollBonusForm(selectedPayrollMonth));
+  };
+
+  const openPayrollEditModal = (entry: PayrollEntry) => {
+    setPayrollEntryToEdit(entry);
+    setPayrollEditForm(createPayrollEditFormFromEntry(entry, selectedPayrollMonth));
+  };
+
+  const closePayrollEditModal = () => {
+    setPayrollEntryToEdit(null);
+    setPayrollEditForm({
+      baseSalary: 0,
+      date: getDefaultPayrollPaymentDate(selectedPayrollMonth),
+      salaryNotes: "",
+    });
+  };
+
   const handlePayrollMonthChange = async (value: string) => {
     setSelectedPayrollMonth(value);
+    closePayrollModal();
+    setIsPayrollBonusModalOpen(false);
+    setPayrollEntryToEdit(null);
+    setPayrollBonusForm(createPayrollBonusForm(value));
+    setPayrollEditForm({
+      baseSalary: 0,
+      date: getDefaultPayrollPaymentDate(value),
+      salaryNotes: "",
+    });
     await fetchData(value);
+  };
+
+  const fetchStaffFinancialRecords = () =>
+    fetchApiData<StaffFinancialRecord[]>("/api/staff/financials", "staff financial records");
+
+  const updateStaffRecord = (staffId: string, updates: StaffRecordUpdate) =>
+    fetchApiData(`/api/staff/${encodeURIComponent(staffId)}`, "staff update", {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+
+  const createStaffFinancialRecord = (record: {
+    staffId: string;
+    type: string;
+    amount: number;
+    date: string;
+    notes?: string;
+    repaymentSchedule?: string;
+  }) =>
+    fetchApiData<StaffFinancialRecord>("/api/staff/financials", "staff financial record", {
+      method: "POST",
+      body: JSON.stringify(record),
+    });
+
+  const updateStaffFinancialRecord = (recordId: string, updates: Partial<StaffFinancialRecord>) =>
+    fetchApiData<StaffFinancialRecord>(`/api/staff/financials/${encodeURIComponent(recordId)}`, "staff financial record update", {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+
+  const deleteStaffFinancialRecord = (recordId: string) =>
+    fetchApiData<null>(`/api/staff/financials/${encodeURIComponent(recordId)}`, "staff financial record deletion", {
+      method: "DELETE",
+    });
+
+  const payPayrollEmployee = (entry: PayrollEntry, paymentDate: string) =>
+    fetchApiData<PayrollEntry>(
+      `/api/finance/payroll/${encodeURIComponent(entry.id)}/pay`,
+      "payroll payment",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          month: selectedPayrollMonth,
+          paymentDate,
+        }),
+      }
+    );
+
+  const loadPayrollBonusDetails = async (staffId: string) => {
+    try {
+      const records = await fetchStaffFinancialRecords();
+      const bonusRecords = getPayrollBonusRecords(records || [], staffId, selectedPayrollMonth);
+      const managedRecord = findManagedPayrollAdjustment(records || [], staffId, selectedPayrollMonth);
+      const managedAmount = Number(managedRecord?.amount) || 0;
+      const existingAdjustmentTotal = bonusRecords.reduce(
+        (sum, record) => sum + (Number(record.amount) || 0),
+        0
+      );
+      const displayNotes = String(managedRecord?.notes || bonusRecords[0]?.notes || "")
+        .replace(payrollAdjustmentMarker(selectedPayrollMonth), "")
+        .trim();
+
+      setPayrollBonusForm((currentForm) => ({
+        ...currentForm,
+        staffId,
+        amount: existingAdjustmentTotal,
+        date: managedRecord?.date || bonusRecords[0]?.date || currentForm.date || getDefaultPayrollPaymentDate(selectedPayrollMonth),
+        notes: displayNotes,
+        existingAdjustmentTotal,
+      }));
+    } catch (error) {
+      console.error("Error loading payroll bonus details:", error);
+    }
+  };
+
+  const handlePayrollBonusStaffChange = (staffId: string) => {
+    setPayrollBonusForm(createPayrollBonusForm(selectedPayrollMonth, staffId));
+    loadPayrollBonusDetails(staffId);
   };
 
   const handleProcessPayroll = async () => {
     setIsSavingPayroll(true);
     try {
-      const data = await fetchApiData<PayrollEntry[]>("/api/finance/payroll/process", "payroll processing", {
-        method: "POST",
-        body: JSON.stringify({ month: selectedPayrollMonth }),
-      });
-      setPayrollData(data || []);
-      toast.success(`Payroll prepared for ${formatPayrollMonthLabel(selectedPayrollMonth)}`);
+      const payableEntries = payrollData.filter(
+        (employee) => normalizeFilterValue(employee.status) !== "paid"
+      );
+
+      if (payableEntries.length === 0) {
+        toast.info("All payroll entries are already paid");
+        closePayrollModal();
+        return;
+      }
+
+      await Promise.all(payableEntries.map((employee) => payPayrollEmployee(employee, payrollPaymentDate)));
+      toast.success(`Payroll paid for ${formatPayrollMonthLabel(selectedPayrollMonth)}`);
       closePayrollModal();
       await fetchData(selectedPayrollMonth);
     } catch (error) {
@@ -853,22 +1121,146 @@ export function FinanceView() {
     }
   };
 
+  const handleAddPayrollBonus = async () => {
+    if (!payrollBonusForm.staffId) {
+      toast.error("Please select a staff member");
+      return;
+    }
+
+    const selectedStaff = payrollData.find((employee) => employee.id === payrollBonusForm.staffId);
+    const desiredAdjustmentTotal = Number(payrollBonusForm.amount) || 0;
+    const existingAdjustmentTotal = Number(payrollBonusForm.existingAdjustmentTotal) || 0;
+
+    if (Math.abs(desiredAdjustmentTotal) <= 0.009 && Math.abs(existingAdjustmentTotal) <= 0.009) {
+      toast.error("Enter a bonus or reduction amount");
+      return;
+    }
+
+    const bonusDate = payrollBonusForm.date || getDefaultPayrollPaymentDate(selectedPayrollMonth);
+    if (!isPayrollMonthDate(bonusDate, selectedPayrollMonth)) {
+      toast.error(`Date must be within ${formatPayrollMonthLabel(selectedPayrollMonth)}`);
+      return;
+    }
+
+    setIsSavingPayroll(true);
+    try {
+      const latestRecords = await fetchStaffFinancialRecords();
+      const latestManagedRecord = findManagedPayrollAdjustment(
+        latestRecords || [],
+        payrollBonusForm.staffId,
+        selectedPayrollMonth
+      );
+      const latestBonusRecords = getPayrollBonusRecords(
+        latestRecords || [],
+        payrollBonusForm.staffId,
+        selectedPayrollMonth
+      );
+      const latestManagedAmount = Number(latestManagedRecord?.amount) || 0;
+      const latestExistingTotal = latestBonusRecords.reduce(
+        (sum, record) => sum + (Number(record.amount) || 0),
+        0
+      );
+      const latestUnmanagedTotal = latestExistingTotal - latestManagedAmount;
+      const managedRecordId = latestManagedRecord?.id || "";
+      const managedAdjustmentDelta = desiredAdjustmentTotal - latestUnmanagedTotal;
+
+      if (Math.abs(managedAdjustmentDelta) > 0.009) {
+        const notes = payrollAdjustmentNotes(selectedPayrollMonth, payrollBonusForm.notes);
+        if (managedRecordId) {
+          await updateStaffFinancialRecord(managedRecordId, {
+            amount: managedAdjustmentDelta,
+            date: bonusDate,
+            notes,
+          });
+        } else {
+          await createStaffFinancialRecord({
+            staffId: payrollBonusForm.staffId,
+            type: "bonus",
+            amount: managedAdjustmentDelta,
+            date: bonusDate,
+            notes,
+            repaymentSchedule: "",
+          });
+        }
+      } else if (managedRecordId) {
+        await deleteStaffFinancialRecord(managedRecordId);
+      }
+
+      toast.success(`${selectedStaff?.name || "Staff"} bonus updated`);
+      closePayrollBonusModal();
+      await fetchData(selectedPayrollMonth);
+    } catch (error) {
+      console.error("Error saving payroll bonus:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save payroll bonus");
+    } finally {
+      setIsSavingPayroll(false);
+    }
+  };
+
+  const handleSavePayrollEdit = async () => {
+    if (!payrollEntryToEdit) return;
+
+    if (Number(payrollEditForm.baseSalary) < 0) {
+      toast.error("Base salary cannot be negative");
+      return;
+    }
+
+    const editDate = payrollEditForm.date || getDefaultPayrollPaymentDate(selectedPayrollMonth);
+    if (!isPayrollMonthDate(editDate, selectedPayrollMonth)) {
+      toast.error(`Effective date must be within ${formatPayrollMonthLabel(selectedPayrollMonth)}`);
+      return;
+    }
+
+    setIsSavingPayroll(true);
+    try {
+      const nextBaseSalary = Number(payrollEditForm.baseSalary) || 0;
+      const records = await fetchStaffFinancialRecords();
+      const salaryRecord = findPayrollSalaryRecord(records || [], payrollEntryToEdit.id, selectedPayrollMonth);
+
+      await updateStaffRecord(payrollEntryToEdit.id, { baseSalary: nextBaseSalary });
+
+      if (salaryRecord) {
+        await updateStaffFinancialRecord(salaryRecord.id, {
+          amount: nextBaseSalary,
+          date: editDate,
+          notes: payrollEditForm.salaryNotes || salaryRecord.notes || `${formatPayrollMonthLabel(selectedPayrollMonth)} salary`,
+        });
+      } else if (nextBaseSalary > 0) {
+        await createStaffFinancialRecord({
+          staffId: payrollEntryToEdit.id,
+          type: "salary",
+          amount: nextBaseSalary,
+          date: editDate,
+          notes: payrollEditForm.salaryNotes || `${formatPayrollMonthLabel(selectedPayrollMonth)} salary`,
+          repaymentSchedule: "",
+        });
+      }
+
+      const salaryChanged = Math.abs(
+        nextBaseSalary - (Number(payrollEntryToEdit.staffBaseSalary ?? payrollEntryToEdit.baseSalary) || 0)
+      ) > 0.009;
+
+      if (!salaryChanged && !payrollEditForm.salaryNotes) {
+        toast.info("No payroll changes to save");
+      } else {
+        toast.success(`${payrollEntryToEdit.name} salary updated`);
+      }
+      closePayrollEditModal();
+      await fetchData(selectedPayrollMonth);
+    } catch (error) {
+      console.error("Error configuring payroll:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save payroll changes");
+    } finally {
+      setIsSavingPayroll(false);
+    }
+  };
+
   const handlePayPayrollEntry = async () => {
     if (!selectedPayrollEntry) return;
 
     setIsSavingPayroll(true);
     try {
-      await fetchApiData<PayrollEntry>(
-        `/api/finance/payroll/${encodeURIComponent(selectedPayrollEntry.id)}/pay`,
-        "payroll payment",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            month: selectedPayrollMonth,
-            paymentDate: payrollPaymentDate,
-          }),
-        }
-      );
+      await payPayrollEmployee(selectedPayrollEntry, payrollPaymentDate);
       toast.success(`${selectedPayrollEntry.name} marked as paid`);
       closePayrollModal();
       await fetchData(selectedPayrollMonth);
@@ -1223,7 +1615,7 @@ export function FinanceView() {
                 <div>
                   <CardTitle>Expenses</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Money spent by the clinic. Manual bills are added here; stock purchases from Inventory also appear here.
+                    Money spent by the clinic. Link a stock item when a bill should also add quantity to Inventory.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -1302,14 +1694,13 @@ export function FinanceView() {
                         <TableHead>Amount</TableHead>
                         <TableHead>Paid With</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Recurring</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredDetailedExpenses.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                             No detailed expenses found.
                           </TableCell>
                         </TableRow>
@@ -1338,13 +1729,6 @@ export function FinanceView() {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                {expense.recurring ? (
-                                  <Badge variant="outline">Recurring</Badge>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
                                 <div className="flex flex-wrap gap-2">
                                   <Button variant="outline" size="sm" onClick={() => openExpenseModal("edit", expense)}>
                                     <Edit className="h-3 w-3 mr-1" />
@@ -1363,41 +1747,6 @@ export function FinanceView() {
                       )}
                     </TableBody>
                   </Table>
-                  
-                  {/* Recurring Expenses Summary */}
-                  <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                    <h3 className="font-medium mb-4 flex items-center">
-                      <Receipt className="h-4 w-4 mr-2" />
-                      Recurring Expenses Overview
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {recurringExpenses.length === 0 ? (
-                        <div className="col-span-full text-center py-4 text-muted-foreground">
-                          No recurring expenses found.
-                        </div>
-                      ) : (
-                        recurringExpenses.map((expense, index) => (
-                          <div key={`recurring-${expense.description}-${index}`} className="bg-white p-3 rounded-lg border">
-                            <div className="flex items-center justify-between mb-2">
-                              <Badge variant="secondary" className="text-xs">{expense.category}</Badge>
-                              <span className="text-xs text-muted-foreground">{expense.frequency}</span>
-                            </div>
-                            <div className="font-medium text-sm mb-1">{expense.description}</div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-lg font-bold">{formatCurrency(expense.amount)}</span>
-                              <span className="text-xs text-muted-foreground">Due: {expense.nextDue}</span>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                      <span className="font-medium">Total Monthly Recurring Expenses</span>
-                      <span className="text-xl font-bold">
-                        {formatCurrency(recurringExpenses.reduce((sum, e) => sum + e.amount, 0))}
-                      </span>
-                    </div>
-                  </div>
                 </>
               )}
             </CardContent>
@@ -1448,7 +1797,6 @@ export function FinanceView() {
                         <TableHead>Item Name</TableHead>
                         <TableHead>Quantity</TableHead>
                         <TableHead>Unit Cost</TableHead>
-                        <TableHead>Stock Value</TableHead>
                         <TableHead>Supplier</TableHead>
                         <TableHead>Last Ordered</TableHead>
                         <TableHead>Actions</TableHead>
@@ -1457,7 +1805,7 @@ export function FinanceView() {
                   <TableBody>
                     {filteredInventoryData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                           {inventoryData.length === 0 ? "No inventory items found. Create a stock item to start tracking supplies." : "No inventory items match this filter."}
                         </TableCell>
                       </TableRow>
@@ -1471,7 +1819,6 @@ export function FinanceView() {
                             </Badge>
                           </TableCell>
                           <TableCell>{formatCurrency(item.costPerUnit)}</TableCell>
-                          <TableCell className="font-medium">{formatCurrency(item.totalValue)}</TableCell>
                           <TableCell>{item.supplier}</TableCell>
                           <TableCell>{item.lastOrdered}</TableCell>
                           <TableCell>
@@ -1499,8 +1846,13 @@ export function FinanceView() {
         <TabsContent value="payroll" className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Employee Payroll</CardTitle>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle>Employee Payroll</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {formatPayrollMonthLabel(selectedPayrollMonth)} salary run
+                  </p>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <Select value={selectedPayrollMonth} onValueChange={handlePayrollMonthChange}>
                     <SelectTrigger className="w-[140px]">
@@ -1514,7 +1866,15 @@ export function FinanceView() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button onClick={() => openPayrollModal("process")}>
+                  <Button variant="outline" onClick={handleExportPayroll} disabled={payrollData.length === 0}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                  <Button variant="outline" onClick={() => openPayrollBonusModal()} disabled={payrollData.length === 0}>
+                    <Gift className="h-4 w-4 mr-2" />
+                    Add Bonus
+                  </Button>
+                  <Button onClick={() => openPayrollModal("process")} disabled={payrollData.length === 0}>
                     <Wallet className="h-4 w-4 mr-2" />
                     Process Payroll
                   </Button>
@@ -1531,66 +1891,112 @@ export function FinanceView() {
                 </div>
               ) : (
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Employee</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Base Salary</TableHead>
-                        <TableHead>Bonus</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {payrollData.length === 0 ? (
+                  <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-md border bg-gray-50 p-4">
+                      <div className="text-xs text-muted-foreground">Employees</div>
+                      <div className="mt-1 text-2xl font-bold">{payrollStats.employeeCount}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{payrollStats.paidCount} paid</div>
+                    </div>
+                    <div className="rounded-md border bg-gray-50 p-4">
+                      <div className="text-xs text-muted-foreground">Pending Payroll</div>
+                      <div className="mt-1 text-2xl font-bold">{payrollStats.pendingCount}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Ready for payment</div>
+                    </div>
+                    <div className="rounded-md border bg-gray-50 p-4">
+                      <div className="text-xs text-muted-foreground">Base Salaries</div>
+                      <div className="mt-1 text-2xl font-bold">{formatCurrency(payrollStats.baseTotal)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Before bonuses</div>
+                    </div>
+                    <div className="rounded-md border bg-gray-50 p-4">
+                      <div className="text-xs text-muted-foreground">Net Bonus / Adj.</div>
+                      <div className={`mt-1 text-2xl font-bold ${payrollStats.bonusTotal < 0 ? "text-red-700" : "text-green-700"}`}>
+                        {formatCurrency(payrollStats.bonusTotal)}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">Current month only</div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                            No payroll data available.
-                          </TableCell>
+                          <TableHead>Employee</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Base Salary</TableHead>
+                          <TableHead>Bonus / Adj.</TableHead>
+                          <TableHead>Total</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Actions</TableHead>
                         </TableRow>
-                      ) : (
-                        payrollData.map((employee) => {
-                          const payrollStatus = normalizeFilterValue(employee.status);
-                          return (
-                            <TableRow key={employee.id}>
-                              <TableCell className="font-medium">{employee.name}</TableCell>
-                              <TableCell>{employee.role}</TableCell>
-                              <TableCell>{formatCurrency(employee.baseSalary)}</TableCell>
-                              <TableCell>{formatCurrency(employee.bonus)}</TableCell>
-                              <TableCell className="font-medium">
-                                {formatCurrency(employee.total)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge className={
-                                  payrollStatus === "paid"
-                                    ? "bg-green-100 text-green-800"
-                                    : payrollStatus === "approved"
-                                      ? "bg-blue-100 text-blue-800"
-                                      : "bg-yellow-100 text-yellow-800"
-                                }>
-                                  {employee.status || "pending"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex flex-wrap gap-2">
-                                  {payrollStatus !== "paid" && (
-                                    <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={() => openPayrollModal("pay", employee)}>
-                                      Pay Now
+                      </TableHeader>
+                      <TableBody>
+                        {payrollData.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                              No payroll data available.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          payrollData.map((employee) => {
+                            const payrollStatus = normalizeFilterValue(employee.status);
+                            const isPaid = payrollStatus === "paid";
+                            return (
+                              <TableRow key={employee.id}>
+                                <TableCell className="font-medium">{employee.name}</TableCell>
+                                <TableCell>{employee.role}</TableCell>
+                                <TableCell>{formatCurrency(employee.baseSalary)}</TableCell>
+                                <TableCell className={employee.bonus < 0 ? "font-medium text-red-700" : employee.bonus > 0 ? "font-medium text-green-700" : ""}>
+                                  {formatCurrency(employee.bonus)}
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  {formatCurrency(employee.total)}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    <Badge className={
+                                      isPaid
+                                        ? "bg-green-100 text-green-800"
+                                        : payrollStatus === "approved"
+                                          ? "bg-blue-100 text-blue-800"
+                                          : "bg-yellow-100 text-yellow-800"
+                                    }>
+                                      {employee.status || "pending"}
+                                    </Badge>
+                                    {isPaid && employee.paymentDate ? (
+                                      <span className="text-xs text-muted-foreground">{employee.paymentDate}</span>
+                                    ) : null}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap gap-2">
+                                    {!isPaid ? (
+                                      <Button size="sm" onClick={() => openPayrollModal("pay", employee)}>
+                                        <CreditCard className="h-3 w-3 mr-1" />
+                                        Pay
+                                      </Button>
+                                    ) : (
+                                      <span className="inline-flex h-9 items-center gap-1 rounded-md border border-green-200 bg-green-50 px-3 text-sm font-medium text-green-700">
+                                        <CheckCircle2 className="h-3 w-3" />
+                                        Paid
+                                      </span>
+                                    )}
+                                    <Button variant="outline" size="sm" onClick={() => openPayrollBonusModal(employee)}>
+                                      <Gift className="h-3 w-3 mr-1" />
+                                      Bonus
                                     </Button>
-                                  )}
-                                  {payrollStatus === "paid" && (
-                                    <span className="text-sm text-muted-foreground">Paid</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
+                                    <Button variant="outline" size="sm" onClick={() => openPayrollEditModal(employee)}>
+                                      <Edit className="h-3 w-3 mr-1" />
+                                      Edit
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                   
                   <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                     <div className="flex justify-between items-center">
@@ -1599,9 +2005,9 @@ export function FinanceView() {
                         <p className="text-sm text-muted-foreground">{formatPayrollMonthLabel(selectedPayrollMonth)}</p>
                       </div>
                       <div className="text-right">
-                        <div className="text-2xl font-bold">{formatCurrency(payrollData.reduce((sum, emp) => sum + emp.total, 0))}</div>
+                        <div className="text-2xl font-bold">{formatCurrency(payrollStats.total)}</div>
                         <p className="text-sm text-muted-foreground">
-                          {payrollData.filter(emp => normalizeFilterValue(emp.status) === "paid").length} of {payrollData.length} employees paid
+                          {payrollStats.paidCount} of {payrollStats.employeeCount} employees paid
                         </p>
                       </div>
                     </div>
@@ -1763,7 +2169,9 @@ export function FinanceView() {
         form={expenseForm}
         isSaving={isSavingExpense}
         inventoryItems={inventoryData}
-        formatCurrency={formatCurrency}
+        vendorOptions={expenseVendorOptions}
+        originalInventoryItemId={selectedExpense?.inventoryItemId}
+        originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         onOpenChange={(open) => !open && closeExpenseModal()}
         onFormChange={setExpenseForm}
         onSave={handleSaveExpense}
@@ -1784,7 +2192,6 @@ export function FinanceView() {
         isSaving={isSavingInventory}
         inventoryItems={inventoryData}
         currentItemId={selectedInventoryItem?.id}
-        formatCurrency={formatCurrency}
         onOpenChange={(open) => !open && closeInventoryModal()}
         onFormChange={setInventoryForm}
         onSave={handleSaveInventoryItem}
@@ -1805,6 +2212,29 @@ export function FinanceView() {
         onOpenChange={(open) => !open && setInventoryItemToReorder(null)}
         onFormChange={setReorderForm}
         onSave={handleReorderInventoryItem}
+      />
+      <FinancePayrollBonusModal
+        open={isPayrollBonusModalOpen}
+        form={payrollBonusForm}
+        payrollData={payrollData}
+        selectedPayrollMonth={selectedPayrollMonth}
+        isSaving={isSavingPayroll}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && closePayrollBonusModal()}
+        onFormChange={setPayrollBonusForm}
+        onStaffChange={handlePayrollBonusStaffChange}
+        onSave={handleAddPayrollBonus}
+      />
+      <FinancePayrollEditModal
+        open={Boolean(payrollEntryToEdit)}
+        entry={payrollEntryToEdit}
+        form={payrollEditForm}
+        selectedPayrollMonth={selectedPayrollMonth}
+        isSaving={isSavingPayroll}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && closePayrollEditModal()}
+        onFormChange={setPayrollEditForm}
+        onSave={handleSavePayrollEdit}
       />
       <FinancePayrollModal
         open={Boolean(payrollModalMode)}

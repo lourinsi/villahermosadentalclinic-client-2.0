@@ -1,15 +1,17 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "./ui/select";
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
   PAYMENT_METHOD_OPTIONS,
+  normalizeFinanceValue,
   type ExpenseForm,
 } from "./financeModalOptions";
 
@@ -30,10 +32,31 @@ type FinanceExpenseModalProps = {
   form: ExpenseForm;
   isSaving: boolean;
   inventoryItems: ExpenseInventoryItem[];
-  formatCurrency: (amount?: number) => string;
+  vendorOptions: string[];
+  originalInventoryItemId?: string;
+  originalInventoryQuantity?: number;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ExpenseForm) => void;
   onSave: () => void;
+};
+
+const NO_VENDOR_VALUE = "__no_vendor__";
+const CREATE_NEW_VENDOR_VALUE = "__create_new_vendor__";
+
+const expenseCurrencyFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0,
+});
+
+const formatExpenseCurrency = (amount?: number) => expenseCurrencyFormatter.format(Number(amount) || 0);
+
+const singularizeUnit = (unit?: string) => {
+  const value = String(unit || "unit").trim();
+  if (!value) return "unit";
+  if (value.toLowerCase().endsWith("ies")) return `${value.slice(0, -3)}y`;
+  if (value.toLowerCase().endsWith("s") && value.length > 3) return value.slice(0, -1);
+  return value;
 };
 
 export function FinanceExpenseModal({
@@ -42,15 +65,80 @@ export function FinanceExpenseModal({
   form,
   isSaving,
   inventoryItems,
-  formatCurrency,
+  vendorOptions,
+  originalInventoryItemId = "",
+  originalInventoryQuantity = 0,
   onOpenChange,
   onFormChange,
   onSave,
 }: FinanceExpenseModalProps) {
+  const [isCreatingVendor, setIsCreatingVendor] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
   const selectedInventoryItem = inventoryItems.find((item) => item.id === form.inventoryItemId);
   const linkedQuantity = Number(form.inventoryQuantity) || 0;
-  const linkedStockValue = selectedInventoryItem ? linkedQuantity * (Number(selectedInventoryItem.costPerUnit) || 0) : 0;
+  const savedInventoryItemId = String(originalInventoryItemId || "").trim();
+  const savedInventoryQuantity = Number(originalInventoryQuantity) || 0;
+  const stockQuantityChange = selectedInventoryItem
+    ? mode === "edit" && selectedInventoryItem.id === savedInventoryItemId
+      ? linkedQuantity - savedInventoryQuantity
+      : linkedQuantity
+    : 0;
+  const enteredAmount = Number(form.amount) || 0;
+  const impliedUnitCost = linkedQuantity > 0 ? enteredAmount / linkedQuantity : 0;
+  const linkedUnitLabel = singularizeUnit(selectedInventoryItem?.unit);
+  const stockAmount = (item: ExpenseInventoryItem | undefined, quantity: number) =>
+    item ? Math.max(0, quantity) * (Number(item.costPerUnit) || 0) : 0;
+  const isSameAmount = (left: number, right: number) => Math.abs((Number(left) || 0) - (Number(right) || 0)) < 0.01;
+  const shouldUseStockAmountDefault = () => {
+    if (mode !== "create") return false;
+    if (Number(form.amount) <= 0) return true;
+    if (!selectedInventoryItem) return false;
+    return isSameAmount(Number(form.amount), stockAmount(selectedInventoryItem, linkedQuantity));
+  };
+
+  useEffect(() => {
+    if (!open) {
+      setIsCreatingVendor(false);
+    }
+  }, [open]);
+
+  const allVendorOptions = useMemo(() => {
+    const vendors = new Map<string, string>();
+    [...vendorOptions, ...inventoryItems.map((item) => item.supplier || "")]
+      .map((vendor) => vendor.trim())
+      .filter(Boolean)
+      .forEach((vendor) => {
+        const key = normalizeFinanceValue(vendor);
+        if (!vendors.has(key)) {
+          vendors.set(key, vendor);
+        }
+      });
+
+    return Array.from(vendors.values()).sort((left, right) => left.localeCompare(right));
+  }, [inventoryItems, vendorOptions]);
+
+  const visibleVendorOptions = useMemo(() => {
+    const selectedVendor = form.vendor.trim();
+    if (!selectedVendor || isCreatingVendor) return allVendorOptions;
+
+    const selectedVendorKey = normalizeFinanceValue(selectedVendor);
+    const selectedVendorExists = allVendorOptions.some(
+      (vendor) => normalizeFinanceValue(vendor) === selectedVendorKey
+    );
+
+    return selectedVendorExists ? allVendorOptions : [selectedVendor, ...allVendorOptions];
+  }, [allVendorOptions, form.vendor, isCreatingVendor]);
+
+  const handleVendorChange = (vendor: string) => {
+    if (vendor === CREATE_NEW_VENDOR_VALUE) {
+      setIsCreatingVendor(true);
+      updateForm({ vendor: "" });
+      return;
+    }
+
+    setIsCreatingVendor(false);
+    updateForm({ vendor: vendor === NO_VENDOR_VALUE ? "" : vendor });
+  };
 
   const selectInventoryItem = (value: string) => {
     if (value === "none") {
@@ -62,23 +150,22 @@ export function FinanceExpenseModal({
     if (!item) return;
 
     const quantity = Number(form.inventoryQuantity) > 0 ? Number(form.inventoryQuantity) : 1;
-    const estimatedAmount = quantity * (Number(item.costPerUnit) || 0);
+    const shouldDefaultAmount = shouldUseStockAmountDefault();
     updateForm({
       inventoryItemId: item.id,
       inventoryQuantity: quantity,
       category: form.category || "supplies",
       description: form.description || `Stock purchase: ${item.item}`,
       vendor: form.vendor || item.supplier || "",
-      amount: Number(form.amount) > 0 ? form.amount : estimatedAmount,
+      ...(shouldDefaultAmount && { amount: stockAmount(item, quantity) }),
     });
   };
 
   const updateInventoryQuantity = (quantity: number) => {
+    const shouldDefaultAmount = shouldUseStockAmountDefault();
     updateForm({
       inventoryQuantity: quantity,
-      amount: selectedInventoryItem && quantity > 0
-        ? quantity * (Number(selectedInventoryItem.costPerUnit) || 0)
-        : form.amount,
+      ...(shouldDefaultAmount && { amount: stockAmount(selectedInventoryItem, quantity) }),
     });
   };
 
@@ -126,15 +213,57 @@ export function FinanceExpenseModal({
           <div className="space-y-2">
             <Label htmlFor="expense-amount">Amount (PHP)</Label>
             <Input id="expense-amount" type="number" min="0" value={form.amount} onChange={(event) => updateForm({ amount: Number(event.target.value) })} />
+            {mode === "create" && selectedInventoryItem ? (
+              <p className="text-xs text-muted-foreground">
+                This is the total receipt amount for all units, not the per-unit price.
+              </p>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="expense-vendor">Vendor/Supplier</Label>
-            <Input
-              id="expense-vendor"
-              placeholder="e.g., Ormoc Dental Lab"
-              value={form.vendor}
-              onChange={(event) => updateForm({ vendor: event.target.value })}
-            />
+            <Select
+              value={isCreatingVendor ? CREATE_NEW_VENDOR_VALUE : form.vendor.trim() || NO_VENDOR_VALUE}
+              onValueChange={handleVendorChange}
+            >
+              <SelectTrigger id="expense-vendor">
+                <SelectValue placeholder="Select vendor/supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_VENDOR_VALUE}>No vendor/supplier</SelectItem>
+                {visibleVendorOptions.length > 0 ? <SelectSeparator /> : null}
+                {visibleVendorOptions.map((vendor) => (
+                  <SelectItem key={vendor} value={vendor}>
+                    {vendor}
+                  </SelectItem>
+                ))}
+                <SelectSeparator />
+                <SelectItem value={CREATE_NEW_VENDOR_VALUE}>Create new vendor/supplier</SelectItem>
+              </SelectContent>
+            </Select>
+            {isCreatingVendor ? (
+              <div className="flex gap-2">
+                <Input
+                  id="expense-vendor-new"
+                  autoFocus
+                  placeholder="Vendor or supplier name"
+                  value={form.vendor}
+                  onChange={(event) => updateForm({ vendor: event.target.value })}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 flex-shrink-0"
+                  title="Cancel new vendor"
+                  onClick={() => {
+                    setIsCreatingVendor(false);
+                    updateForm({ vendor: "" });
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="expense-payment-method">Paid With</Label>
@@ -166,55 +295,47 @@ export function FinanceExpenseModal({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center gap-3 rounded-md border bg-gray-50 p-3 sm:col-span-2">
-            <Checkbox
-              id="expense-recurring"
-              checked={form.recurring}
-              onCheckedChange={(checked) => updateForm({ recurring: checked === true })}
-            />
-            <Label htmlFor="expense-recurring" className="cursor-pointer">
-              This is a recurring monthly expense
-            </Label>
-          </div>
-          {mode === "create" ? (
-            <div className="space-y-4 rounded-md border bg-gray-50 p-4 sm:col-span-2">
-              <div>
-                <div className="font-medium text-gray-900">Link to Inventory</div>
-                <p className="text-sm text-muted-foreground">
-                  Optional. Use this when the bill is for stock you want to add to Inventory.
-                </p>
+          <div className="space-y-4 rounded-md border bg-gray-50 p-4 sm:col-span-2">
+            <div>
+              <div className="font-medium text-gray-900">Link to Inventory</div>
+              <p className="text-sm text-muted-foreground">
+                {mode === "edit"
+                  ? "Saved links preload here. Changing the stock item or quantity adjusts Inventory by the difference."
+                  : "Optional. Choose a stock item only when saving this expense should add quantity to Inventory now."}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="expense-stock-item">Stock Item</Label>
+                <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
+                  <SelectTrigger id="expense-stock-item">
+                    <SelectValue placeholder="No stock item" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No stock item</SelectItem>
+                    {inventoryItems.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.item}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="expense-stock-item">Stock Item</Label>
-                  <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
-                    <SelectTrigger id="expense-stock-item">
-                      <SelectValue placeholder="No stock item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No stock item</SelectItem>
-                      {inventoryItems.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.item}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expense-stock-quantity">Quantity Added</Label>
-                  <Input
-                    id="expense-stock-quantity"
-                    type="number"
-                    min="0"
-                    disabled={!selectedInventoryItem}
-                    value={form.inventoryQuantity}
-                    onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="expense-stock-quantity">{mode === "edit" ? "Linked Quantity" : "Quantity to Add Now"}</Label>
+                <Input
+                  id="expense-stock-quantity"
+                  type="number"
+                  min="0"
+                  disabled={!selectedInventoryItem}
+                  value={form.inventoryQuantity}
+                  onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
+                />
               </div>
-              {selectedInventoryItem ? (
-                <div className="grid gap-3 rounded-md bg-white p-3 text-sm sm:grid-cols-3">
+            </div>
+            {selectedInventoryItem ? (
+              <div className="space-y-3 rounded-md bg-white p-3 text-sm">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <div className="text-muted-foreground">Current stock</div>
                     <div className="font-medium">
@@ -224,17 +345,25 @@ export function FinanceExpenseModal({
                   <div>
                     <div className="text-muted-foreground">After save</div>
                     <div className="font-medium">
-                      {Number(selectedInventoryItem.quantity) + linkedQuantity} {selectedInventoryItem.unit}
+                      {Number(selectedInventoryItem.quantity) + stockQuantityChange} {selectedInventoryItem.unit}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-muted-foreground">Stock value added</div>
-                    <div className="font-medium">{formatCurrency(linkedStockValue)}</div>
-                  </div>
                 </div>
-              ) : null}
-            </div>
-          ) : null}
+                <div className="rounded-md border border-violet-100 bg-violet-50 px-3 py-2">
+                  <div className="font-medium text-gray-900">Purchase math</div>
+                  <p className="mt-1 text-muted-foreground">
+                    {formatExpenseCurrency(enteredAmount)} total for {linkedQuantity || 0} {selectedInventoryItem.unit || "units"}
+                    {linkedQuantity > 0
+                      ? ` means ${formatExpenseCurrency(impliedUnitCost)} per ${linkedUnitLabel}.`
+                      : "."}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Inventory only adds the quantity. Expenses records the actual total you paid.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <DialogFooter className="border-t px-6 py-4">

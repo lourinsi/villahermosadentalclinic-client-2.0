@@ -51,7 +51,11 @@ export function FinancePayrollModal({
   onPay,
 }: FinancePayrollModalProps) {
   const pendingCount = payrollData.filter((employee) => normalizeFinanceValue(employee.status) !== "paid").length;
+  const paidCount = payrollData.length - pendingCount;
   const payrollTotal = payrollData.reduce((sum, employee) => sum + employee.total, 0);
+  const pendingTotal = payrollData
+    .filter((employee) => normalizeFinanceValue(employee.status) !== "paid")
+    .reduce((sum, employee) => sum + employee.total, 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,7 +65,7 @@ export function FinancePayrollModal({
             <DialogTitle>{mode === "process" ? "Process Payroll" : "Pay Payroll"}</DialogTitle>
             <DialogDescription>
               {mode === "process"
-                ? `Prepare salary records for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`
+                ? `Pay all payroll entries for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`
                 : `Pay this payroll entry for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`}
             </DialogDescription>
           </DialogHeader>
@@ -76,15 +80,34 @@ export function FinancePayrollModal({
               </div>
               <div className="rounded-md border bg-white p-3 text-center">
                 <div className="text-2xl font-bold">{pendingCount}</div>
-                <div className="text-xs text-muted-foreground">Pending</div>
+                <div className="text-xs text-muted-foreground">To Pay</div>
               </div>
               <div className="rounded-md border bg-white p-3 text-center">
                 <div className="text-2xl font-bold">{formatCurrency(payrollTotal)}</div>
-                <div className="text-xs text-muted-foreground">Total</div>
+                <div className="text-xs text-muted-foreground">Month Total</div>
               </div>
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border bg-gray-50 p-3">
+                <div className="text-xs text-muted-foreground">Already Paid</div>
+                <div className="font-medium">{paidCount}</div>
+              </div>
+              <div className="rounded-md border bg-gray-50 p-3">
+                <div className="text-xs text-muted-foreground">Pending Amount</div>
+                <div className="font-medium">{formatCurrency(pendingTotal)}</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="payroll-process-payment-date">Payment Date</Label>
+              <Input
+                id="payroll-process-payment-date"
+                type="date"
+                value={paymentDate}
+                onChange={(event) => onPaymentDateChange(event.target.value)}
+              />
+            </div>
             <p className="text-sm text-muted-foreground">
-              This creates any missing salary records for the selected month. Existing paid payroll entries are left unchanged.
+              This creates missing salary records and marks everyone in the selected month as paid.
             </p>
           </div>
         ) : entry ? (

@@ -18,3 +18,37 @@ export interface Staff {
   deleted?: boolean;
   deletedAt?: Date;
 }
+
+export interface StaffFinancialRecord {
+  id: string;
+  staffId: string;
+  staffName: string;
+  type: string;
+  amount: number;
+  date: string;
+  status: string;
+  notes: string;
+  repaymentSchedule: string;
+}
+
+export interface StaffFinancialRecordForm {
+  staffId: string;
+  type: string;
+  amount: number;
+  date: string;
+  status: string;
+  notes: string;
+  repaymentSchedule: string;
+}
+
+export interface Attendance {
+  id?: string;
+  staffId: string;
+  staffName: string;
+  date?: string;
+  status?: string;
+  hoursWorked: number;
+  daysPresent: number;
+  daysAbsent: number;
+  overtimeHours: number;
+}

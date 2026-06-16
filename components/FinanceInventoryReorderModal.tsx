@@ -12,7 +12,6 @@ type ReorderInventoryItem = {
   quantity: number;
   unit?: string;
   costPerUnit?: number;
-  totalValue?: number;
   supplier?: string;
   lastOrdered?: string;
 };
@@ -40,7 +39,6 @@ export function FinanceInventoryReorderModal({
   const currentQuantity = Number(item?.quantity) || 0;
   const unitCost = Number(item?.costPerUnit) || 0;
   const newStockLevel = currentQuantity + quantityToAdd;
-  const newStockValue = newStockLevel * unitCost;
 
   return (
     <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
@@ -84,10 +82,6 @@ export function FinanceInventoryReorderModal({
               <div>
                 <div className="text-muted-foreground">Last ordered</div>
                 <div className="font-medium">{item.lastOrdered || "-"}</div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">Stock value after save</div>
-                <div className="font-medium">{formatCurrency(newStockValue)}</div>
               </div>
               <div className="sm:col-span-2">
                 <div className="text-muted-foreground">Expense impact</div>

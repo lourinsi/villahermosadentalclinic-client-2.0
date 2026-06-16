@@ -8,7 +8,6 @@ export type ExpenseForm = {
   date: string;
   paymentMethod: string;
   status: string;
-  recurring: boolean;
   inventoryItemId: string;
   inventoryQuantity: number;
 };
@@ -145,7 +144,6 @@ export const createEmptyExpense = (): ExpenseForm => ({
   date: todayDate(),
   paymentMethod: "",
   status: "pending",
-  recurring: false,
   inventoryItemId: "",
   inventoryQuantity: 0,
 });
@@ -171,9 +169,8 @@ export const createExpenseFormFromExpense = (expense: ExpenseRecord): ExpenseFor
   date: expense.date || todayDate(),
   paymentMethod: resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS),
   status: resolveOptionValue(expense.status, EXPENSE_STATUS_OPTIONS) || "pending",
-  recurring: Boolean(expense.recurring),
-  inventoryItemId: "",
-  inventoryQuantity: 0,
+  inventoryItemId: expense.inventoryItemId || "",
+  inventoryQuantity: Number(expense.inventoryQuantity) || 0,
 });
 
 export const createInventoryFormFromItem = (item: InventoryRecord): InventoryForm => ({

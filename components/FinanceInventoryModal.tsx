@@ -25,7 +25,6 @@ type FinanceInventoryModalProps = {
   isSaving: boolean;
   inventoryItems?: InventoryLookupItem[];
   currentItemId?: string;
-  formatCurrency: (amount?: number) => string;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: InventoryForm) => void;
   onSave: () => void;
@@ -111,7 +110,6 @@ export function FinanceInventoryModal({
   isSaving,
   inventoryItems = [],
   currentItemId,
-  formatCurrency,
   onOpenChange,
   onFormChange,
   onSave,
@@ -228,12 +226,6 @@ export function FinanceInventoryModal({
           <div className="space-y-2">
             <Label htmlFor="inventory-cost">Unit Cost (PHP)</Label>
             <Input id="inventory-cost" type="number" min="0" value={form.costPerUnit} onChange={(event) => updateForm({ costPerUnit: Number(event.target.value) })} />
-          </div>
-          <div className="space-y-2">
-            <Label>Stock Value</Label>
-            <div className="flex h-10 items-center rounded-md border bg-gray-50 px-3 font-medium">
-              {formatCurrency((Number(form.quantity) || 0) * (Number(form.costPerUnit) || 0))}
-            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="inventory-supplier">Supplier</Label>
