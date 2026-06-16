@@ -14,12 +14,32 @@ import { Badge } from "./ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
+import { FinanceExpensePaymentModal } from "./FinanceExpensePaymentModal";
+import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./FinanceInventoryChangeReviewModal";
+import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
+import { FinanceInventoryReorderModal } from "./FinanceInventoryReorderModal";
+import { FinancePayrollModal, type FinancePayrollModalMode } from "./FinancePayrollModal";
+import {
+  EXPENSE_CATEGORY_OPTIONS,
+  EXPENSE_STATUS_OPTIONS,
+  PAYMENT_METHOD_OPTIONS,
+  createEmptyExpense,
+  createEmptyInventoryItem,
+  createEmptyReorderForm,
+  createExpenseFormFromExpense,
+  createInventoryFormFromItem,
+  currentPayrollMonthKey,
+  formatOptionLabel,
+  formatPayrollMonthLabel,
+  getDefaultPayrollPaymentDate,
+  getPayrollMonthOptions,
+  resolveOptionValue,
+  todayDate,
+} from "./financeModalOptions";
 import { 
   DollarSign, 
   TrendingUp, 
@@ -30,10 +50,14 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Eye,
+  Edit,
   Plus,
   Receipt,
   Filter,
-  User
+  User,
+  PackagePlus,
+  RotateCcw,
+  Wallet
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -42,18 +66,6 @@ type ApiResponse<T> = {
   data?: T;
   error?: string;
 };
-
-const todayDate = () => new Date().toISOString().slice(0, 10);
-
-const createEmptyExpense = () => ({
-  category: "",
-  description: "",
-  amount: 0,
-  vendor: "",
-  date: todayDate(),
-  paymentMethod: "",
-  notes: "",
-});
 
 const currencyFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -323,6 +335,9 @@ export interface PayrollEntry {
   bonus: number;
   total: number;
   status: string;
+  salaryRecordId?: string;
+  paymentDate?: string;
+  month?: string;
 }
 
 export interface RecentTransaction {
@@ -347,8 +362,22 @@ export interface RecentTransaction {
 
 export function FinanceView() {
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
-  const [isAddExpenseDialogOpen, setIsAddExpenseDialogOpen] = useState(false);
-  const [newExpense, setNewExpense] = useState(createEmptyExpense);
+  const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
+  const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
+  const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
+  const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
+  const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
+  const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
+  const [inventoryForm, setInventoryForm] = useState(createEmptyInventoryItem);
+  const [inventoryChangesToReview, setInventoryChangesToReview] = useState<InventoryChange[]>([]);
+  const [inventoryItemToReorder, setInventoryItemToReorder] = useState<InventoryItem | null>(null);
+  const [reorderForm, setReorderForm] = useState(createEmptyReorderForm);
+  const [inventoryStockFilter, setInventoryStockFilter] = useState("all");
+  const [selectedPayrollMonth, setSelectedPayrollMonth] = useState(currentPayrollMonthKey);
+  const [payrollModalMode, setPayrollModalMode] = useState<FinancePayrollModalMode | null>(null);
+  const [selectedPayrollEntry, setSelectedPayrollEntry] = useState<PayrollEntry | null>(null);
+  const [payrollPaymentDate, setPayrollPaymentDate] = useState(todayDate());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -368,6 +397,10 @@ export function FinanceView() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const [isSavingExpensePayment, setIsSavingExpensePayment] = useState(false);
+  const [isSavingInventory, setIsSavingInventory] = useState(false);
+  const [isSavingReorder, setIsSavingReorder] = useState(false);
+  const [isSavingPayroll, setIsSavingPayroll] = useState(false);
   const [isAppointmentHistoryOpen, setIsAppointmentHistoryOpen] = useState(false);
   const [appointmentSnapshot, setAppointmentSnapshot] = useState<any | null>(null);
   const [appointmentSnapshotLogDate, setAppointmentSnapshotLogDate] = useState("");
@@ -380,7 +413,7 @@ export function FinanceView() {
     String(selectedAppointment.id) === getAppointmentIdFromSnapshot(appointmentSnapshot)
   );
 
-  const fetchData = async () => {
+  const fetchData = async (payrollMonth = selectedPayrollMonth) => {
     setIsLoading(true);
     try {
       const [
@@ -397,7 +430,7 @@ export function FinanceView() {
         fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
         fetchApiData<RecurringExpense[]>("/api/finance/recurring-expenses", "recurring expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
-        fetchApiData<PayrollEntry[]>("/api/finance/payroll", "payroll data"),
+        fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data"),
         fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions"),
       ]);
 
@@ -491,31 +524,98 @@ export function FinanceView() {
     })
   ), [endDate, recentTransactions, startDate, transactionTypeFilter]);
 
-  const handleAddExpense = async () => {
-    if (!newExpense.category || !newExpense.description || !newExpense.date || Number(newExpense.amount) <= 0) {
+  const filteredInventoryData = useMemo(() => (
+    inventoryData.filter((item) => {
+      if (inventoryStockFilter === "out") return Number(item.quantity) <= 0;
+      if (inventoryStockFilter === "low") return Number(item.quantity) > 0 && Number(item.quantity) < 20;
+      if (inventoryStockFilter === "healthy") return Number(item.quantity) >= 20;
+      return true;
+    })
+  ), [inventoryData, inventoryStockFilter]);
+
+  const payrollMonthOptions = useMemo(() => getPayrollMonthOptions(), []);
+
+  const openExpenseModal = (mode: FinanceExpenseModalMode, expense?: DetailedExpense) => {
+    setSelectedExpense(expense || null);
+    setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
+    setExpenseModalMode(mode);
+  };
+
+  const closeExpenseModal = () => {
+    setExpenseModalMode(null);
+    setSelectedExpense(null);
+    setExpenseForm(createEmptyExpense());
+  };
+
+  const openExpensePaymentModal = (expense: DetailedExpense) => {
+    setExpenseToPay(expense);
+    setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
+  };
+
+  const handleSaveExpense = async () => {
+    if (!expenseForm.category || !expenseForm.description || !expenseForm.date || Number(expenseForm.amount) <= 0) {
       toast.error("Please complete the required expense fields");
+      return;
+    }
+
+    if (expenseModalMode === "create" && expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
+      toast.error("Enter the stock quantity to add");
+      return;
+    }
+
+    if (expenseModalMode === "create" && expenseForm.inventoryItemId && normalizeFilterValue(expenseForm.status) === "cancelled") {
+      toast.error("Linked stock expenses must be pending or paid");
       return;
     }
 
     setIsSavingExpense(true);
     try {
-      await fetchApiData<DetailedExpense>("/api/finance/detailed-expenses", "new expense", {
+      const isEditingExpense = expenseModalMode === "edit" && selectedExpense;
+      await fetchApiData<DetailedExpense>(
+        isEditingExpense
+          ? `/api/finance/detailed-expenses/${encodeURIComponent(selectedExpense.id)}`
+          : "/api/finance/detailed-expenses",
+        isEditingExpense ? "expense update" : "new expense",
+        {
+          method: isEditingExpense ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...expenseForm,
+            amount: Number(expenseForm.amount),
+          }),
+        }
+      );
+
+      toast.success(isEditingExpense ? "Expense updated" : "Expense added");
+      closeExpenseModal();
+      await fetchData();
+    } catch (error) {
+      console.error("Error saving expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save expense");
+    } finally {
+      setIsSavingExpense(false);
+    }
+  };
+
+  const handlePayExpense = async () => {
+    if (!expenseToPay) return;
+
+    setIsSavingExpensePayment(true);
+    try {
+      await fetchApiData<DetailedExpense>(`/api/finance/detailed-expenses/${encodeURIComponent(expenseToPay.id)}/pay`, "expense payment", {
         method: "POST",
         body: JSON.stringify({
-          ...newExpense,
-          amount: Number(newExpense.amount),
+          paymentMethod: expensePaymentMethod,
         }),
       });
 
-      toast.success("Expense added");
-      setNewExpense(createEmptyExpense());
-      setIsAddExpenseDialogOpen(false);
+      toast.success("Expense marked as paid");
+      setExpenseToPay(null);
       await fetchData();
     } catch (error) {
-      console.error("Error adding expense:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to add expense");
+      console.error("Error paying expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to mark expense paid");
     } finally {
-      setIsSavingExpense(false);
+      setIsSavingExpensePayment(false);
     }
   };
 
@@ -541,7 +641,7 @@ export function FinanceView() {
         })),
         ...payrollData.map((employee) => ({
           Section: "Payroll",
-          Date: currentMonth.month,
+          Date: formatPayrollMonthLabel(selectedPayrollMonth),
           Description: `${employee.name} - ${employee.role}`,
           Amount: employee.total,
           Expenses: employee.total,
@@ -562,6 +662,222 @@ export function FinanceView() {
       }));
 
     downloadCsv(`invoice-summary-${dateKey(new Date())}.csv`, invoiceRows);
+  };
+
+  const openInventoryModal = (mode: FinanceInventoryModalMode, item?: InventoryItem) => {
+    setSelectedInventoryItem(item || null);
+    setInventoryForm(item ? createInventoryFormFromItem(item) : createEmptyInventoryItem());
+    setInventoryChangesToReview([]);
+    setInventoryModalMode(mode);
+  };
+
+  const closeInventoryModal = () => {
+    setInventoryModalMode(null);
+    setSelectedInventoryItem(null);
+    setInventoryChangesToReview([]);
+    setInventoryForm(createEmptyInventoryItem());
+  };
+
+  const openReorderModal = (item: InventoryItem) => {
+    setInventoryItemToReorder(item);
+    setReorderForm(createEmptyReorderForm());
+  };
+
+  const buildInventoryChanges = (current: InventoryItem, form: typeof inventoryForm): InventoryChange[] => {
+    const nextQuantity = Number(form.quantity) || 0;
+    const nextCostPerUnit = Number(form.costPerUnit) || 0;
+    const currentStockValue = Number(current.totalValue) || (Number(current.quantity) || 0) * (Number(current.costPerUnit) || 0);
+    const nextStockValue = nextQuantity * nextCostPerUnit;
+    const textValue = (value?: string | number | null) => String(value ?? "").trim() || "-";
+    const quantityValue = (quantity: number, unit?: string | null) => `${quantity} ${textValue(unit)}`.trim();
+    const changedText = (before?: string | number | null, after?: string | number | null) => textValue(before) !== textValue(after);
+    const changedNumber = (before?: number | null, after?: number | null) => Math.abs((Number(before) || 0) - (Number(after) || 0)) > 0.009;
+
+    return [
+      ...(changedText(current.item, form.item)
+        ? [{ label: "Item name", before: textValue(current.item), after: textValue(form.item) }]
+        : []),
+      ...(changedNumber(current.quantity, nextQuantity)
+        ? [{ label: "Quantity", before: quantityValue(Number(current.quantity) || 0, current.unit), after: quantityValue(nextQuantity, form.unit) }]
+        : []),
+      ...(changedText(current.unit, form.unit)
+        ? [{ label: "Unit", before: textValue(current.unit), after: textValue(form.unit) }]
+        : []),
+      ...(changedNumber(current.costPerUnit, nextCostPerUnit)
+        ? [{ label: "Unit cost", before: formatCurrency(current.costPerUnit), after: formatCurrency(nextCostPerUnit), important: true }]
+        : []),
+      ...(changedNumber(currentStockValue, nextStockValue)
+        ? [{ label: "Stock value", before: formatCurrency(currentStockValue), after: formatCurrency(nextStockValue), important: true }]
+        : []),
+      ...(changedText(current.supplier, form.supplier)
+        ? [{ label: "Supplier", before: textValue(current.supplier), after: textValue(form.supplier) }]
+        : []),
+      ...(changedText(current.lastOrdered, form.lastOrdered)
+        ? [{ label: "Last ordered", before: textValue(current.lastOrdered), after: textValue(form.lastOrdered) }]
+        : []),
+    ];
+  };
+
+  const saveInventoryItem = async () => {
+    if (!inventoryForm.item || Number(inventoryForm.quantity) < 0 || !inventoryForm.unit || Number(inventoryForm.costPerUnit) <= 0) {
+      toast.error("Please complete the required inventory fields");
+      return;
+    }
+
+    setIsSavingInventory(true);
+    try {
+      const isEditingItem = inventoryModalMode === "edit" && selectedInventoryItem;
+      const quantity = Number(inventoryForm.quantity) || 0;
+      const costPerUnit = Number(inventoryForm.costPerUnit) || 0;
+      await fetchApiData<InventoryItem>(
+        isEditingItem
+          ? `/api/inventory/${encodeURIComponent(selectedInventoryItem.id)}`
+          : "/api/inventory",
+        isEditingItem ? "inventory update" : "new inventory item",
+        {
+          method: isEditingItem ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...inventoryForm,
+            quantity,
+            costPerUnit,
+            totalValue: quantity * costPerUnit,
+          }),
+        }
+      );
+
+      toast.success(isEditingItem ? "Inventory item updated" : "Inventory item added");
+      closeInventoryModal();
+      await fetchData();
+    } catch (error) {
+      console.error("Error saving inventory item:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save inventory item");
+    } finally {
+      setIsSavingInventory(false);
+    }
+  };
+
+  const handleSaveInventoryItem = async () => {
+    if (!inventoryForm.item || Number(inventoryForm.quantity) < 0 || !inventoryForm.unit || Number(inventoryForm.costPerUnit) <= 0) {
+      toast.error("Please complete the required inventory fields");
+      return;
+    }
+
+    const isEditingItem = inventoryModalMode === "edit" && selectedInventoryItem;
+    if (isEditingItem) {
+      const changes = buildInventoryChanges(selectedInventoryItem, inventoryForm);
+      if (changes.length === 0) {
+        toast.info("No inventory changes to save");
+        return;
+      }
+      setInventoryChangesToReview(changes);
+      return;
+    }
+
+    await saveInventoryItem();
+  };
+
+  const handleConfirmInventoryChanges = async () => {
+    await saveInventoryItem();
+  };
+
+  const handleReorderInventoryItem = async () => {
+    if (!inventoryItemToReorder || Number(reorderForm.quantityToAdd) === 0) {
+      toast.error("Please enter a stock change");
+      return;
+    }
+
+    setIsSavingReorder(true);
+    try {
+      const stockChange = Number(reorderForm.quantityToAdd) || 0;
+      const costPerUnit = Number(inventoryItemToReorder.costPerUnit) || 0;
+      const newQuantity = Number(inventoryItemToReorder.quantity) + stockChange;
+
+      if (newQuantity < 0) {
+        toast.error("Stock cannot go below zero");
+        return;
+      }
+
+      await fetchApiData<InventoryItem>(`/api/inventory/${encodeURIComponent(inventoryItemToReorder.id)}`, "stock update", {
+        method: "PUT",
+        body: JSON.stringify({
+          quantity: newQuantity,
+          totalValue: newQuantity * costPerUnit,
+        }),
+      });
+
+      toast.success("Stock quantity updated");
+      setInventoryItemToReorder(null);
+      setReorderForm(createEmptyReorderForm());
+      await fetchData();
+    } catch (error) {
+      console.error("Error adding inventory stock:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add inventory stock");
+    } finally {
+      setIsSavingReorder(false);
+    }
+  };
+
+  const openPayrollModal = (mode: FinancePayrollModalMode, entry?: PayrollEntry) => {
+    setPayrollModalMode(mode);
+    setSelectedPayrollEntry(entry || null);
+    setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
+  };
+
+  const closePayrollModal = () => {
+    setPayrollModalMode(null);
+    setSelectedPayrollEntry(null);
+    setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
+  };
+
+  const handlePayrollMonthChange = async (value: string) => {
+    setSelectedPayrollMonth(value);
+    await fetchData(value);
+  };
+
+  const handleProcessPayroll = async () => {
+    setIsSavingPayroll(true);
+    try {
+      const data = await fetchApiData<PayrollEntry[]>("/api/finance/payroll/process", "payroll processing", {
+        method: "POST",
+        body: JSON.stringify({ month: selectedPayrollMonth }),
+      });
+      setPayrollData(data || []);
+      toast.success(`Payroll prepared for ${formatPayrollMonthLabel(selectedPayrollMonth)}`);
+      closePayrollModal();
+      await fetchData(selectedPayrollMonth);
+    } catch (error) {
+      console.error("Error processing payroll:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to process payroll");
+    } finally {
+      setIsSavingPayroll(false);
+    }
+  };
+
+  const handlePayPayrollEntry = async () => {
+    if (!selectedPayrollEntry) return;
+
+    setIsSavingPayroll(true);
+    try {
+      await fetchApiData<PayrollEntry>(
+        `/api/finance/payroll/${encodeURIComponent(selectedPayrollEntry.id)}/pay`,
+        "payroll payment",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            month: selectedPayrollMonth,
+            paymentDate: payrollPaymentDate,
+          }),
+        }
+      );
+      toast.success(`${selectedPayrollEntry.name} marked as paid`);
+      closePayrollModal();
+      await fetchData(selectedPayrollMonth);
+    } catch (error) {
+      console.error("Error paying payroll entry:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to pay payroll entry");
+    } finally {
+      setIsSavingPayroll(false);
+    }
   };
 
   const getTransactionAppointmentId = (transaction: RecentTransaction) =>
@@ -804,10 +1120,10 @@ export function FinanceView() {
       <Tabs defaultValue="overview" className="space-y-6" onValueChange={() => fetchData()}>
         <TabsList>
           <TabsTrigger value="overview" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Financial Overview</TabsTrigger>
-          <TabsTrigger value="expenses" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Expense Tracking</TabsTrigger>
-          <TabsTrigger value="inventory" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Inventory & Costs</TabsTrigger>
-          <TabsTrigger value="payroll" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Payroll Management</TabsTrigger>
-          <TabsTrigger value="transactions" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Recent Transactions</TabsTrigger>
+          <TabsTrigger value="expenses" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Expenses</TabsTrigger>
+          <TabsTrigger value="inventory" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Inventory</TabsTrigger>
+          <TabsTrigger value="payroll" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Payroll</TabsTrigger>
+          <TabsTrigger value="transactions" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Transactions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -900,13 +1216,17 @@ export function FinanceView() {
           </div>
         </TabsContent>
 
-        {/* NEW: Expense Tracking Tab */}
         <TabsContent value="expenses" className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Expense Management</CardTitle>
-                <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <CardTitle>Expenses</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Money spent by the clinic. Manual bills are added here; stock purchases from Inventory also appear here.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 xl:justify-end">
                   <Select value={timePeriodFilter} onValueChange={setTimePeriodFilter}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Time Period" />
@@ -932,103 +1252,33 @@ export function FinanceView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="paid">Paid</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
+                      {EXPENSE_STATUS_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
                     <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Payment Method" />
+                      <SelectValue placeholder="Paid With" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Methods</SelectItem>
-                      <SelectItem value="credit_card">Credit Card</SelectItem>
-                      <SelectItem value="ach">ACH Transfer</SelectItem>
-                      <SelectItem value="check">Check</SelectItem>
-                      <SelectItem value="cash">Cash</SelectItem>
+                      {PAYMENT_METHOD_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button variant="outline" size="icon" onClick={() => fetchData()} title="Refresh finance data">
                     <Filter className="h-4 w-4" />
                   </Button>
-                  <Dialog
-                    open={isAddExpenseDialogOpen}
-                    onOpenChange={(open) => {
-                      setIsAddExpenseDialogOpen(open);
-                      if (open && !newExpense.date) setNewExpense((prev) => ({ ...prev, date: todayDate() }));
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Expense
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add New Expense</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="expenseCategory">Category</Label>
-                          <Select value={newExpense.category} onValueChange={(value) => setNewExpense({ ...newExpense, category: value })}>
-                            <SelectTrigger id="expenseCategory">
-                              <SelectValue placeholder="Select category" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="equipment">Equipment</SelectItem>
-                              <SelectItem value="supplies">Supplies</SelectItem>
-                              <SelectItem value="utilities">Utilities</SelectItem>
-                              <SelectItem value="insurance">Insurance</SelectItem>
-                              <SelectItem value="other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="description">Description</Label>
-                          <Input id="description" placeholder="e.g., Dental supplies order" value={newExpense.description} onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="expenseAmount">Amount (PHP)</Label>
-                          <Input id="expenseAmount" type="number" placeholder="500.00" value={newExpense.amount} onChange={(e) => setNewExpense({ ...newExpense, amount: Number(e.target.value) })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="vendor">Vendor/Supplier</Label>
-                          <Input id="vendor" placeholder="e.g., DentMed Supply" value={newExpense.vendor} onChange={(e) => setNewExpense({ ...newExpense, vendor: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="expenseDate">Date</Label>
-                          <Input id="expenseDate" type="date" value={newExpense.date} onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="paymentMethod">Payment Method</Label>
-                          <Select value={newExpense.paymentMethod} onValueChange={(value) => setNewExpense({ ...newExpense, paymentMethod: value })}>
-                            <SelectTrigger id="paymentMethod">
-                              <SelectValue placeholder="Select payment method" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="credit_card">Credit Card</SelectItem>
-                              <SelectItem value="ach">ACH Transfer</SelectItem>
-                              <SelectItem value="check">Check</SelectItem>
-                              <SelectItem value="cash">Cash</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="expenseNotes">Notes (Optional)</Label>
-                          <Textarea id="expenseNotes" placeholder="Additional details..." value={newExpense.notes} onChange={(e) => setNewExpense({ ...newExpense, notes: e.target.value })} />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAddExpenseDialogOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleAddExpense} disabled={isSavingExpense}>
-                          {isSavingExpense ? "Adding..." : "Add Expense"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                  <Button onClick={() => openExpenseModal("create")}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Manual Expense
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -1050,7 +1300,7 @@ export function FinanceView() {
                         <TableHead>Description</TableHead>
                         <TableHead>Vendor</TableHead>
                         <TableHead>Amount</TableHead>
-                        <TableHead>Payment Method</TableHead>
+                        <TableHead>Paid With</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Recurring</TableHead>
                         <TableHead>Actions</TableHead>
@@ -1064,36 +1314,52 @@ export function FinanceView() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredDetailedExpenses.map((expense) => (
-                          <TableRow key={expense.id}>
-                            <TableCell>{expense.date}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{expense.category}</Badge>
-                            </TableCell>
-                            <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
-                            <TableCell>{expense.vendor}</TableCell>
-                            <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{expense.paymentMethod}</TableCell>
-                            <TableCell>
-                              <Badge className={expense.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
-                                {expense.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {expense.recurring && (
-                                <Badge variant="outline">Recurring</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm">View</Button>
-                                {expense.status === 'pending' && (
-                                  <Button size="sm">Pay</Button>
+                        filteredDetailedExpenses.map((expense) => {
+                          const expenseStatus = normalizeFilterValue(expense.status);
+                          return (
+                            <TableRow key={expense.id}>
+                              <TableCell>{expense.date}</TableCell>
+                              <TableCell>
+                                <Badge variant="secondary">{formatOptionLabel(expense.category, EXPENSE_CATEGORY_OPTIONS)}</Badge>
+                              </TableCell>
+                              <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
+                              <TableCell>{expense.vendor || "-"}</TableCell>
+                              <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)}</TableCell>
+                              <TableCell>
+                                <Badge className={
+                                  expenseStatus === "paid"
+                                    ? "bg-green-100 text-green-800"
+                                    : expenseStatus === "cancelled"
+                                      ? "bg-gray-100 text-gray-700"
+                                      : "bg-yellow-100 text-yellow-800"
+                                }>
+                                  {formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {expense.recurring ? (
+                                  <Badge variant="outline">Recurring</Badge>
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">-</span>
                                 )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button variant="outline" size="sm" onClick={() => openExpenseModal("edit", expense)}>
+                                    <Edit className="h-3 w-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                  {expenseStatus === "pending" && (
+                                    <Button size="sm" onClick={() => openExpensePaymentModal(expense)}>
+                                      Pay
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
@@ -1141,21 +1407,29 @@ export function FinanceView() {
         <TabsContent value="inventory" className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Inventory Management</CardTitle>
-                <div className="flex space-x-2">
-                  <Select>
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <CardTitle>Inventory</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Stock on hand. Adjust Stock only changes quantity; record bills in Expenses and link them to stock when needed.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 xl:justify-end">
+                  <Select value={inventoryStockFilter} onValueChange={setInventoryStockFilter}>
                     <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Category" />
+                      <SelectValue placeholder="Stock" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Items</SelectItem>
-                      <SelectItem value="anesthetics">Anesthetics</SelectItem>
-                      <SelectItem value="materials">Materials</SelectItem>
-                      <SelectItem value="supplies">Supplies</SelectItem>
+                      <SelectItem value="low">Low Stock</SelectItem>
+                      <SelectItem value="out">Out of Stock</SelectItem>
+                      <SelectItem value="healthy">Healthy Stock</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button>Add Item</Button>
+                  <Button onClick={() => openInventoryModal("create")}>
+                    <PackagePlus className="h-4 w-4 mr-2" />
+                    New Stock Item
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -1170,25 +1444,25 @@ export function FinanceView() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Item Name</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Cost/Unit</TableHead>
-                      <TableHead>Total Value</TableHead>
-                      <TableHead>Supplier</TableHead>
-                      <TableHead>Last Ordered</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableRow>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Unit Cost</TableHead>
+                        <TableHead>Stock Value</TableHead>
+                        <TableHead>Supplier</TableHead>
+                        <TableHead>Last Ordered</TableHead>
+                        <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {inventoryData.length === 0 ? (
+                    {filteredInventoryData.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                          No inventory items found. Click &apos;Add Item&apos; to add one!
+                          {inventoryData.length === 0 ? "No inventory items found. Create a stock item to start tracking supplies." : "No inventory items match this filter."}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      inventoryData.map((item) => (
+                      filteredInventoryData.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell className="font-medium">{item.item}</TableCell>
                           <TableCell>
@@ -1201,9 +1475,15 @@ export function FinanceView() {
                           <TableCell>{item.supplier}</TableCell>
                           <TableCell>{item.lastOrdered}</TableCell>
                           <TableCell>
-                            <div className="flex space-x-2">
-                              <Button variant="outline" size="sm">Reorder</Button>
-                              <Button variant="outline" size="sm">Edit</Button>
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => openReorderModal(item)}>
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Adjust Stock
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openInventoryModal("edit", item)}>
+                                <Edit className="h-3 w-3 mr-1" />
+                                Edit
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1221,18 +1501,23 @@ export function FinanceView() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Employee Payroll</CardTitle>
-                <div className="flex space-x-2">
-                  <Select>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={selectedPayrollMonth} onValueChange={handlePayrollMonthChange}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Month" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="january">January 2024</SelectItem>
-                      <SelectItem value="february">February 2024</SelectItem>
-                      <SelectItem value="march">March 2024</SelectItem>
+                      {payrollMonthOptions.map((month) => (
+                        <SelectItem key={month.value} value={month.value}>
+                          {month.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  <Button>Process Payroll</Button>
+                  <Button onClick={() => openPayrollModal("process")}>
+                    <Wallet className="h-4 w-4 mr-2" />
+                    Process Payroll
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -1266,30 +1551,43 @@ export function FinanceView() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        payrollData.map((employee) => (
-                          <TableRow key={employee.id}>
-                            <TableCell className="font-medium">{employee.name}</TableCell>
-                            <TableCell>{employee.role}</TableCell>
-                            <TableCell>{formatCurrency(employee.baseSalary)}</TableCell>
-                            <TableCell>{formatCurrency(employee.bonus)}</TableCell>
-                            <TableCell className="font-medium">
-                              {formatCurrency(employee.total)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={employee.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
-                                {employee.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm">View Details</Button>
-                                {employee.status === 'pending' && (
-                                  <Button size="sm" className="bg-primary hover:bg-primary/90">Pay Now</Button>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        payrollData.map((employee) => {
+                          const payrollStatus = normalizeFilterValue(employee.status);
+                          return (
+                            <TableRow key={employee.id}>
+                              <TableCell className="font-medium">{employee.name}</TableCell>
+                              <TableCell>{employee.role}</TableCell>
+                              <TableCell>{formatCurrency(employee.baseSalary)}</TableCell>
+                              <TableCell>{formatCurrency(employee.bonus)}</TableCell>
+                              <TableCell className="font-medium">
+                                {formatCurrency(employee.total)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={
+                                  payrollStatus === "paid"
+                                    ? "bg-green-100 text-green-800"
+                                    : payrollStatus === "approved"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-yellow-100 text-yellow-800"
+                                }>
+                                  {employee.status || "pending"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-2">
+                                  {payrollStatus !== "paid" && (
+                                    <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={() => openPayrollModal("pay", employee)}>
+                                      Pay Now
+                                    </Button>
+                                  )}
+                                  {payrollStatus === "paid" && (
+                                    <span className="text-sm text-muted-foreground">Paid</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
@@ -1298,12 +1596,12 @@ export function FinanceView() {
                     <div className="flex justify-between items-center">
                       <div>
                         <h3 className="font-medium">Total Monthly Payroll</h3>
-                        <p className="text-sm text-muted-foreground">January 2024</p>
+                        <p className="text-sm text-muted-foreground">{formatPayrollMonthLabel(selectedPayrollMonth)}</p>
                       </div>
                       <div className="text-right">
                         <div className="text-2xl font-bold">{formatCurrency(payrollData.reduce((sum, emp) => sum + emp.total, 0))}</div>
                         <p className="text-sm text-muted-foreground">
-                          {payrollData.filter(emp => emp.status === 'paid').length} of {payrollData.length} employees paid
+                          {payrollData.filter(emp => normalizeFilterValue(emp.status) === "paid").length} of {payrollData.length} employees paid
                         </p>
                       </div>
                     </div>
@@ -1458,6 +1756,70 @@ export function FinanceView() {
 
         </TabsContent>
       </Tabs>
+
+      <FinanceExpenseModal
+        open={Boolean(expenseModalMode)}
+        mode={expenseModalMode || "create"}
+        form={expenseForm}
+        isSaving={isSavingExpense}
+        inventoryItems={inventoryData}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && closeExpenseModal()}
+        onFormChange={setExpenseForm}
+        onSave={handleSaveExpense}
+      />
+      <FinanceExpensePaymentModal
+        expense={expenseToPay}
+        paymentMethod={expensePaymentMethod}
+        isSaving={isSavingExpensePayment}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && setExpenseToPay(null)}
+        onPaymentMethodChange={setExpensePaymentMethod}
+        onConfirm={handlePayExpense}
+      />
+      <FinanceInventoryModal
+        open={Boolean(inventoryModalMode)}
+        mode={inventoryModalMode || "create"}
+        form={inventoryForm}
+        isSaving={isSavingInventory}
+        inventoryItems={inventoryData}
+        currentItemId={selectedInventoryItem?.id}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && closeInventoryModal()}
+        onFormChange={setInventoryForm}
+        onSave={handleSaveInventoryItem}
+      />
+      <FinanceInventoryChangeReviewModal
+        open={inventoryChangesToReview.length > 0}
+        itemName={selectedInventoryItem?.item || ""}
+        changes={inventoryChangesToReview}
+        isSaving={isSavingInventory}
+        onOpenChange={(open) => !open && setInventoryChangesToReview([])}
+        onConfirm={handleConfirmInventoryChanges}
+      />
+      <FinanceInventoryReorderModal
+        item={inventoryItemToReorder}
+        form={reorderForm}
+        isSaving={isSavingReorder}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && setInventoryItemToReorder(null)}
+        onFormChange={setReorderForm}
+        onSave={handleReorderInventoryItem}
+      />
+      <FinancePayrollModal
+        open={Boolean(payrollModalMode)}
+        mode={payrollModalMode || "process"}
+        entry={selectedPayrollEntry}
+        payrollData={payrollData}
+        selectedPayrollMonth={selectedPayrollMonth}
+        paymentDate={payrollPaymentDate}
+        isSaving={isSavingPayroll}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => !open && closePayrollModal()}
+        onPaymentDateChange={setPayrollPaymentDate}
+        onProcess={handleProcessPayroll}
+        onPay={handlePayPayrollEntry}
+      />
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {
