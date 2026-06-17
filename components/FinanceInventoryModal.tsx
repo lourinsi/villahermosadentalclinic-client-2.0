@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { History, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "./ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { FinanceHistoryDialog, type FinanceHistoryLog } from "./FinanceHistoryDialog";
 import { INVENTORY_UNIT_OPTIONS, normalizeFinanceValue, type InventoryForm } from "./financeModalOptions";
 
 export type FinanceInventoryModalMode = "create" | "edit";
@@ -23,6 +24,8 @@ type FinanceInventoryModalProps = {
   mode: FinanceInventoryModalMode;
   form: InventoryForm;
   isSaving: boolean;
+  historyLogs?: FinanceHistoryLog[];
+  isHistoryLoading?: boolean;
   inventoryItems?: InventoryLookupItem[];
   currentItemId?: string;
   onOpenChange: (open: boolean) => void;
@@ -108,6 +111,8 @@ export function FinanceInventoryModal({
   mode,
   form,
   isSaving,
+  historyLogs = [],
+  isHistoryLoading = false,
   inventoryItems = [],
   currentItemId,
   onOpenChange,
@@ -115,11 +120,13 @@ export function FinanceInventoryModal({
   onSave,
 }: FinanceInventoryModalProps) {
   const [isCreatingSupplier, setIsCreatingSupplier] = useState(false);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<InventoryForm>) => onFormChange({ ...form, ...updates });
 
   useEffect(() => {
     if (!open) {
       setIsCreatingSupplier(false);
+      setIsHistoryDialogOpen(false);
     }
   }, [open]);
 
@@ -177,14 +184,27 @@ export function FinanceInventoryModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
-        <div className="border-b bg-gray-50 px-6 py-5">
-          <DialogHeader>
-            <DialogTitle>{mode === "edit" ? "Edit Stock Item" : "New Stock Item"}</DialogTitle>
-            <DialogDescription>Create or update the item record. Use Add Stock when buying more units.</DialogDescription>
-          </DialogHeader>
-        </div>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
+          <div className="border-b bg-gray-50 px-6 py-5">
+            <div className="flex items-start justify-between gap-4">
+              <DialogHeader>
+                <DialogTitle>{mode === "edit" ? "Edit Stock Item" : "New Stock Item"}</DialogTitle>
+                <DialogDescription>Create or update the item record. Use Add Stock when buying more units.</DialogDescription>
+              </DialogHeader>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setIsHistoryDialogOpen(true)}
+                title="View inventory history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
         <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
           <div className="space-y-2 sm:col-span-2">
@@ -286,6 +306,16 @@ export function FinanceInventoryModal({
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      <FinanceHistoryDialog
+        open={isHistoryDialogOpen}
+        onOpenChange={setIsHistoryDialogOpen}
+        entityType="inventory"
+        title="Inventory History"
+        description={`Recent stock changes${form.item ? ` for ${form.item}` : ""}`}
+        logs={historyLogs}
+        isLoading={isHistoryLoading}
+      />
+    </>
   );
 }

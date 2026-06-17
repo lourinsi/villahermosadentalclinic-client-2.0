@@ -26,6 +26,7 @@ import { FinanceInventoryReorderModal } from "./FinanceInventoryReorderModal";
 import { FinancePayrollModal, type FinancePayrollModalMode } from "./FinancePayrollModal";
 import { FinancePayrollBonusModal, type PayrollBonusForm } from "./FinancePayrollBonusModal";
 import { FinancePayrollEditModal, type PayrollEditForm } from "./FinancePayrollEditModal";
+import type { FinanceHistoryEntityType, FinanceHistoryLog } from "./FinanceHistoryDialog";
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
@@ -510,6 +511,8 @@ export function FinanceView() {
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [patientImages, setPatientImages] = useState<Record<string, string | undefined>>({});
+  const [financeHistoryLogs, setFinanceHistoryLogs] = useState<FinanceHistoryLog[]>([]);
+  const [isFinanceHistoryLoading, setIsFinanceHistoryLoading] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
@@ -603,6 +606,51 @@ export function FinanceView() {
     }
   };
 
+  const loadFinanceHistory = async (
+    entityType: FinanceHistoryEntityType,
+    options: { entityId?: string; context?: string } = {}
+  ) => {
+    if (!options.entityId && entityType !== "payroll") {
+      setFinanceHistoryLogs([]);
+      setIsFinanceHistoryLoading(false);
+      return;
+    }
+
+    setIsFinanceHistoryLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "150");
+      if (options.context) params.set("context", options.context);
+
+      const path = options.entityId
+        ? `/api/finance/history/${encodeURIComponent(entityType)}/${encodeURIComponent(options.entityId)}`
+        : `/api/finance/history/${encodeURIComponent(entityType)}`;
+      const query = params.toString();
+      const logs = await fetchApiData<FinanceHistoryLog[]>(
+        `${path}${query ? `?${query}` : ""}`,
+        `${entityType} history`
+      );
+      setFinanceHistoryLogs(logs || []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load finance history";
+      const routeUnavailable = /route not found|404/i.test(message);
+      setFinanceHistoryLogs([]);
+      if (routeUnavailable) {
+        console.warn("Finance history route is not available from the current backend.");
+      } else {
+        console.error("Error loading finance history:", error);
+        toast.error(message);
+      }
+    } finally {
+      setIsFinanceHistoryLoading(false);
+    }
+  };
+
+  const resetFinanceHistory = () => {
+    setFinanceHistoryLogs([]);
+    setIsFinanceHistoryLoading(false);
+  };
+
   useEffect(() => {
     fetchData();
   }, []); // Empty dependency array means this effect runs once on mount
@@ -680,6 +728,10 @@ export function FinanceView() {
   const openExpenseModal = (mode: FinanceExpenseModalMode, expense?: DetailedExpense) => {
     setSelectedExpense(expense || null);
     setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
+    resetFinanceHistory();
+    if (mode === "edit" && expense?.id) {
+      void loadFinanceHistory("expense", { entityId: expense.id });
+    }
     setExpenseModalMode(mode);
   };
 
@@ -687,6 +739,7 @@ export function FinanceView() {
     setExpenseModalMode(null);
     setSelectedExpense(null);
     setExpenseForm(createEmptyExpense());
+    resetFinanceHistory();
   };
 
   const openExpensePaymentModal = (expense: DetailedExpense) => {
@@ -828,6 +881,10 @@ export function FinanceView() {
     setSelectedInventoryItem(item || null);
     setInventoryForm(item ? createInventoryFormFromItem(item) : createEmptyInventoryItem());
     setInventoryChangesToReview([]);
+    resetFinanceHistory();
+    if (mode === "edit" && item?.id) {
+      void loadFinanceHistory("inventory", { entityId: item.id });
+    }
     setInventoryModalMode(mode);
   };
 
@@ -836,6 +893,7 @@ export function FinanceView() {
     setSelectedInventoryItem(null);
     setInventoryChangesToReview([]);
     setInventoryForm(createEmptyInventoryItem());
+    resetFinanceHistory();
   };
 
   const openReorderModal = (item: InventoryItem) => {
@@ -976,12 +1034,18 @@ export function FinanceView() {
     setPayrollModalMode(mode);
     setSelectedPayrollEntry(entry || null);
     setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
+    resetFinanceHistory();
+    void loadFinanceHistory("payroll", {
+      entityId: entry?.id,
+      context: selectedPayrollMonth,
+    });
   };
 
   const closePayrollModal = () => {
     setPayrollModalMode(null);
     setSelectedPayrollEntry(null);
     setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
+    resetFinanceHistory();
   };
 
   const openPayrollBonusModal = (entry?: PayrollEntry) => {
@@ -2264,6 +2328,8 @@ export function FinanceView() {
         inventoryItems={inventoryData}
         vendorOptions={expenseVendorOptions}
         canManageStatus={canManageExpenseStatus}
+        historyLogs={financeHistoryLogs}
+        isHistoryLoading={isFinanceHistoryLoading}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         onOpenChange={(open) => !open && closeExpenseModal()}
@@ -2284,6 +2350,8 @@ export function FinanceView() {
         mode={inventoryModalMode || "create"}
         form={inventoryForm}
         isSaving={isSavingInventory}
+        historyLogs={financeHistoryLogs}
+        isHistoryLoading={isFinanceHistoryLoading}
         inventoryItems={inventoryData}
         currentItemId={selectedInventoryItem?.id}
         onOpenChange={(open) => !open && closeInventoryModal()}
@@ -2338,6 +2406,8 @@ export function FinanceView() {
         selectedPayrollMonth={selectedPayrollMonth}
         paymentDate={payrollPaymentDate}
         isSaving={isSavingPayroll}
+        historyLogs={financeHistoryLogs}
+        isHistoryLoading={isFinanceHistoryLoading}
         formatCurrency={formatCurrency}
         onOpenChange={(open) => !open && closePayrollModal()}
         onPaymentDateChange={setPayrollPaymentDate}

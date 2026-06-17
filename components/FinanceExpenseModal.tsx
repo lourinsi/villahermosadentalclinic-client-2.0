@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { History, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "./ui/select";
+import { FinanceHistoryDialog, type FinanceHistoryLog } from "./FinanceHistoryDialog";
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
@@ -34,6 +35,8 @@ type FinanceExpenseModalProps = {
   inventoryItems: ExpenseInventoryItem[];
   vendorOptions: string[];
   canManageStatus?: boolean;
+  historyLogs?: FinanceHistoryLog[];
+  isHistoryLoading?: boolean;
   originalInventoryItemId?: string;
   originalInventoryQuantity?: number;
   onOpenChange: (open: boolean) => void;
@@ -68,6 +71,8 @@ export function FinanceExpenseModal({
   inventoryItems,
   vendorOptions,
   canManageStatus = true,
+  historyLogs = [],
+  isHistoryLoading = false,
   originalInventoryItemId = "",
   originalInventoryQuantity = 0,
   onOpenChange,
@@ -75,6 +80,7 @@ export function FinanceExpenseModal({
   onSave,
 }: FinanceExpenseModalProps) {
   const [isCreatingVendor, setIsCreatingVendor] = useState(false);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
   const selectedInventoryItem = inventoryItems.find((item) => item.id === form.inventoryItemId);
   const linkedQuantity = Number(form.inventoryQuantity) || 0;
@@ -101,6 +107,7 @@ export function FinanceExpenseModal({
   useEffect(() => {
     if (!open) {
       setIsCreatingVendor(false);
+      setIsHistoryDialogOpen(false);
     }
   }, [open]);
 
@@ -172,16 +179,29 @@ export function FinanceExpenseModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
-        <div className="border-b bg-gray-50 px-6 py-5">
-          <DialogHeader>
-            <DialogTitle>{mode === "edit" ? "Edit Expense" : "Add Manual Expense"}</DialogTitle>
-            <DialogDescription>
-              Record the bill here. Link stock only when this expense should also increase Inventory.
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
+          <div className="border-b bg-gray-50 px-6 py-5">
+            <div className="flex items-start justify-between gap-4">
+              <DialogHeader>
+                <DialogTitle>{mode === "edit" ? "Edit Expense" : "Add Manual Expense"}</DialogTitle>
+                <DialogDescription>
+                  Record the bill here. Link stock only when this expense should also increase Inventory.
+                </DialogDescription>
+              </DialogHeader>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setIsHistoryDialogOpen(true)}
+                title="View expense history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
         <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
           <div className="space-y-2">
@@ -386,6 +406,16 @@ export function FinanceExpenseModal({
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      <FinanceHistoryDialog
+        open={isHistoryDialogOpen}
+        onOpenChange={setIsHistoryDialogOpen}
+        entityType="expense"
+        title="Expense History"
+        description={`Recent expense changes${form.description ? ` for ${form.description}` : ""}`}
+        logs={historyLogs}
+        isLoading={isHistoryLoading}
+      />
+    </>
   );
 }

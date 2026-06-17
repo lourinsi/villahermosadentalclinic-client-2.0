@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { History } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { FinanceHistoryDialog, type FinanceHistoryLog } from "./FinanceHistoryDialog";
 import { formatPayrollMonthLabel, normalizeFinanceValue } from "./financeModalOptions";
 
 export type FinancePayrollModalMode = "pay" | "process";
@@ -29,6 +32,8 @@ type FinancePayrollModalProps = {
   selectedPayrollMonth: string;
   paymentDate: string;
   isSaving: boolean;
+  historyLogs?: FinanceHistoryLog[];
+  isHistoryLoading?: boolean;
   formatCurrency: (amount?: number) => string;
   onOpenChange: (open: boolean) => void;
   onPaymentDateChange: (date: string) => void;
@@ -44,6 +49,8 @@ export function FinancePayrollModal({
   selectedPayrollMonth,
   paymentDate,
   isSaving,
+  historyLogs = [],
+  isHistoryLoading = false,
   formatCurrency,
   onOpenChange,
   onPaymentDateChange,
@@ -56,20 +63,40 @@ export function FinancePayrollModal({
   const pendingTotal = payrollData
     .filter((employee) => normalizeFinanceValue(employee.status) !== "paid")
     .reduce((sum, employee) => sum + employee.total, 0);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setIsHistoryDialogOpen(false);
+    }
+  }, [open]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="p-0 sm:max-w-lg">
-        <div className="border-b bg-gray-50 px-6 py-5">
-          <DialogHeader>
-            <DialogTitle>{mode === "process" ? "Process Payroll" : "Pay Payroll"}</DialogTitle>
-            <DialogDescription>
-              {mode === "process"
-                ? `Pay all payroll entries for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`
-                : `Pay this payroll entry for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="p-0 sm:max-w-lg">
+          <div className="border-b bg-gray-50 px-6 py-5">
+            <div className="flex items-start justify-between gap-4">
+              <DialogHeader>
+                <DialogTitle>{mode === "process" ? "Process Payroll" : "Pay Payroll"}</DialogTitle>
+                <DialogDescription>
+                  {mode === "process"
+                    ? `Pay all payroll entries for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`
+                    : `Pay this payroll entry for ${formatPayrollMonthLabel(selectedPayrollMonth)}.`}
+                </DialogDescription>
+              </DialogHeader>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setIsHistoryDialogOpen(true)}
+                title="View payroll history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
         {mode === "process" ? (
           <div className="space-y-4 px-6 py-5">
@@ -157,6 +184,20 @@ export function FinancePayrollModal({
           )}
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      <FinanceHistoryDialog
+        open={isHistoryDialogOpen}
+        onOpenChange={setIsHistoryDialogOpen}
+        entityType="payroll"
+        title="Payroll History"
+        description={
+          mode === "process"
+            ? `Recent payroll changes for ${formatPayrollMonthLabel(selectedPayrollMonth)}`
+            : `Recent payroll changes for ${entry?.name || "this employee"}`
+        }
+        logs={historyLogs}
+        isLoading={isHistoryLoading}
+      />
+    </>
   );
 }
