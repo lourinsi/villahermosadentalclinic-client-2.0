@@ -33,6 +33,7 @@ import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetail
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { getAuthHeaders } from "@/lib/auth-headers";
 
 // dummy data removed per request
@@ -84,6 +85,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const patientDetailsRef = useRef<PatientDetailsRef | null>(null);
   const itemsPerPage = 10;
   const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
   const { openAddPatientModal, refreshPatients, refreshTrigger, newAppointmentCreationMode } = useAppointmentModal();
 
   // BookingModal state
@@ -455,7 +457,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                               {patient.name}
                             </span>
                             <div className="mt-1 flex flex-col gap-1 text-xs text-slate-500">
-                              {user?.role !== "receptionist" && (
+                              {effectiveRole !== "receptionist" && (
                                 <span className="truncate min-w-0">ID: {patient.id?.slice(-8).toUpperCase()}</span>
                               )}
                               {formatDateOfBirth(patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday) ? (

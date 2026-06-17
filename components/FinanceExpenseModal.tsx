@@ -33,6 +33,7 @@ type FinanceExpenseModalProps = {
   isSaving: boolean;
   inventoryItems: ExpenseInventoryItem[];
   vendorOptions: string[];
+  canManageStatus?: boolean;
   originalInventoryItemId?: string;
   originalInventoryQuantity?: number;
   onOpenChange: (open: boolean) => void;
@@ -66,6 +67,7 @@ export function FinanceExpenseModal({
   isSaving,
   inventoryItems,
   vendorOptions,
+  canManageStatus = true,
   originalInventoryItemId = "",
   originalInventoryQuantity = 0,
   onOpenChange,
@@ -266,7 +268,7 @@ export function FinanceExpenseModal({
             ) : null}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="expense-payment-method">Paid With</Label>
+            <Label htmlFor="expense-payment-method">{mode === "edit" ? "Payment Method" : "Planned Payment Method"}</Label>
             <Select value={form.paymentMethod} onValueChange={(value) => updateForm({ paymentMethod: value })}>
               <SelectTrigger id="expense-payment-method">
                 <SelectValue placeholder="Select method" />
@@ -282,18 +284,27 @@ export function FinanceExpenseModal({
           </div>
           <div className="space-y-2">
             <Label htmlFor="expense-status">Payment Status</Label>
-            <Select value={form.status} onValueChange={(value) => updateForm({ status: value })}>
-              <SelectTrigger id="expense-status">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                {EXPENSE_STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {!canManageStatus ? (
+              <div
+                id="expense-status"
+                className="flex h-10 items-center rounded-md border bg-yellow-50 px-3 text-sm font-medium text-yellow-800"
+              >
+                {form.status ? form.status.charAt(0).toUpperCase() + form.status.slice(1) : "Pending"}
+              </div>
+            ) : (
+              <Select value={form.status} onValueChange={(value) => updateForm({ status: value })}>
+                <SelectTrigger id="expense-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXPENSE_STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="space-y-4 rounded-md border bg-gray-50 p-4 sm:col-span-2">
             <div>

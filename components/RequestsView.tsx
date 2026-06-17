@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
-import { useAuth } from "@/hooks/useAuth.tsx";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -115,7 +115,7 @@ const getPatientImage = (appointment: any, patientRecord?: any) => {
 };
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
-  const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
   const {
     appointments,
     updateAppointment,
@@ -127,7 +127,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   } = useAppointmentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
-  const canManagePaymentStatuses = user?.role === "admin";
+  const canManagePaymentStatuses = effectiveRole === "admin";
   const [requests, setRequests] = useState<Appointment[]>([]);
   const [isRequestsLoading, setIsRequestsLoading] = useState(true);
   const [requestCurrentPage, setRequestCurrentPage] = useState(1);
@@ -855,7 +855,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </h1>
           <p className="text-gray-500 font-medium">Review and manage appointment requests</p>
         </div>
-        {(user?.role === "admin" || user?.role === "doctor") && (
+        {(effectiveRole === "admin" || effectiveRole === "doctor") && (
           <Button
             type="button"
             variant="outline"

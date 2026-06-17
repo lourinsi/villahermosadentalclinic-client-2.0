@@ -5,6 +5,7 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
 
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
@@ -307,8 +308,10 @@ export interface DetailedExpense {
   amount: number;
   vendor: string;
   paymentMethod: string;
+  paymentDate?: string;
   status: string;
   recurring: boolean;
+  createdAt?: string;
   inventoryItemId?: string;
   inventoryQuantity?: number;
   notes?: string;
@@ -465,7 +468,9 @@ export interface RecentTransaction {
 }
 
 export function FinanceView() {
+  const { user } = useAuth();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
+  const canManageExpenseStatus = normalizeFilterValue(user?.role) === "admin";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
@@ -610,7 +615,7 @@ export function FinanceView() {
       const selectedMethod = normalizeFilterValue(paymentMethodFilter);
 
       if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (paymentMethodFilter !== "all" && method !== selectedMethod) return false;
+      if (paymentMethodFilter !== "all" && (status !== "paid" || method !== selectedMethod)) return false;
 
       const rangeStart = timePeriodFilter === "custom" ? startDate : periodRange?.start || startDate;
       const rangeEnd = timePeriodFilter === "custom" ? endDate : periodRange?.end || endDate;
@@ -718,6 +723,7 @@ export function FinanceView() {
           body: JSON.stringify({
             ...expenseForm,
             amount: Number(expenseForm.amount),
+            ...(!isEditingExpense && !canManageExpenseStatus && { status: "pending" }),
           }),
         }
       );
@@ -771,6 +777,7 @@ export function FinanceView() {
         ...detailedExpenses.map((expense) => ({
           Section: "Expense",
           Date: expense.date,
+          "Created At": expense.createdAt || "",
           Description: expense.description,
           Amount: expense.amount,
           Expenses: expense.amount,
@@ -1277,6 +1284,73 @@ export function FinanceView() {
     getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
     getAppointmentIdFromDescription(transaction.description);
 
+  const findExpenseForTransaction = (
+    transaction: RecentTransaction,
+    expenses: DetailedExpense[] = detailedExpenses
+  ) => {
+    if (transaction.type !== "expense") return null;
+
+    const transactionExpenseId =
+      transaction.source === "expense"
+        ? String(transaction.id || transaction.transactionId || "").trim()
+        : "";
+    const directMatch = transactionExpenseId
+      ? expenses.find((expense) => String(expense.id) === transactionExpenseId)
+      : null;
+
+    if (directMatch) return directMatch;
+
+    const transactionAmount = Math.abs(Number(transaction.amount) || 0);
+    const transactionDescription = normalizeFilterValue(transaction.description);
+    const transactionMethod = normalizeFilterValue(transaction.method);
+
+    return (
+      expenses.find((expense) => {
+        const method = normalizeFilterValue(expense.paymentMethod);
+        return (
+          expense.date === transaction.date &&
+          normalizeFilterValue(expense.description) === transactionDescription &&
+          Math.abs((Number(expense.amount) || 0) - transactionAmount) < 0.01 &&
+          (!transactionMethod || method === transactionMethod)
+        );
+      }) || null
+    );
+  };
+
+  const handleViewTransaction = async (transaction: RecentTransaction) => {
+    if (transaction.type === "expense") {
+      let expense = findExpenseForTransaction(transaction);
+
+      if (!expense && transaction.source === "expense") {
+        setLoadingAppointmentId(transaction.id);
+        try {
+          const refreshedExpenses = await fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses");
+          setDetailedExpenses(refreshedExpenses || []);
+          expense = findExpenseForTransaction(transaction, refreshedExpenses || []);
+        } catch (error) {
+          console.error("Error loading expense details:", error);
+          toast.error(error instanceof Error ? error.message : "Failed to load expense details");
+          setLoadingAppointmentId(null);
+          return;
+        } finally {
+          setLoadingAppointmentId(null);
+        }
+      }
+
+      if (expense) {
+        openExpenseModal("edit", expense);
+        return;
+      }
+
+      if (!getTransactionAppointmentId(transaction) && !transaction.appointmentSnapshot) {
+        toast.error("No detailed expense is linked to this transaction");
+        return;
+      }
+    }
+
+    await handleViewAppointmentSnapshot(transaction);
+  };
+
   const handleOpenAppointment = async (appointmentId: string) => {
     if (!appointmentId) {
       toast.error("No appointment is linked to this snapshot");
@@ -1688,6 +1762,7 @@ export function FinanceView() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
+                        <TableHead>Created At</TableHead>
                         <TableHead>Category</TableHead>
                         <TableHead>Description</TableHead>
                         <TableHead>Vendor</TableHead>
@@ -1700,7 +1775,7 @@ export function FinanceView() {
                     <TableBody>
                       {filteredDetailedExpenses.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                             No detailed expenses found.
                           </TableCell>
                         </TableRow>
@@ -1710,13 +1785,20 @@ export function FinanceView() {
                           return (
                             <TableRow key={expense.id}>
                               <TableCell>{expense.date}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "-"}
+                              </TableCell>
                               <TableCell>
                                 <Badge variant="secondary">{formatOptionLabel(expense.category, EXPENSE_CATEGORY_OPTIONS)}</Badge>
                               </TableCell>
                               <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
                               <TableCell>{expense.vendor || "-"}</TableCell>
                               <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {expenseStatus === "paid"
+                                  ? formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)
+                                  : "-"}
+                              </TableCell>
                               <TableCell>
                                 <Badge className={
                                   expenseStatus === "paid"
@@ -2069,6 +2151,11 @@ export function FinanceView() {
                       const appointmentId = getTransactionAppointmentId(transaction);
                       const transactionLoadingKey = appointmentId || transaction.id;
                       const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
+                      const expenseForTransaction = findExpenseForTransaction(transaction);
+                      const canViewExpense =
+                        transaction.type === "expense" &&
+                        (Boolean(expenseForTransaction) || transaction.source === "expense");
+                      const canViewAppointmentSnapshot = Boolean(appointmentId || transaction.appointmentSnapshot);
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
@@ -2145,8 +2232,14 @@ export function FinanceView() {
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-violet-600"
                               disabled={isLoadingThisAppointment}
-                              title={appointmentId || transaction.appointmentSnapshot ? "View appointment snapshot" : "No appointment linked"}
-                              onClick={() => handleViewAppointmentSnapshot(transaction)}
+                              title={
+                                canViewExpense
+                                  ? "View expense details"
+                                  : canViewAppointmentSnapshot
+                                    ? "View appointment snapshot"
+                                    : "No details linked"
+                              }
+                              onClick={() => handleViewTransaction(transaction)}
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
@@ -2170,6 +2263,7 @@ export function FinanceView() {
         isSaving={isSavingExpense}
         inventoryItems={inventoryData}
         vendorOptions={expenseVendorOptions}
+        canManageStatus={canManageExpenseStatus}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         onOpenChange={(open) => !open && closeExpenseModal()}

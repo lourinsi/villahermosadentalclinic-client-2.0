@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
@@ -424,6 +425,7 @@ interface BookingModalProps {
 
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
@@ -552,7 +554,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     isPatientLevelBookingMode,
     isDoctorSelectionLocked,
   } = getBookingActor({
-    userRole: user?.role,
+    userRole: effectiveRole,
     bookingMode,
     isEditing: Boolean(appointmentToEdit),
   });
@@ -3467,7 +3469,7 @@ return (
         isCancelled={isCancelled}
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
-        userRole={user?.role}
+        userRole={effectiveRole}
       />
 
       <AppointmentHistoryView
