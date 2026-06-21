@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
 import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings } from "lucide-react";
 import { toast } from "sonner";
@@ -16,11 +17,52 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
 
-const AdminLayout = ({ children }: { children: React.ReactNode }) => {
+export interface AdminLayoutTheme {
+  sidebar: string;
+  title: string;
+  navActive: string;
+  navInactive: string;
+  footer: string;
+  userBox: string;
+  userIcon: string;
+  logoutButton: string;
+}
+
+export const adminLayoutTheme: AdminLayoutTheme = {
+  sidebar: "w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col",
+  title: "p-4 text-2xl font-bold border-b border-blue-800",
+  navActive: "bg-blue-950 text-white",
+  navInactive: "text-blue-100 hover:bg-blue-800 hover:text-white",
+  footer: "p-4 border-t border-blue-800 space-y-3",
+  userBox: "flex items-center space-x-2 px-3 py-2 bg-blue-800 rounded-lg",
+  userIcon: "w-4 h-4 text-blue-200",
+  logoutButton: "w-full justify-start text-blue-900 hover:bg-blue-50 bg-white",
+};
+
+const navItems = [
+  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/requests", label: "Requests", icon: ClipboardList },
+  { href: "/admin/patients", label: "Patients", icon: Users },
+  { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
+  { href: "/admin/calendar", label: "Calendar", icon: Calendar },
+  { href: "/admin/finance", label: "Finance", icon: DollarSign },
+  { href: "/admin/staff", label: "Staff", icon: Shield },
+  { href: "/admin/notifications", label: "Notifications", icon: Bell },
+  { href: "/admin/settings", label: "Settings", icon: Settings },
+];
+
+interface AdminLayoutShellProps {
+  children: React.ReactNode;
+  portalTitle: string;
+  theme: AdminLayoutTheme;
+}
+
+export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutShellProps) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
+  const { isReceptionistView, canSwitchAdminView, toggleViewMode } = useAdminViewMode();
   const {
     notifications,
     markAsRead,
@@ -44,8 +86,9 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     closeCreateModal,
     selectedAppointment,
     newAppointmentDate,
-    newAppointmentTime
-    , newAppointmentCreationMode
+    newAppointmentTime,
+    newAppointmentDoctorName,
+    newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -96,34 +139,23 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
   const handleLogout = async () => {
     try {
+      const logoutRedirect = user?.role === "receptionist" ? "/receptionist/login" : "/admin/login";
       await logout();
       toast.success("Logged out successfully");
-      router.push("/login");
+      router.push(logoutRedirect);
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout");
     }
   };
 
-  const navItems = [
-    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/requests", label: "Requests", icon: ClipboardList },
-    { href: "/admin/patients", label: "Patients", icon: Users },
-    { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
-    { href: "/admin/calendar", label: "Calendar", icon: Calendar },
-    { href: "/admin/finance", label: "Finance", icon: DollarSign },
-    { href: "/admin/staff", label: "Staff", icon: Shield },
-    { href: "/admin/notifications", label: "Notifications", icon: Bell },
-    { href: "/admin/settings", label: "Settings", icon: Settings },
-  ];
-
   const getNavTourId = (label: string) =>
     `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <aside data-tour-id="admin-sidebar" className="w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col">
-        <div className="p-4 text-2xl font-bold border-b border-blue-800">Admin</div>
+      <aside data-tour-id="admin-sidebar" className={theme.sidebar}>
+        <div className={theme.title}>{portalTitle}</div>
         <nav className="flex-1 py-4">
           <ul className="space-y-1">
             {navItems.map((item) => {
@@ -137,8 +169,8 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                     data-tour-id={getNavTourId(item.label)}
                     className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
                       isActive
-                        ? "bg-blue-950 text-white"
-                        : "text-blue-100 hover:bg-blue-800 hover:text-white"
+                        ? theme.navActive
+                        : theme.navInactive
                     }`}
                   >
                     <Icon className="w-5 h-5" />
@@ -149,15 +181,15 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             })}
           </ul>
         </nav>
-        <div className="p-4 border-t border-blue-800 space-y-3">
-          <div className="flex items-center space-x-2 px-3 py-2 bg-blue-800 rounded-lg">
-            <User className="w-4 h-4 text-blue-200" />
-            <span className="text-sm font-medium truncate">{user?.username || "Admin"}</span>
+        <div className={theme.footer}>
+          <div className={theme.userBox}>
+            <User className={theme.userIcon} />
+            <span className="text-sm font-medium truncate">{user?.username || portalTitle}</span>
           </div>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="w-full justify-start text-blue-900 hover:bg-blue-50 bg-white"
+            className={theme.logoutButton}
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout
@@ -167,6 +199,23 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
           <div className="flex items-center gap-3">
+            {canSwitchAdminView && (
+              <Button
+                onClick={toggleViewMode}
+                variant="outline"
+                size="sm"
+                data-tour-id="admin-role-view-toggle"
+                className="text-xs gap-2"
+                title={`Switch to ${isReceptionistView ? "Admin" : "Receptionist"} view`}
+              >
+                {isReceptionistView ? (
+                  <User className="h-3.5 w-3.5" />
+                ) : (
+                  <Shield className="h-3.5 w-3.5" />
+                )}
+                {isReceptionistView ? "Receptionist" : "Admin"}
+              </Button>
+            )}
             <Button
               onClick={toggleMode}
               variant="outline"
@@ -235,6 +284,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             appointmentToEdit={selectedAppointment}
             defaultDate={newAppointmentDate}
             defaultTime={newAppointmentTime}
+            doctorName={newAppointmentDoctorName}
             appointmentCreationMode={newAppointmentCreationMode}
           />
         )}
@@ -242,5 +292,11 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     </div>
   );
 };
+
+const AdminLayout = ({ children }: { children: React.ReactNode }) => (
+  <AdminLayoutShell portalTitle="Admin" theme={adminLayoutTheme}>
+    {children}
+  </AdminLayoutShell>
+);
 
 export default AdminLayout;

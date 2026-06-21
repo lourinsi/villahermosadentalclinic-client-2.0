@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Clock, Calendar } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
@@ -233,16 +234,13 @@ export function NextAppointmentCard({
               </p>
             </div>
             
-            <Avatar className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500 overflow-hidden">
-              {resolvedPatientImage ? (
-                <AvatarImage src={resolvedPatientImage} alt={`${currentPatientName} photo`} className="object-cover" />
-              ) : (
-                <AvatarFallback className="bg-emerald-50 text-center">
-                  <div className="text-2xl font-black text-emerald-700">{getInitials(currentPatientName)}</div>
-                  <div className="text-[8px] font-black uppercase tracking-widest text-emerald-600/70 mt-0.5">Patient</div>
-                </AvatarFallback>
-              )}
-            </Avatar>
+            <PatientAvatar
+              src={resolvedPatientImage}
+              name={currentPatientName}
+              dob={patientRecord?.dateOfBirth || patientRecord?.birthDate || patientRecord?.dob || patientRecord?.birthday}
+              className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500 overflow-hidden"
+              sizeClass="h-20 w-20 rounded-2xl"
+            />
           </div>
 
           <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">

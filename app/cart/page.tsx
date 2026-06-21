@@ -1,7 +1,5 @@
-"use client";
-
-import PublicCartPage from "@/components/PublicCartPage";
+import { redirect } from "next/navigation";
 
 export default function CartPage() {
-  return <PublicCartPage />;
+  redirect("/");
 }

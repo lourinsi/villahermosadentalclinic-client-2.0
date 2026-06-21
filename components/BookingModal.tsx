@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
@@ -24,6 +25,8 @@ import useSharedBookingLogic, {
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
+  findNextAvailableRepeatSlot,
+  formatBookingDateKey,
   formatBookingDoctorName as formatDoctorName,
   formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
@@ -38,12 +41,15 @@ import useSharedBookingLogic, {
   getBookingCreateTime,
   getBookingDefaultDate,
   getBookingDefaultScheduleAction,
+  useBookingPaymentPrefill,
   getBookingDefaultTime,
   getBookingEditDate,
   getBookingEditTime,
+  getBookingTreatmentNotesValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
+  buildBookingTreatmentNotesPayload,
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
@@ -52,12 +58,15 @@ import useSharedBookingLogic, {
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizePastAppointmentStatus,
+  parseLocalDateOnly,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
 } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
+import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
@@ -198,6 +207,7 @@ const getBookingHistoryBriefDetail = (log: any, userRole?: string) => {
 
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
@@ -213,7 +223,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
-  const [selectedDate, setSelectedDate] = useState<Date>(defaultDate ?? new Date());
+  const [treatmentNotes, setTreatmentNotes] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<Date>(getBookingDefaultDate(defaultDate));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
@@ -229,6 +240,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
   const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
+  const [repeatOption, setRepeatOption] = useState<string>("do-not-repeat");
+  const [customRepeatDate, setCustomRepeatDate] = useState<string>("");
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
@@ -276,9 +289,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     canCreatePatients,
     canManagePricing,
     canManageStatuses,
+    canManagePaymentStatuses,
     isDoctorSelectionLocked,
   } = getBookingActor({
-    userRole: user?.role,
+    userRole: effectiveRole,
     bookingMode,
     isEditing: Boolean(appointmentToEdit),
   });
@@ -765,7 +779,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Get conflict info for patient
   const getPatientConflictInfo = useCallback(() => {
-    if (!selectedTime || !selectedDate) return { hasConflict: false };
+    if (!selectedTime || !selectedDate || !selectedPatient) return { hasConflict: false };
+
+    if (patientAppointments.length > 0) {
+      return {
+        hasConflict: true,
+        conflictMessage: 'Selected patient already has an appointment on this date. Only one appointment is allowed per patient per day.',
+      };
+    }
     
     const durationMins = normalizeBookingDuration(duration);
     const hasConflict = checkPatientConflict(selectedTime, durationMins);
@@ -816,7 +837,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const conflict = getPatientConflictInfo();
     
     if (conflict.hasConflict) {
-      setPatientConflict(`${selectedPatientName} has appointment with ${conflict.conflictDoctor} at ${conflict.conflictTime}`);
+      if (conflict.conflictMessage) {
+        setPatientConflict(conflict.conflictMessage);
+      } else {
+        setPatientConflict(`${selectedPatientName} has appointment with ${conflict.conflictDoctor} at ${conflict.conflictTime}`);
+      }
     } else {
       setPatientConflict("");
     }
@@ -1212,6 +1237,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // Notes from history remain visible in the AppointmentHistoryView below,
   // but they are not auto-copied into the editable notes field.
   setNotes('');
+      setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
       setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
@@ -1222,7 +1248,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
-      setPaymentMethod(appointmentToEdit.paymentMethod || (appointmentToEdit.paymentStatus === 'pay-at-clinic' ? 'Pay at Clinic' : ''));
+      setPaymentMethod(appointmentToEdit.paymentMethod || '');
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
@@ -1241,6 +1267,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
+      setTreatmentNotes('');
       setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setAmountToPay('');
@@ -1274,6 +1301,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   });
   const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
 
+  useBookingPaymentPrefill({
+    open,
+    modalStep,
+    amountToPay,
+    remainingBalance,
+    setAmountToPay,
+  });
+
   const { handleNextStep } = useSharedBookingLogic({
     modalStep,
     flow: 'details-payment',
@@ -1288,6 +1323,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     toast,
     durationConflict,
     patientConflict,
+    patientDateConflict: patientAppointments.length > 0 && selectedPatient ? `${selectedPatient} already has an appointment on this date. Only one appointment is allowed per patient per day.` : undefined,
     allowConflictSummary: true,
     scheduleMode: isPastAppointmentMode ? 'past' : 'standard',
   });
@@ -1347,7 +1383,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const amountPaid = parseFloat(amountPaidRaw) || 0;
 
     return getProjectedBookingStatus({
-      userRole: user?.role,
+      userRole: effectiveRole,
       bookingMode,
       isEditing: Boolean(appointmentToEdit),
       statusChangedByUser: statusChangedByUser === 1,
@@ -1380,9 +1416,134 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return getProjectedStatus();
   };
 
+  const getRepeatTargetDate = (repeatPayload?: { repeatOption: string; customRepeatDate?: string }) => {
+    const repeatOptionValue = repeatPayload?.repeatOption || "do-not-repeat";
+    if (repeatOptionValue === "do-not-repeat") return null;
+
+    const baseDate = new Date(selectedDate);
+    const target = new Date(baseDate);
+
+    switch (repeatOptionValue) {
+      case "next-week":
+        target.setDate(baseDate.getDate() + 7);
+        return target;
+      case "next-month":
+        target.setMonth(baseDate.getMonth() + 1);
+        return target;
+      case "3-months":
+        target.setMonth(baseDate.getMonth() + 3);
+        return target;
+      case "custom":
+        if (!repeatPayload?.customRepeatDate) return null;
+        const parsed = new Date(repeatPayload.customRepeatDate);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      default:
+        return null;
+    }
+  };
+
+  const getFollowUpLogNotes = (followUpTargetDate: Date) => {
+    return `Follow-up appointment created for ${followUpTargetDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })}.`;
+  };
+
+  const buildRepeatAppointmentNotes = (baseNotes: string, sourceDate: Date, nextDate: Date) => {
+    const repeatDateLabel = nextDate.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    const repeatNote = `Repeats on ${repeatDateLabel}`;
+    const trimmed = String(baseNotes || "").trim();
+    return trimmed ? `${trimmed}\n${repeatNote}` : repeatNote;
+  };
+
+  const buildFollowUpAppointmentNotes = (baseNotes: string, sourceDate: Date, sourceDateForLabel: Date) => {
+    const sourceDateLabel = sourceDateForLabel.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    const followUpNote = `Created as a repeating schedule from ${sourceDateLabel}`;
+    const trimmed = String(baseNotes || "").trim();
+    return trimmed ? `${trimmed}\n${followUpNote}` : followUpNote;
+  };
+
+  const saveFollowUpAppointment = async ({
+    followUpDate,
+    followUpStatus,
+    targetDoctor,
+    targetPatientRecord,
+    bookingDuration: followUpDuration,
+    treatmentNotesUpdate: followUpTreatmentNotesUpdate,
+  }: {
+    followUpDate: Date;
+    followUpStatus: string;
+    targetDoctor: string;
+    targetPatientRecord?: any;
+    bookingDuration: number;
+    treatmentNotesUpdate: any;
+  }) => {
+    const followUpDateStr = formatDateToYYYYMMDD(followUpDate);
+    const followUpPayload: any = {
+      patientId: selectedPatient,
+      patientName: targetPatientRecord?.name || selectedPatient,
+      doctor: targetDoctor || "",
+      date: followUpDateStr,
+      time: selectedTime,
+      type: getAppointmentTypeIndex(appointmentType),
+      customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+      duration: followUpDuration,
+      price: finalPrice,
+      discount: Number(discount) || 0,
+      notes: buildFollowUpAppointmentNotes(notes, selectedDate, followUpDate),
+      ...followUpTreatmentNotesUpdate,
+      status: followUpStatus as any,
+      paymentStatus: "unpaid",
+      paymentMethod: "",
+      totalPaid: 0,
+      balance: discountedPrice,
+      logNotes: getFollowUpLogNotes(followUpDate),
+    };
+
+    try {
+      if (isPublicBookingMode) {
+        if (isCartAppointmentStatus(followUpStatus)) {
+          await createPublicBookingAppointment(followUpPayload);
+        } else {
+          const resp = await fetch(apiUrl("/api/appointments/public-book"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              firstName: targetPatientRecord?.firstName || "",
+              lastName: targetPatientRecord?.lastName || "",
+              email: targetPatientRecord?.email || "",
+              phone: targetPatientRecord?.phone || "",
+              patientId: targetPatientRecord?.id,
+              ...followUpPayload,
+            }),
+          });
+          const json = await resp.json();
+          if (!resp.ok || !json.success) {
+            throw new Error(json?.message || "Failed to create follow-up appointment");
+          }
+        }
+      } else {
+        await addAppointment(followUpPayload);
+      }
+      toast.success("Follow-up appointment saved successfully.");
+    } catch (repeatError) {
+      console.error("Failed to save follow-up appointment:", repeatError);
+      toast.error("Could not save the follow-up appointment. Please try again.");
+    }
+  };
+
   // Final step: save after confirmation
-  const handleConfirmSummary = async () => {
+  const handleConfirmSummary = async (repeatPayload?: { repeatOption: string; customRepeatDate?: string }) => {
     if (!selectedPatient || !appointmentType) return;
+    
+    const repeatTargetDate = getRepeatTargetDate(repeatPayload);
     
     // Log the current state and history logs before submitting
     console.log('[BookingModal] 🚀 SUBMITTING APPOINTMENT:', {
@@ -1393,14 +1554,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
+      treatmentNotes,
       payment: {
         amountToPay,
         method: paymentMethod,
         previouslyPaid: previouslyPaidAmount,
-        remaining: remainingBalance
+        remaining: remainingBalance,
       },
       historyLogs: appointmentLogs,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     setIsBooking(true);
@@ -1408,6 +1570,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
+      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
+      const originalAppointmentNotes = repeatTargetDate
+        ? buildRepeatAppointmentNotes(notes, selectedDate, repeatTargetDate)
+        : notes;
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1471,7 +1637,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
-              notes,
+              notes: originalAppointmentNotes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               paymentMethod,
@@ -1491,12 +1658,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
-              notes,
+              notes: originalAppointmentNotes,
+              ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               totalPaid: newTotalPaid,
               balance: newBalance,
-            });
+            } as any);
 
         // Log the updated appointment details
         console.log('[BookingModal Payment] ✅ APPOINTMENT UPDATED SUCCESSFULLY:', {
@@ -1526,6 +1694,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         }
         try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated } })); } catch {}
         if (onBooked) onBooked(updated);
+
+        if (repeatTargetDate) {
+          const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+            startDate: repeatTargetDate,
+            doctorToCheck: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+            durationToCheck: bookingDuration,
+            patientToCheck: selectedPatient,
+            timeToCheck: selectedTime,
+            availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+            localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
+          });
+
+          if (resolvedRepeatSlot) {
+            const followUpDate = resolvedRepeatSlot.date;
+            if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
+              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
+            }
+
+            const followUpStatus = isCartAppointmentStatus(updateAppointmentStatus) ? updateAppointmentStatus : "scheduled";
+            await saveFollowUpAppointment({
+              followUpDate,
+              followUpStatus,
+              targetDoctor: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+              targetPatientRecord: selectedPatientRecord,
+              bookingDuration,
+              treatmentNotesUpdate,
+            });
+          }
+        }
+
         // close modal after updating
         onOpenChange(false);
       } else {
@@ -1565,7 +1763,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || "",
-              notes,
+              notes: originalAppointmentNotes,
+              ...treatmentNotesUpdate,
               price: finalPrice,
               discount: Number(discount) || 0,
               status: autoStatus as any,
@@ -1573,7 +1772,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentMethod,
               totalPaid: amountPaid,
               balance: newBalance,
-            });
+            } as any);
           } else {
             // Persist to backend using public booking endpoint. Fallback to cache on failure.
             try {
@@ -1593,7 +1792,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
-                notes,
+                notes: originalAppointmentNotes,
+                ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
                 status: autoStatus,
                 paymentStatus: paymentStatus,
@@ -1634,7 +1834,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
-                  notes,
+                  notes: originalAppointmentNotes,
+                  ...treatmentNotesUpdate,
                   price: finalPrice,
                   discount: Number(discount) || 0,
                   status: autoStatus as any,
@@ -1642,7 +1843,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   paymentMethod,
                   totalPaid: amountPaid,
                   balance: newBalance,
-                });
+                } as any);
               }
             } catch (err) {
               console.error("Public booking error, falling back to cache:", err);
@@ -1655,7 +1856,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
-                notes,
+                notes: originalAppointmentNotes,
+                ...treatmentNotesUpdate,
                 price: finalPrice,
                 discount: Number(discount) || 0,
                 status: autoStatus as any,
@@ -1663,7 +1865,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentMethod,
                 totalPaid: amountPaid,
                 balance: newBalance,
-              });
+              } as any);
             }
           }
         } else {
@@ -1678,12 +1880,42 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             duration: bookingDuration,
             price: finalPrice,
             discount: Number(discount) || 0,
-            notes,
+            notes: originalAppointmentNotes,
+            ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
             totalPaid: amountPaid,
             balance: newBalance,
+          } as any);
+        }
+
+        if (repeatTargetDate) {
+          const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+            startDate: repeatTargetDate,
+            doctorToCheck: selectedDoctor || "",
+            durationToCheck: bookingDuration,
+            patientToCheck: selectedPatient,
+            timeToCheck: selectedTime,
+            availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+            localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
           });
+
+          if (resolvedRepeatSlot) {
+            const followUpDate = resolvedRepeatSlot.date;
+            if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
+              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
+            }
+
+            const followUpStatus = isCartAppointmentStatus(autoStatus) ? autoStatus as any : "scheduled";
+            await saveFollowUpAppointment({
+              followUpDate,
+              followUpStatus,
+              targetDoctor: selectedDoctor || "",
+              targetPatientRecord: selectedPatientRecord,
+              bookingDuration,
+              treatmentNotesUpdate,
+            });
+          }
         }
 
         // Auto-cancel any overlapping cart appointments for the same doctor
@@ -1779,9 +2011,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             isPublicCache: true,
           } as any)
         : await updateAppointment(appointmentToEdit.id, {
-            ...appointmentToEdit,
             status: 'cancelled',
-          });
+          } as any);
       try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch {}
       if (onBooked) onBooked(updated);
       toast?.success?.('Appointment marked as cancelled');
@@ -1849,17 +2080,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </button>
               )}
-              
+
               <DialogTitle className="flex items-center gap-2 text-2xl font-bold flex-1 text-center">
                 {title ? title : (
-                  modalStep === 'details' 
-                    ? (appointmentToEdit 
-                        ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') 
-                        : 'Appointment Details') 
+                  modalStep === 'details'
+                    ? (appointmentToEdit
+                        ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment')
+                        : 'Appointment Details')
                     : 'Payment Summary'
                 )}
               </DialogTitle>
-              
+
                 {/* Step indicators - hidden if cancelled and patient role */}
                 {!(isCancelled && user?.role === 'patient') && (
                   <div className="flex gap-2">
@@ -2063,6 +2294,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </div>
                       </div>
                     )}
+
+                    <CompactNotesField
+                      id="booking-treatment-notes"
+                      label="Treatment Notes"
+                      placeholder="Add treatment-specific notes..."
+                      value={treatmentNotes}
+                      onChange={setTreatmentNotes}
+                      disabled={isPatientReadonly}
+                      textareaClassName="min-h-[100px]"
+                    />
                   </div>
 
                   <div className="space-y-2">
@@ -2335,12 +2576,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <div className="text-gray-800 leading-relaxed font-medium">
                                 {log.logType === 'payment' ? (
                                   <div className="space-y-0.5">
-                                    <p>{getBookingHistoryBriefDetail(log, user?.role)}</p>
+                                    <p>{getBookingHistoryBriefDetail(log, effectiveRole)}</p>
                                   </div>
                                 ) : (
                                   <div className="space-y-0.5">
                                     <p className="mb-1 text-[10px] text-gray-600">
-                                      {getBookingHistoryBriefDetail(log, user?.role)}
+                                      {getBookingHistoryBriefDetail(log, effectiveRole)}
                                     </p>
                                   </div>
                                 )}
@@ -2363,7 +2604,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 {/* destructive cancel for all users when editing an appointment */}
                 {canCancelAppointment && (
                   <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    {isBooking ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                    )}
                     {isBooking ? 'Processing...' : 'Cancel Appointment'}
                   </Button>
                 )}
@@ -2501,14 +2746,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <span className={`text-[10px] font-bold uppercase text-center leading-tight ${paymentMethod === "Cash" ? "text-blue-700" : "text-gray-500"}`}>Cash</span>
                       </Button>
                     )}
-                    <Button
+                    {/* <Button
                       variant="outline"
                       className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${paymentMethod === "Pay at Clinic" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-200"}`}
                       onClick={() => { setPaymentMethod("Pay at Clinic"); setAmountToPay("0"); }}
                     >
                       <Banknote className={`h-6 w-6 ${paymentMethod === "Pay at Clinic" ? "text-blue-600" : "text-gray-600"}`} />
                       <span className={`text-[10px] font-bold uppercase text-center leading-tight ${paymentMethod === "Pay at Clinic" ? "text-blue-700" : "text-gray-500"}`}>Pay at Clinic</span>
-                    </Button>
+                    </Button> */}
                   </div>
                 </div>
 
@@ -2530,11 +2775,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                 )}
 
-                {/* Payment Status Display - Read-only for Patient, Editable for Admin/Doctor */}
+                {/* Payment Status Display - read-only unless admin can manage payment statuses */}
                 {isEditMode && (
                   <div className="space-y-2">
                     <Label htmlFor="paymentStatus" className="text-sm font-semibold">Payment Status</Label>
-                    {user?.role === "patient" ? (
+                    {!canManagePaymentStatuses ? (
                       <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-700">Status:</span>
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
@@ -2596,193 +2841,83 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       </Dialog>
 
       {/* Cancel confirmation dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5 text-red-600" />
-              Cancel Appointment
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
-              <CalendarIcon className="h-8 w-8" />
-            </div>
-            <div className="text-center space-y-2">
-              <p className="font-semibold text-gray-900">Cancel this appointment?</p>
-              <p className="text-sm text-gray-600">
-                Are you sure you want to cancel this appointment? This will mark it as <strong>Cancelled</strong> and release the time slot, but the record will remain in the system history.
-              </p>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isBooking} className="flex-1">
-              Keep Appointment
-            </Button>
-            <Button variant="destructive" onClick={async () => {
-              setIsDeleteDialogOpen(false);
-              await handleCancel();
-            }} disabled={isBooking} className="flex-1">
-              {isBooking ? "Processing..." : "Yes, Cancel"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ApproveRejectDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        mode="cancel"
+        appointment={appointmentToEdit}
+        isProcessing={isBooking}
+        onConfirm={async () => {
+          setIsDeleteDialogOpen(false);
+          await handleCancel();
+        }}
+      />
 
       {/* Summary confirmation dialog */}
-      <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm Appointment Details</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-3">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Patient:</span>
-                  <span className="font-semibold">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Service:</span>
-                  <span className="font-semibold">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Date:</span>
-                  <span className="font-semibold">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Time:</span>
-                  <span className="font-semibold">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Doctor:</span>
-                  <span className="font-semibold">{displayDoctor}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Duration:</span>
-                  <span className="inline-flex items-center gap-2 font-semibold">
-                    {duration} mins
-                    {durationConflict && (
-                      <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {bookingConflictWarnings.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
-                    <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                    </span>
-                    This appointment has a scheduling conflict. Hover the warning icon for details.
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  {canEditAppointmentStatus ? (
-                    <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded px-2 text-xs font-bold border-0 ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                      } ${
-                        getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                      }`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {appointmentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value}>
-                            {status.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                    } ${
-                      getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                    }`}>
-                      {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Payment Status:</span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                  } ${
-                    getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                  }`}>
-                    {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
-                  </span>
-                </div>
-                <CompactNotesField
-                  id="booking-summary-notes"
-                  label="Notes:"
-                  placeholder="No notes added."
-                  value={notes}
-                  onChange={setNotes}
-                  disabled={isPatientReadonly && isCancelled}
-                  className="border-t border-blue-100 pt-2 mt-2"
-                  labelClassName="text-sm font-normal text-gray-600"
-                  textareaClassName="rounded-md bg-white/70 text-sm font-semibold"
-                />
-                <div className="border-t border-blue-100 pt-2 mt-2">
-                  <div className="flex justify-between font-bold">
-                    <span>Total Price:</span>
-                    <span className={`${Number(discount) > 0 ? 'text-gray-400 line-through' : 'text-blue-700'}`}>₱{finalPrice.toLocaleString()}</span>
-                  </div>
-                  {Number(discount) > 0 && (
-                    <>
-                      <div className="flex justify-between text-orange-600 font-semibold">
-                        <span>Discount:</span>
-                        <span>-₱{Number(discount).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-green-600 font-bold text-lg">
-                        <span>Final Price:</span>
-                        <span>₱{discountedPrice.toLocaleString()}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {previouslyPaidAmount > 0 && (
-                  <div className="flex justify-between text-green-600 font-semibold">
-                    <span>Already Paid:</span>
-                    <span>₱{previouslyPaidAmount.toLocaleString()}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-green-700 font-semibold">
-                  <span>Amount to Pay Now:</span>
-                  <span>₱{paymentAmountNow.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-blue-700 font-semibold">
-                  <span>Remaining Balance:</span>
-                  <span>₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+      <ConfirmAppointmentModal
+        open={isConfirmSummaryOpen}
+        onOpenChange={setIsConfirmSummaryOpen}
+        onConfirm={handleConfirmSummary}
+        isBooking={isBooking}
+        patientName={patients.find((p) => p.id === selectedPatient)?.name || String(selectedPatient)}
+        doctorName={displayDoctor}
+        appointmentType={appointmentType}
+        customAppointmentTypeName={customAppointmentTypeName}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        duration={duration}
+        treatmentNotes={treatmentNotes}
+        notes={notes}
+        onNotesChange={setNotes}
+        durationConflict={durationConflict}
+        bookingConflictWarnings={bookingConflictWarnings}
+        appointmentStatus={getFinalAppointmentStatus()}
+        appointmentStatusOptions={appointmentStatusOptions}
+        onAppointmentStatusChange={handleStatusChange}
+        canEditAppointmentStatus={canEditAppointmentStatus}
+        paymentStatus={getFinalPaymentStatus()}
+        paymentStatusOptions={paymentStatusOptions}
+        onPaymentStatusChange={() => {}}
+        canManagePaymentStatuses={false}
+        finalPrice={finalPrice}
+        discount={Number(discount) || 0}
+        discountedPrice={discountedPrice}
+        previouslyPaidAmount={previouslyPaidAmount}
+        paymentAmountNow={paymentAmountNow}
+        repeatOption={repeatOption}
+        customRepeatDate={customRepeatDate}
+        onRepeatOptionChange={setRepeatOption}
+        onCustomRepeatDateChange={setCustomRepeatDate}
+        patientId={selectedPatient}
 
-          {/* Patient-facing note: suggest payment to reserve when booking remains in the cart */}
-          {isPatientLevelBookingMode && isCartAppointmentStatus(getFinalAppointmentStatus()) && (
-            <div className="px-4 pb-4">
-              <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
-                Tip: This booking will be added to your cart. Add a payment now to reserve this schedule.
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="flex-1">
-              Back
-            </Button>
-            <Button className="bg-green-600 hover:bg-green-700 text-white flex-1" onClick={handleConfirmSummary} disabled={isBooking}>
-              {isBooking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              {isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        getPersonInitials={(name?: string) => {
+          const initials = String(name || "")
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part[0])
+            .join("")
+            .toUpperCase();
+          return initials || "?";
+        }}
+        getDoctorInitials={(name: string) => {
+          return (name || "")
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((p) => p[0])
+            .join("")
+            .toUpperCase() || "?";
+        }}
+        getBookingStatusLabel={getBookingStatusLabel}
+        getAppointmentStatusOption={getAppointmentStatusOption}
+        getPaymentStatusOption={getPaymentStatusOption}
+        formatTimeTo12h={formatTimeTo12h}
+        isPatientReadonly={isPatientReadonly}
+        isCancelled={isCancelled}
+        isPatientLevelBookingMode={isPatientLevelBookingMode}
+        isCartAppointmentStatus={isCartAppointmentStatus}
+        userRole={effectiveRole}
+      />
 
       {/* Historical Snapshot View-only Modal */}
       <AppointmentHistoryView
@@ -2808,6 +2943,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedDate={selectedDate}
         onDateSelect={setSelectedDate}
         doctorName={selectedDoctor}
+        patientId={selectedPatient}
         selectedTime={selectedTime}
         duration={duration}
         dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"}

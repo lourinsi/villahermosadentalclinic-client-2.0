@@ -6,9 +6,8 @@ import { Appointment } from "../hooks/useAppointments";
 
 interface DashboardStatsProps {
   portal: "admin" | "doctor" | "patient";
-  viewMode: "day" | "week" | "month";
   appointments: Appointment[];
-  filteredAppointments: Appointment[];
+  monthlyAppointments: Appointment[];
   totalPatients: number;
   pendingAppointmentsCount: number;
   user: any;
@@ -16,9 +15,8 @@ interface DashboardStatsProps {
 
 export function DashboardStats({
   portal,
-  viewMode,
   appointments,
-  filteredAppointments,
+  monthlyAppointments,
   totalPatients,
   pendingAppointmentsCount,
   user
@@ -35,8 +33,8 @@ export function DashboardStats({
           bgColor: "bg-blue-50"
         },
         {
-          title: viewMode === "day" ? "Today's Appointments" : viewMode === "week" ? "This Week's Appointments" : "This Month's Appointments",
-          value: filteredAppointments.length.toString(),
+          title: "This Month's Appointments",
+          value: monthlyAppointments.length.toString(),
           change: "+2",
           icon: Calendar,
           color: "text-green-600",
@@ -75,8 +73,8 @@ export function DashboardStats({
           bgColor: "bg-blue-50"
         },
         {
-          title: viewMode === "day" ? "Today's Appointments" : viewMode === "week" ? "This Week" : "This Month",
-          value: filteredAppointments.length.toString(),
+          title: "This Month's Appointments",
+          value: monthlyAppointments.length.toString(),
           change: "Scheduled",
           icon: Calendar,
           color: "text-green-600",

@@ -30,7 +30,12 @@ export interface Notification {
   metadata?: {
     appointmentId?: string;
     currentStatus?: string;
+    patientId?: string;
     patientName?: string;
+    patientDateOfBirth?: string;
+    patientDob?: string;
+    patientBirthDate?: string;
+    patientBirthday?: string;
     appointmentDate?: string;
     appointmentTime?: string;
     isRequest?: boolean;

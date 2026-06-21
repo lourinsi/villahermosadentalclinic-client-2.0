@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointments, Appointment } from "@/hooks/useAppointments";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Calendar, Clock, Briefcase, CreditCard, CheckCircle2, Search, X, ArrowUpDown } from "lucide-react";
@@ -41,6 +42,7 @@ const OrdersContent = () => {
     const { user, isLoading: authLoading } = useAuth();
     const { appointments, isLoading: appointmentsLoading } = useAppointments(undefined, { patientId: user?.patientId });
     const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+    const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
     const { openEditModal } = useAppointmentModal();
     const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
     const [historySnapshot, setHistorySnapshot] = useState<any | null>(null);
@@ -344,10 +346,11 @@ const OrdersContent = () => {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Payment Status</SelectItem>
-                                <SelectItem value="paid">Paid</SelectItem>
-                                <SelectItem value="unpaid">Unpaid</SelectItem>
-                                <SelectItem value="half-paid">Half Paid</SelectItem>
-                                <SelectItem value="overdue">Overdue</SelectItem>
+                                {PAYMENT_STATUSES.map((status) => (
+                                    <SelectItem key={status.value} value={status.value}>
+                                        {status.label}
+                                    </SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
 
@@ -432,7 +435,7 @@ const OrdersContent = () => {
                                         </Badge>
                                         {appointment.paymentStatus && (
                                             <Badge 
-                                                className={`font-medium ${getPaymentStatusBadgeClassName(appointment.paymentStatus)}`}
+                                                className={`font-medium ${getPaymentStatusBadgeClassName(appointment.paymentStatus, PAYMENT_STATUSES)}`}
                                             >
                                                 {formatPaymentStatusLabel(appointment.paymentStatus).toUpperCase()}
                                             </Badge>

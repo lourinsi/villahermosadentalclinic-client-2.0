@@ -28,17 +28,13 @@ import {
   Bell,
   Trash2
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
 import { useAuth } from "@/hooks/useAuth";
-import { getNextAvailableSlot } from "../lib/appointment-utils";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { getAuthHeaders } from "@/lib/auth-headers";
-import {
-  buildPatientAppointmentSummary,
-  getPatientAppointments,
-} from "@/lib/patient-aggregates";
 
 // dummy data removed per request
 
@@ -89,7 +85,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const patientDetailsRef = useRef<PatientDetailsRef | null>(null);
   const itemsPerPage = 10;
   const { user } = useAuth();
-  const { openAddPatientModal, refreshPatients, refreshTrigger, appointments, refreshAppointments, newAppointmentCreationMode } = useAppointmentModal();
+  const { effectiveRole } = useAdminViewMode();
+  const { openAddPatientModal, refreshPatients, refreshTrigger, newAppointmentCreationMode } = useAppointmentModal();
 
   // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -105,46 +102,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [nextAvailableTime, setNextAvailableTime] = useState<string | undefined>(undefined);
   const [nextAvailableDoctor, setNextAvailableDoctor] = useState<string>("");
 
-  // State to hold doctor's appointments (for filtering patients by doctor)
-  const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
-
-  // Fetch doctor's appointments when doctorFilter is set
-  useEffect(() => {
-    if (!doctorFilter) {
-      setDoctorAppointments([]);
-      return;
-    }
-
-    const fetchDoctorAppointments = async () => {
-      try {
-        const response = await fetch(apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`), {
-          headers: getAuthHeaders(),
-          credentials: "include",
-        });
-        const result = await response.json();
-        if (result.success && result.data) {
-          setDoctorAppointments(result.data);
-        }
-      } catch (error) {
-        console.error("Error fetching doctor appointments:", error);
-        setDoctorAppointments([]);
-      }
-    };
-
-    fetchDoctorAppointments();
-  }, [doctorFilter, refreshTrigger]);
-
-  // Ensure appointments are loaded so `nextAppointment` can be computed
-  useEffect(() => {
-    // Request appointments once when the view mounts so the patient list
-    // can calculate next appointments from the shared appointments state.
-    try {
-      refreshAppointments();
-    } catch (err) {
-      console.warn("Failed to request appointments:", err);
-    }
-  }, [refreshAppointments]);
-
   const fetchPatients = React.useCallback(async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
     const controller = new AbortController();
@@ -156,63 +113,33 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
       const q = encodeURIComponent(searchTerm || "");
       const statusParam = statusFilter || "all";
-      const shouldFilterStatusClientSide = statusParam !== "all";
-      const requestPage = shouldFilterStatusClientSide ? 1 : page;
-      const requestLimit = shouldFilterStatusClientSide ? 1000 : itemsPerPage;
+      const requestPage = page;
+      const requestLimit = itemsPerPage;
       const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
       const headers = getAuthHeaders();
-      const patientUrl = apiUrl(`/api/patients?page=${requestPage}&limit=${requestLimit}&search=${q}&status=all${doctorParam}`);
-      const appointmentUrl = apiUrl(
-        doctorFilter
-          ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
-          : "/api/appointments"
-      );
-      const [res, appointmentRes] = await Promise.all([
-        fetch(patientUrl, { signal: controller.signal, headers, credentials: "include" }),
-        fetch(appointmentUrl, { signal: controller.signal, headers, credentials: "include" }),
-      ]);
-
-      const [result, appointmentResult] = await Promise.all([
-        res.json(),
-        appointmentRes.json().catch(() => null),
-      ]);
+      const patientUrl = apiUrl(`/api/patients?page=${requestPage}&limit=${requestLimit}&search=${q}&status=${statusParam}${doctorParam}`);
+      const res = await fetch(patientUrl, { signal: controller.signal, headers, credentials: "include" });
+      const result = await res.json();
 
       if (result && result.success) {
         const data = result.data || [];
         const meta = result.meta || { total: 0, page: requestPage, limit: requestLimit, totalPages: 1 };
 
-        const appointmentsToUse =
-          appointmentResult?.success && Array.isArray(appointmentResult.data)
-            ? appointmentResult.data
-            : doctorFilter
-              ? doctorAppointments
-              : appointments;
-
         const transformedPatients = data.map((patient: Patient) => {
-          const patientAppointments = getPatientAppointments(appointmentsToUse, patient);
-          const summary = buildPatientAppointmentSummary(patient, patientAppointments);
-
           return {
             ...patient,
-            name: `${patient.firstName} ${patient.lastName}`,
-            lastVisit: summary.lastVisit,
-            nextAppointment: summary.nextAppointment,
-            status: summary.status,
-            balance: summary.balance,
-            overdueAppointmentCount: summary.overdueAppointmentCount,
+            name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim(),
+            lastVisit: patient.lastVisit || "",
+            nextAppointment: patient.nextAppointment ?? null,
+            status: patient.status || "active",
+            balance: patient.balance ?? 0,
+            overdueAppointmentCount: patient.overdueAppointmentCount ?? 0,
           };
         });
-        const filteredPatients = shouldFilterStatusClientSide
-          ? transformedPatients.filter((patient: Patient) => String(patient.status || "").toLowerCase() === statusParam.toLowerCase())
-          : transformedPatients;
-        const patientsForPage = shouldFilterStatusClientSide
-          ? filteredPatients.slice((page - 1) * itemsPerPage, page * itemsPerPage)
-          : filteredPatients;
-        const filteredTotal = shouldFilterStatusClientSide ? filteredPatients.length : meta.total || 0;
 
-        setPaginatedPatients(patientsForPage);
-        setTotalPages(shouldFilterStatusClientSide ? Math.max(1, Math.ceil(filteredTotal / itemsPerPage)) : meta.totalPages || 1);
-        setTotalFiltered(filteredTotal);
+        setPaginatedPatients(transformedPatients);
+        setTotalPages(meta.totalPages || 1);
+        setTotalFiltered(meta.total || transformedPatients.length);
       } else {
         setPaginatedPatients([]);
         setTotalPages(1);
@@ -239,7 +166,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       clearTimeout(timeoutId);
       setIsLoading(false);
     }
-  }, [searchTerm, statusFilter, doctorFilter, doctorAppointments, appointments, itemsPerPage]);
+  }, [searchTerm, statusFilter, doctorFilter, itemsPerPage]);
 
   // Reset page when search or status changes
   useEffect(() => {
@@ -249,7 +176,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   // Fetch patients when page, search, status filter, or refresh trigger changes
   useEffect(() => {
     fetchPatients(currentPage);
-  }, [currentPage, fetchPatients]);
+  }, [currentPage, fetchPatients, refreshTrigger]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
@@ -284,6 +211,17 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         </TooltipContent>
       </Tooltip>
     );
+  };
+
+  const formatDateOfBirth = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
   };
 
   const handleAddPatient = () => {
@@ -500,15 +438,16 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       className="group hover:bg-slate-50/50 transition-colors border-slate-100"
                     >
                       <TableCell className="py-4">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 border border-slate-200 shadow-sm">
-                            <AvatarImage src={patient.profilePicture} alt={patient.name} className="object-cover" />
-                            <AvatarFallback className="bg-violet-50 text-violet-600 font-semibold">
-                              {patient.firstName?.[0]}{patient.lastName?.[0]}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer"
+                        <div className="flex items-start gap-3 min-w-0">
+                          <PatientAvatar
+                            src={patient.profilePicture}
+                            name={patient.name}
+                            dob={patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday}
+                            className="h-10 w-10 border border-slate-200 shadow-sm"
+                            sizeClass="h-10 w-10"
+                          />
+                          <div className="min-w-0">
+                            <span className="block font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer text-sm truncate"
                               onClick={() => {
                                 setSelectedPatient(patient);
                                 setIsPatientDetailsModified(false);
@@ -517,7 +456,14 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                             >
                               {patient.name}
                             </span>
-                            <span className="text-xs text-slate-400">ID: {patient.id?.slice(-8).toUpperCase()}</span>
+                            <div className="mt-1 flex flex-col gap-1 text-xs text-slate-500">
+                              {effectiveRole !== "receptionist" && (
+                                <span className="truncate min-w-0">ID: {patient.id?.slice(-8).toUpperCase()}</span>
+                              )}
+                              {formatDateOfBirth(patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday) ? (
+                                <span className="truncate min-w-0">{formatDateOfBirth(patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday)}</span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </TableCell>
@@ -608,9 +554,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                               onClick={() => {
                                 setSelectedPatient(patient);
                                 setBookingDefaultPatientId(String(patient.id));
-                                const slot = getNextAvailableSlot(doctorFilter ? doctorAppointments : appointments, doctorFilter);
-                                setNextAvailableDate(slot.date);
-                                setNextAvailableTime(slot.time);
+                                setNextAvailableDate(undefined);
+                                setNextAvailableTime(undefined);
                                 if (user?.role === 'doctor') {
                                   setNextAvailableDoctor(user?.username || "");
                                 } else {

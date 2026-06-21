@@ -62,6 +62,7 @@ import {
 
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
@@ -69,7 +70,6 @@ import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
-import { PastAppointmentButton } from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import {
   getAppointmentStatusOptionWithColors,
@@ -78,7 +78,6 @@ import {
 } from "@/lib/status-colors";
 import {
   buildPatientAppointmentSummary,
-  getPatientAppointments,
 } from "@/lib/patient-aggregates";
 
 export interface Patient {
@@ -91,6 +90,9 @@ export interface Patient {
   alternateEmail?: string;
   alternatePhone?: string;
   dateOfBirth: string;
+  dob?: string;
+  birthday?: string;
+  birthDate?: string;
   lastVisit?: string;
   nextAppointment?: string | null;
   status?: string;
@@ -255,65 +257,18 @@ export function PatientDetailsModal({
   }, [open, patient?.id, refreshTrigger]);
 
   useEffect(() => {
-    let mounted = true;
+    if (!open) {
+      setModalOverdueAppointmentCount(null);
+      setModalAppointmentSummary(null);
+      return;
+    }
 
-    const loadOverdueAppointmentCount = async () => {
-      if (!open) {
-        setModalOverdueAppointmentCount(null);
-        setModalAppointmentSummary(null);
-        return;
-      }
-
-      setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
-
-      if (!patient?.id) return;
-
-      try {
-        const patientName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ");
-        const endpoint = doctorFilter
-          ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
-          : `/api/appointments?patientId=${encodeURIComponent(String(patient.id))}`;
-        const res = await fetch(apiUrl(endpoint), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        const json = await res.json();
-
-        if (!mounted) return;
-
-        if (json && json.success && Array.isArray(json.data)) {
-          const patientScopedAppointments = doctorFilter
-            ? json.data.filter((apt: Appointment) =>
-                String(apt.patientId || "") === String(patient.id) ||
-                apt.patientName === patientName
-              )
-            : json.data;
-
-          const summary = buildPatientAppointmentSummary(
-            { ...patient, ...(serverPatient || {}) },
-            patientScopedAppointments
-          );
-          setModalAppointmentSummary(summary);
-          setModalOverdueAppointmentCount(summary.overdueAppointmentCount);
-        }
-      } catch (err) {
-        console.warn('Failed to fetch overdue appointment count:', err);
-        if (mounted) setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
-      }
-    };
-
-    loadOverdueAppointmentCount();
-    return () => { mounted = false; };
+    setModalOverdueAppointmentCount(serverPatient?.overdueAppointmentCount ?? patient?.overdueAppointmentCount ?? null);
+    setModalAppointmentSummary(null);
   }, [
     open,
-    patient?.id,
-    patient?.name,
-    patient?.firstName,
-    patient?.lastName,
     patient?.overdueAppointmentCount,
-    serverPatient,
-    doctorFilter,
-    refreshTrigger,
+    serverPatient?.overdueAppointmentCount,
   ]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
@@ -362,14 +317,7 @@ export function PatientDetailsModal({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4 sm:gap-6">
               <div className="relative group">
-                <Avatar className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20">
-                  {patient?.profilePicture ? (
-                    <AvatarImage src={patient.profilePicture} alt={`${patientDisplayName} photo`} className="object-cover" />
-                  ) : null}
-                  <AvatarFallback className="bg-violet-50 text-2xl font-bold text-violet-600">
-                    {patientInitials}
-                  </AvatarFallback>
-                </Avatar>
+                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20" sizeClass="h-16 w-16 sm:h-20 sm:w-20 rounded-md" />
                 <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
               <div className="min-w-0 space-y-1.5">
@@ -464,7 +412,7 @@ export function PatientDetailsModal({
 
             <PatientDetails
               ref={detailsRef}
-              patient={patient}
+              patient={serverPatient || patient}
               onDeletePatient={onDeletePatient}
               isModified={isModified}
               setIsModified={setIsModified}
@@ -805,9 +753,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   openBookingAppointmentId,
   onOpenBookingModal
 }, ref) => {
-  const { refreshPatients, appointments } = useAppointmentModal();
+  const { refreshPatients, appointments, refreshAppointments, openCreateModal } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
-  const { doctors } = useDoctors(undefined, { enabled: true });
+  const [activeTab, setActiveTab] = useState("info");
+  const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
+  const shouldLoadFinancialLog = activeTab === "payments";
+  const { doctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -832,8 +783,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     emergencyContact: patient.emergencyContact || '',
     emergencyPhone: patient.emergencyPhone || '',
     notes: patient.notes || '',
-    profilePicture: patient.profilePicture || '',
-    dentalCharts: patient.dentalCharts || []
+    profilePicture: patient.profilePicture || '', // This will now just trigger a clone
+    dentalCharts: patient.dentalCharts || [] // This will now just trigger a clone
   });
 
   const [loadedPatient, setLoadedPatient] = useState<Patient>(patient);
@@ -857,6 +808,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     .join("")
     .slice(0, 2)
     .toUpperCase() || "P";
+
+  useEffect(() => {
+    setActiveTab("info");
+  }, [patient.id]);
 
   const handlePatientPhotoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1451,7 +1406,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   useEffect(() => {
     const fetchFamilyData = async () => {
-      if (!patient?.id) return;
+      if (activeTab !== "family" || !patient?.id) return;
 
       try {
         setIsLoadingFamily(true);
@@ -1488,7 +1443,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     };
 
     fetchFamilyData();
-  }, [patient]);
+  }, [activeTab, patient]);
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
@@ -1511,105 +1466,51 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   }, [isModified]);
 
   useEffect(() => {
-    // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
-    const loadFullPatient = async () => {
-      if (!patient?.id) {
-        const initialData = {
-          firstName: patient.firstName || patient.name?.split(' ')[0] || '',
-          lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
-          email: patient.email || '',
-          phone: patient.phone || '',
-          alternateEmail: patient.alternateEmail || '',
-          alternatePhone: patient.alternatePhone || '',
-          dateOfBirth: patient.dateOfBirth || '',
-          insurance: patient.insurance || '',
-          balance: patient.balance ?? 0,
-          status: patient.status || 'active',
-          createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
-          allergies: patient.allergies || '',
-          medicalHistory: patient.medicalHistory || '',
-          treatmentPlan: patient.treatmentPlan || '',
-          clinicalNotes: patient.clinicalNotes || '',
-          address: patient.address || '',
-          city: patient.city || '',
-          zipCode: patient.zipCode || '',
-          emergencyContact: patient.emergencyContact || '',
-          emergencyPhone: patient.emergencyPhone || '',
-          notes: patient.notes || '',
-          profilePicture: patient.profilePicture || '',
-          dentalCharts: patient.dentalCharts || []
-        };
-        setFormData(initialData);
-        setOriginalLoadedData(initialData);
-        setLoadedPatient(patient);
-        return;
-      }
-
-      try {
-        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patient.id)}`), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        const json = await res.json();
-        if (json?.success && json.data) {
-          const p = json.data;
-          setLoadedPatient(p);
-          const loadedData = {
-            firstName: p.firstName || p.name?.split(' ')[0] || '',
-            lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
-            email: p.email || '',
-            phone: p.phone || '',
-            alternateEmail: p.alternateEmail || '',
-            alternatePhone: p.alternatePhone || '',
-            dateOfBirth: p.dateOfBirth || '',
-            insurance: p.insurance || '',
-            balance: p.balance ?? 0,
-            status: p.status || 'active',
-            createdAt: p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-            allergies: p.allergies || '',
-            medicalHistory: p.medicalHistory || '',
-            treatmentPlan: p.treatmentPlan || '',
-            clinicalNotes: p.clinicalNotes || '',
-            address: p.address || '',
-            city: p.city || '',
-            zipCode: p.zipCode || '',
-            emergencyContact: p.emergencyContact || '',
-            emergencyPhone: p.emergencyPhone || '',
-            notes: p.notes || '',
-            profilePicture: p.profilePicture || '',
-            dentalCharts: p.dentalCharts || []
-          };
-          setFormData(loadedData);
-          // Update original loaded data to match what came from server
-          setOriginalLoadedData(loadedData);
-        }
-      } catch (err) {
-        console.error("Failed to load full patient data:", err);
-        setLoadedPatient(patient);
-      }
+    const loadedData = {
+      firstName: patient.firstName || patient.name?.split(' ')[0] || '',
+      lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
+      email: patient.email || '',
+      phone: patient.phone || '',
+      alternateEmail: patient.alternateEmail || '',
+      alternatePhone: patient.alternatePhone || '',
+      dateOfBirth: patient.dateOfBirth || '',
+      insurance: patient.insurance || '',
+      balance: patient.balance ?? 0,
+      status: patient.status || 'active',
+      createdAt: patient.createdAt ? new Date(patient.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      allergies: patient.allergies || '',
+      medicalHistory: patient.medicalHistory || '',
+      treatmentPlan: patient.treatmentPlan || '',
+      clinicalNotes: patient.clinicalNotes || '',
+      address: patient.address || '',
+      city: patient.city || '',
+      zipCode: patient.zipCode || '',
+      emergencyContact: patient.emergencyContact || '',
+      emergencyPhone: patient.emergencyPhone || '',
+      notes: patient.notes || '',
+      profilePicture: patient.profilePicture || '',
+      dentalCharts: patient.dentalCharts || []
     };
-
-    loadFullPatient();
+    setLoadedPatient(patient);
+    setFormData(loadedData);
+    setOriginalLoadedData(loadedData);
   }, [patient]);
 
   useEffect(() => {
+    if (!shouldLoadHistoryData) return;
+
     // If doctorFilter is set, fetch appointments directly from API for this patient
     // This ensures we get the doctor's appointments even if shared state is empty
     if (doctorFilter) {
       const fetchPatientAppointments = async () => {
         try {
-          const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
           const response = await fetch(
-            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`),
+            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}&patientId=${encodeURIComponent(String(patient.id || ""))}`),
             { headers: getAuthHeaders(), credentials: 'include' }
           );
           const result = await response.json();
           if (result.success && result.data) {
-            // Filter to only this patient's appointments
-            const filtered = getPatientAppointments<Appointment>(
-              result.data as Appointment[],
-              { ...patient, name: patientName }
-            ).sort((a: Appointment, b: Appointment) =>
+            const filtered = (result.data as Appointment[]).sort((a: Appointment, b: Appointment) =>
               parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
             );
             setPatientAppointments(filtered);
@@ -1655,7 +1556,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       fetchPatientAppointments();
     }
-  }, [appointments, patient, doctorFilter]);
+  }, [appointments, patient, doctorFilter, shouldLoadHistoryData]);
 
   useEffect(() => {
     const summary = buildPatientAppointmentSummary(loadedPatient, patientAppointments);
@@ -1780,6 +1681,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       };
 
       applyTransactions();
+      if (!shouldLoadFinancialLog) return;
 
       const controller = new AbortController();
       const loadPersistedTransactions = async () => {
@@ -1876,7 +1778,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
 
       return () => controller.abort();
-    }, [buildPatientTransactions, patientAppointments, patient?.id]);
+    }, [buildPatientTransactions, patientAppointments, patient?.id, shouldLoadFinancialLog]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -2024,7 +1926,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   return (
     <div className="flex-1 overflow-hidden bg-slate-50/50">
       <div className="h-full flex flex-col">
-        <Tabs defaultValue="info" data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
           <div className="shrink-0 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
             <TabsList className="flex h-auto min-h-14 w-full justify-start gap-2 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
@@ -2060,14 +1962,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="h-32 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500" />
                     <CardContent className="-mt-16 px-5 pb-7 pt-0 text-center sm:px-8 sm:pb-10">
                       <div className="relative inline-block group">
-                        <Avatar className="h-36 w-36 border-[6px] border-white bg-white shadow-2xl transition-transform duration-300 group-hover:scale-105">
-                          {formData.profilePicture ? (
-                            <AvatarImage src={formData.profilePicture} alt={patientDisplayName} className="object-cover" />
-                          ) : null}
-                          <AvatarFallback className="bg-violet-50 text-4xl font-black text-violet-600">
-                            {patientInitials}
-                          </AvatarFallback>
-                        </Avatar>
+                        <PatientAvatar src={resolveImageSource(formData.profilePicture)} name={patientDisplayName} dob={formData.dateOfBirth || patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-36 w-36 border-[6px] border-white bg-white shadow-2xl transition-transform duration-300 group-hover:scale-105" sizeClass="h-36 w-36 rounded-full" />
                         <Label
                           htmlFor={patientPhotoInputId}
                           className="absolute bottom-2 right-2 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-4 border-white bg-violet-600 text-white shadow-xl transition-all hover:scale-110 active:scale-90 hover:bg-violet-700"
@@ -2396,11 +2291,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         <div className="space-y-4">
                           <Label className="text-xs font-black uppercase tracking-widest text-slate-400">Primary Contact / Guardian</Label>
                           <div className="group flex items-center rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-violet-100 hover:shadow-md sm:p-5">
-                            <Avatar className="h-14 w-14 mr-5 ring-4 ring-slate-50 group-hover:ring-violet-50 transition-all">
-                              <AvatarFallback className="bg-violet-50 text-violet-600 font-black text-lg">
-                                {parentPatient.name?.charAt(0) || "P"}
-                              </AvatarFallback>
-                            </Avatar>
+                            <PatientAvatar src={resolveImageSource(parentPatient.profilePicture)} name={parentPatient.name} dob={parentPatient.dateOfBirth || parentPatient.dob || parentPatient.birthday} className="h-14 w-14 mr-5 ring-4 ring-slate-50 group-hover:ring-violet-50 transition-all" sizeClass="h-14 w-14 rounded-md" />
                             <div className="min-w-0 flex-1">
                               <div className="font-black text-slate-900 text-lg leading-tight truncate">{parentPatient.name}</div>
                               <div className="text-sm font-bold text-slate-500 flex items-center gap-2 mt-1">
@@ -2464,11 +2355,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           {familyMembers.map((member) => (
                             <div key={member.id} className="group flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 transition-all hover:border-blue-100 hover:shadow-lg sm:p-5">
                               <div className="flex items-center min-w-0">
-                                <Avatar className="h-12 w-12 mr-4 ring-2 ring-slate-50 group-hover:ring-blue-50 transition-all">
-                                  <AvatarFallback className="bg-blue-50 text-blue-600 font-black">
-                                    {member.name?.charAt(0)}
-                                  </AvatarFallback>
-                                </Avatar>
+                                <PatientAvatar src={resolveImageSource(member.profilePicture)} name={member.name} dob={member.dateOfBirth || member.dob || member.birthday} className="h-12 w-12 mr-4 ring-2 ring-slate-50 group-hover:ring-blue-50 transition-all" sizeClass="h-12 w-12 rounded-md" />
                                 <div className="min-w-0">
                                   <div className="text-base font-black text-slate-900 truncate">{member.name}</div>
                                   <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{member.relationship || "Dependent"}</div>
@@ -2529,15 +2416,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                     <CardTitle>Appointment History</CardTitle>
-                    <PastAppointmentButton
+                    <Button
                       size="sm"
-                      doctorName={doctorFilter}
-                      patientId={patient?.id}
-                      onCreated={() => {
-                        // Optionally refresh patients or history if needed
-                        // refreshPatients is already called in PastAppointmentButton's onBooked
-                      }}
-                    />
+                      type="button"
+                      variant="outline"
+                      onClick={() => openCreateModal()}
+                      className="gap-2 font-semibold"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>New Appointment</span>
+                    </Button>
                 </div>
                 <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2 lg:grid-cols-5 xl:flex xl:items-center">
                     <div className="relative w-full xl:w-[250px]">
@@ -2569,7 +2457,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             {PAYMENT_STATUSES.map(status => (
                                 <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                             ))}
-                            <SelectItem value="over-paid">Over-paid</SelectItem>
                         </SelectContent>
                     </Select>
                     {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
@@ -3016,6 +2903,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         isHistorical={selectedSnapshotIsHistorical}
         openedFromBookingModal={false}
       />
+
       </div>
     </div>
   );

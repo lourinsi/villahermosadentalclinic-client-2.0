@@ -10,21 +10,39 @@ import { cn } from "@/lib/utils";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
 import { isCartAppointmentStatus } from "@/lib/appointment-status";
-import { normalizeBookingDuration, type BookingCreationMode } from "./sharedBookingLogic";
+import { normalizeBookingDuration, parseLocalDateOnly, type BookingCreationMode } from "./sharedBookingLogic";
 
 interface DatePickerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  selectedDate: Date;
+  selectedDate: Date | string | null;
   onDateSelect: (date: Date) => void;
   doctorName?: string;
+  patientId?: string;
   selectedTime?: string;
   duration?: string;
   dateSelectionMode?: BookingCreationMode;
   appointmentSource?: "server" | "cache";
   cachedAppointments?: Appointment[];
   selectionDisabled?: boolean;
+  minDate?: Date | string | null;
+  title?: string;
+  subtitle?: string;
+  disableDatesWithTimeConflict?: boolean;
+  disableDatesOnOrBeforeMinDate?: boolean;
+  timeConflictMessage?: string;
+  excludeAppointmentId?: string | null;
 }
+
+const normalizeDateInput = (value?: Date | string | null): Date => {
+  if (!value) return new Date();
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? new Date() : value;
+  }
+
+  const parsed = parseLocalDateOnly(value) || new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
 
 const getAppointmentFetchOptions = (): RequestInit => {
   const headers: HeadersInit = {
@@ -46,17 +64,46 @@ export function DatePickerModal({
   selectedDate, 
   onDateSelect, 
   doctorName, 
+  patientId,
   selectedTime,
   duration,
   dateSelectionMode = "standard",
   appointmentSource = "server",
   cachedAppointments = [],
   selectionDisabled = false,
+  minDate,
+  title = "Select Date",
+  subtitle,
+  disableDatesWithTimeConflict = false,
+  disableDatesOnOrBeforeMinDate = false,
+  timeConflictMessage = "That time and day is already booked. Please select another time or day.",
+  excludeAppointmentId,
 }: DatePickerModalProps) {
-  const [viewDate, setViewDate] = useState<Date>(new Date(selectedDate));
+  const [viewDate, setViewDate] = useState<Date>(() => normalizeDateInput(selectedDate));
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [showTimeConflictAlert, setShowTimeConflictAlert] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string>("");
+  const normalizedMinDate = React.useMemo(() => {
+    if (!minDate) return null;
+    const date = normalizeDateInput(minDate);
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }, [minDate]);
+
+  useEffect(() => {
+    if (!open) return;
+    setViewDate(normalizeDateInput(selectedDate));
+    setShowTimeConflictAlert(false);
+    setConflictMessage("");
+  }, [open, selectedDate]);
+
+  const isBeforeMinDate = (date: Date) => {
+    if (!normalizedMinDate) return false;
+    const candidate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    if (disableDatesOnOrBeforeMinDate) {
+      return candidate.getTime() <= normalizedMinDate.getTime();
+    }
+    return candidate.getTime() < normalizedMinDate.getTime();
+  };
 
   // Check if the selected time has a conflict on the given date
   const checkTimeConflict = (date: Date): boolean => {
@@ -73,8 +120,12 @@ export function DatePickerModal({
 
     // Check for overlap with any appointment on that date
     const dayAppointments = appointments.filter(apt => {
-      const aptDateStr = formatDateToYYYYMMDD(new Date(apt.date));
-      return aptDateStr === dateStr && apt.status !== 'cancelled' && !isCartAppointmentStatus(apt.status);
+      const aptDate = parseLocalDateOnly(apt.date) || new Date(apt.date);
+      const aptDateStr = formatDateToYYYYMMDD(aptDate);
+      return aptDateStr === dateStr
+        && (!excludeAppointmentId || String(apt.id) !== String(excludeAppointmentId))
+        && apt.status !== 'cancelled'
+        && !isCartAppointmentStatus(apt.status);
     });
 
     for (const apt of dayAppointments) {
@@ -95,12 +146,17 @@ export function DatePickerModal({
 
   const handleDateSelect = (date: Date) => {
     if (selectionDisabled) return;
+    if (isBeforeMinDate(date)) {
+      setConflictMessage("Choose a date after the original appointment date.");
+      setShowTimeConflictAlert(true);
+      return;
+    }
 
     // If a time is selected, check if it's available on the new date
     if (selectedTime && duration) {
       const hasConflict = checkTimeConflict(date);
       if (hasConflict) {
-        setConflictMessage(`That time and day is already booked. Please select another time or day.`);
+        setConflictMessage(timeConflictMessage);
         setShowTimeConflictAlert(true);
         return;
       }
@@ -110,20 +166,43 @@ export function DatePickerModal({
     onOpenChange(false);
   };
 
+  const getDayAppointments = (date: Date) => {
+    const dateStr = formatDateToYYYYMMDD(date);
+    return appointments.filter((apt) => {
+      const aptDate = parseLocalDateOnly(apt.date) || new Date(apt.date);
+      const aptDateStr = formatDateToYYYYMMDD(aptDate);
+      return aptDateStr === dateStr
+        && (!excludeAppointmentId || String(apt.id) !== String(excludeAppointmentId))
+        && apt.status !== 'cancelled'
+        && !isCartAppointmentStatus(apt.status);
+    });
+  };
+
+  const handleDayClick = (date: Date) => {
+    if (selectionDisabled || isBeforeMinDate(date)) return;
+
+    const status = getDayStatus(date);
+    if (status === 'patient-booked' || status === 'fully-booked') {
+      return;
+    }
+
+    handleDateSelect(date);
+  };
+
   // Fetch appointments for the entire month being viewed
   useEffect(() => {
-    if (!open || !doctorName) return;
+    if (!open || (!doctorName && !patientId)) return;
 
     const fetchMonthAppointments = async () => {
       try {
         if (appointmentSource === "cache") {
           const doctorKey = normalizeDoctorName(doctorName);
           setAppointments(
-            cachedAppointments.filter(
-              (appointment) =>
-                !doctorKey ||
-                normalizeDoctorName(appointment.doctor) === doctorKey
-            )
+            cachedAppointments.filter((appointment) => {
+              const matchesDoctor = !doctorKey || normalizeDoctorName(appointment.doctor) === doctorKey;
+              const matchesPatient = !patientId || String(appointment.patientId) === String(patientId);
+              return matchesDoctor && matchesPatient;
+            })
           );
           return;
         }
@@ -137,8 +216,25 @@ export function DatePickerModal({
         
         const startDateStr = formatDateToYYYYMMDD(firstDay);
         const endDateStr = formatDateToYYYYMMDD(lastDay);
-        
-        const url = apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${startDateStr}&endDate=${endDateStr}&includeUnpaid=true`);
+
+        const params = new URLSearchParams({
+          startDate: startDateStr,
+          endDate: endDateStr,
+          includeUnpaid: "true",
+        });
+
+        if (doctorName) {
+          params.set("doctor", doctorName);
+        }
+
+        if (patientId) {
+          params.set("patientId", patientId);
+          if (doctorName) {
+            params.set("matchType", "or");
+          }
+        }
+
+        const url = apiUrl(`/api/appointments?${params.toString()}`);
         
         const response = await fetch(url, getAppointmentFetchOptions());
         const result = await response.json();
@@ -148,13 +244,13 @@ export function DatePickerModal({
           setAppointments([]);
         }
       } catch (error) {
-        console.error("Failed to fetch doctor appointments", error);
+        console.error("Failed to fetch appointments", error);
         setAppointments([]);
       }
     };
 
     fetchMonthAppointments();
-  }, [open, viewDate, doctorName, appointmentSource, cachedAppointments]);
+  }, [open, viewDate, doctorName, patientId, appointmentSource, cachedAppointments]);
 
   const daysInMonth = React.useMemo(() => {
     const year = viewDate.getFullYear();
@@ -189,41 +285,28 @@ export function DatePickerModal({
   };
 
   const isSelected = (date: Date) => {
-    return date.getDate() === selectedDate.getDate() &&
-      date.getMonth() === selectedDate.getMonth() &&
-      date.getFullYear() === selectedDate.getFullYear();
+    const normalizedSelectedDate = normalizeDateInput(selectedDate);
+    return date.getDate() === normalizedSelectedDate.getDate() &&
+      date.getMonth() === normalizedSelectedDate.getMonth() &&
+      date.getFullYear() === normalizedSelectedDate.getFullYear();
   };
 
-  const isPastMode = dateSelectionMode === "past";
-  const isEditMode = dateSelectionMode === "edit";
-
-  const isPastDate = (date: Date) => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    return date < now;
-  };
-
-  const isFutureDate = (date: Date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const candidate = new Date(date);
-    candidate.setHours(0, 0, 0, 0);
-    return candidate > today;
-  };
+  const isDisabled = selectionDisabled;
 
   // Check if a day has any available slots
   const getDayStatus = (date: Date) => {
-    const dateStr = formatDateToYYYYMMDD(date);
-    const dayAppointments = appointments.filter(apt => {
-      const aptDateStr = formatDateToYYYYMMDD(new Date(apt.date));
-      return aptDateStr === dateStr && apt.status !== 'cancelled' && !isCartAppointmentStatus(apt.status);
-    });
+    const dayAppointments = getDayAppointments(date);
 
-    // Assuming 8 AM - 5 PM with 30-min slots = 18 slots per day
-    // If all slots are booked, mark as fully booked
+    if (patientId) {
+      const patientHasAppointment = dayAppointments.some((apt) =>
+        String(apt.patientId) === String(patientId)
+      );
+      if (patientHasAppointment) return 'patient-booked';
+    }
+
     const totalSlots = 18;
     const bookedSlots = dayAppointments.length;
-    
+
     if (bookedSlots >= totalSlots) {
       return 'fully-booked';
     } else if (bookedSlots > 0) {
@@ -236,7 +319,8 @@ export function DatePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-tour-id="booking-date-picker" className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isPastMode ? "Select Past Date" : isEditMode ? "Select Date" : "Select Date"}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
+          {subtitle ? <p className="text-sm font-medium text-gray-500">{subtitle}</p> : null}
         </DialogHeader>
         
         <div className="flex justify-center py-4">
@@ -277,11 +361,7 @@ export function DatePickerModal({
             </div>
 
             {/* Legend */}
-            <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-gray-200" />
-                <span className="text-gray-600">{isPastMode ? "Upcoming" : isEditMode ? "All Dates" : "Past"}</span>
-              </div>
+            <div className="grid grid-cols-4 gap-2 mb-4 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-emerald-100" />
                 <span className="text-gray-600">Available</span>
@@ -290,7 +370,11 @@ export function DatePickerModal({
                 <div className="w-3 h-3 rounded-full bg-amber-100" />
                 <span className="text-gray-600">Has Bookings</span>
               </div>
-              <div className="flex items-center gap-2 col-span-3">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-yellow-100" />
+                <span className="text-gray-600">Already has booking</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-red-100" />
                 <span className="text-gray-600">Fully Booked</span>
               </div>
@@ -310,27 +394,32 @@ export function DatePickerModal({
               {daysInMonth.map((date, i) => {
                 if (!date) return <div key={`empty-${i}`} className="aspect-square" />;
 
-                const isDisabled = isEditMode ? false : (isPastMode ? isFutureDate(date) : isPastDate(date));
                 const active = isSelected(date);
                 const today = isToday(date);
                 const dayStatus = getDayStatus(date);
                 const isFullyBooked = dayStatus === 'fully-booked';
+                const isPatientBooked = dayStatus === 'patient-booked';
+                const isTooEarly = isBeforeMinDate(date);
+                const hasTimeConflict = Boolean(selectedTime && duration && checkTimeConflict(date));
+                const isTimeConflictDisabled = disableDatesWithTimeConflict && hasTimeConflict;
+                const isBlockedDate = isPatientBooked || isFullyBooked;
+                const isDisabled = selectionDisabled || isTooEarly || isTimeConflictDisabled;
 
                 return (
                   <button
                     key={date.toISOString()}
-                    disabled={selectionDisabled || isDisabled || isFullyBooked}
-                    onClick={() => !selectionDisabled && !isDisabled && !isFullyBooked && handleDateSelect(date)}
+                    disabled={isDisabled || isBlockedDate}
+                    onClick={() => !isDisabled && !isBlockedDate && handleDayClick(date)}
                     className={cn(
                       "aspect-square flex items-center justify-center rounded-lg text-sm font-medium transition-all border",
-                      selectionDisabled
+                      selectionDisabled || isTooEarly
                         ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
-                        : isDisabled
-                        ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
-                        : isFullyBooked
+                        : isTimeConflictDisabled
                         ? "bg-red-50 text-red-400 border-red-200 cursor-not-allowed hover:bg-red-50"
-                        : dayStatus === 'has-bookings'
-                        ? "bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-400 hover:bg-amber-100 cursor-pointer"
+                        : isPatientBooked
+                        ? "bg-yellow-50 text-amber-700 border-amber-200 cursor-pointer hover:bg-yellow-100"
+                        : isFullyBooked
+                        ? "bg-red-50 text-red-400 border-red-200 cursor-pointer hover:bg-red-100"
                         : active
                         ? "bg-blue-600 text-white border-blue-700 shadow-lg scale-110"
                         : today
@@ -339,7 +428,9 @@ export function DatePickerModal({
                     )}
                     title={
                       selectionDisabled ? "Date selection is disabled during this tour step"
-                      : isDisabled ? (isPastMode ? "Upcoming date" : isEditMode ? "Not available" : "Past date")
+                      : isTooEarly ? "Too early"
+                      : disableDatesWithTimeConflict && hasTimeConflict ? "Original time is already booked"
+                      : isPatientBooked ? "Already has a booking"
                       : isFullyBooked ? "Fully booked"
                       : dayStatus === 'has-bookings' ? "Has Bookings"
                       : "Available"
@@ -349,6 +440,9 @@ export function DatePickerModal({
                       <span>{date.getDate()}</span>
                       {dayStatus === 'fully-booked' && (
                         <span className="text-[8px] font-bold">FULL</span>
+                      )}
+                      {dayStatus === 'patient-booked' && (
+                        <span className="text-[8px] font-bold">BOOKED</span>
                       )}
                       {dayStatus === 'has-bookings' && (
                         <span className="text-[8px]">◐</span>

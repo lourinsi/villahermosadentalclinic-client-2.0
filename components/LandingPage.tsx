@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,26 +10,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Stethoscope,
-  ArrowRight,
   Heart,
   Clock,
   Shield,
-  Calendar,
+  ClipboardCheck,
 } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import BookingModalWrapper from "@/components/BookingModalWrapper";
-import { usePublicBookingCache } from "@/components/PublicBookingPanels";
 
 export default function LandingPage() {
   const router = useRouter();
-  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
-  const { refresh: refreshPublicBookings } = usePublicBookingCache();
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <Header onBookAppointment={() => setIsBookingModalOpen(true)} />
+      <Header />
 
       <section
         id="home"
@@ -42,62 +36,28 @@ export default function LandingPage() {
               Friendly care for brighter, healthier smiles
             </div>
             <h1 className="mb-6 max-w-3xl text-4xl font-black leading-tight text-gray-950 md:text-6xl">
-              Book trusted dental care without the back-and-forth
+              Trusted dental care for brighter, healthier smiles
             </h1>
             <p className="mb-8 max-w-2xl text-lg leading-8 text-gray-600">
-              Choose a dentist, check real availability, and reserve your visit
-              online. New and returning patients can start from here.
+              Villahermosa Dental Clinic provides friendly, modern care for
+              families and returning patients.
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
-                onClick={() => setIsBookingModalOpen(true)}
+                onClick={() => router.push("/admin/login")}
                 size="lg"
                 className="h-12 rounded-full bg-primary px-8 text-base font-bold hover:bg-primary/90"
               >
-                Book Appointment <ArrowRight className="ml-2 h-5 w-5" />
+                Admin Login
               </Button>
               <Button
-                onClick={() => router.push("/doctors")}
+                onClick={() => router.push("/receptionist/login")}
+                size="lg"
                 variant="outline"
-                size="lg"
-                className="h-12 rounded-full border-blue-200 px-8 text-base font-bold text-blue-700 hover:bg-blue-50"
+                className="h-12 rounded-full px-8 text-base font-bold"
               >
-                <Stethoscope className="mr-2 h-5 w-5" />
-                Find a Dentist
+                Receptionist Login
               </Button>
-              <Button
-                onClick={() => router.push("/calendar")}
-                variant="ghost"
-                size="lg"
-                className="h-12 rounded-full px-6 text-base font-semibold text-gray-700 hover:bg-white"
-              >
-                <Calendar className="mr-2 h-5 w-5" />
-                View Calendar
-              </Button>
-            </div>
-            <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-gray-500">
-              <button
-                type="button"
-                data-tour-id="landing-login"
-                onClick={() => router.push("/login")}
-                className="hover:text-primary"
-              >
-                Patient login
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push("/doctor/login")}
-                className="hover:text-primary"
-              >
-                Doctor portal
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push("/admin/login")}
-                className="hover:text-primary"
-              >
-                Admin portal
-              </button>
             </div>
           </div>
 
@@ -108,26 +68,26 @@ export default function LandingPage() {
               </p>
               <h2 className="mt-2 text-3xl font-black">Care made simple</h2>
               <p className="mt-3 text-blue-50">
-                Public booking keeps your reserved visits available from the
-                calendar and cart on this device.
+                Our clinic team keeps patient visits, records, and care
+                coordination organized in one secure workspace.
               </p>
             </div>
             <div className="mt-5 grid gap-3">
               {[
                 {
-                  icon: Stethoscope,
-                  title: "Pick your doctor",
-                  text: "Browse the team and open each dentist's schedule.",
+                  icon: Heart,
+                  title: "Personalized care",
+                  text: "Treatment plans are tailored to each patient's needs.",
                 },
                 {
                   icon: Clock,
-                  title: "Reserve a time",
-                  text: "Choose from open appointment slots in the calendar.",
+                  title: "Efficient visits",
+                  text: "Clinic workflows are built around clear scheduling.",
                 },
                 {
-                  icon: Calendar,
-                  title: "Review your visits",
-                  text: "Return to your calendar or cart from the header.",
+                  icon: ClipboardCheck,
+                  title: "Organized records",
+                  text: "Patient histories and follow-ups stay easy to manage.",
                 },
               ].map((item) => {
                 const Icon = item.icon;
@@ -239,30 +199,10 @@ export default function LandingPage() {
         <div className="mx-auto max-w-4xl text-center">
           <h2 className="mb-6 text-4xl font-bold">Ready to Smile Again?</h2>
           <p className="mb-8 text-lg opacity-90">
-            Schedule your appointment today and experience excellent dental care
+            Visit the clinic and experience excellent dental care.
           </p>
-          <div className="flex flex-col justify-center gap-4 sm:flex-row">
-            <Button
-              onClick={() => setIsBookingModalOpen(true)}
-              size="lg"
-              className="bg-white px-8 py-6 text-lg font-semibold text-blue-600 hover:bg-gray-100"
-            >
-              <Calendar className="mr-2 h-5 w-5" />
-              Book Now
-            </Button>
-          </div>
         </div>
       </section>
-
-      {isBookingModalOpen && (
-        <BookingModalWrapper
-          open={isBookingModalOpen}
-          onOpenChange={setIsBookingModalOpen}
-          title="Book Your Appointment"
-          bookingMode="public"
-          onBooked={() => refreshPublicBookings()}
-        />
-      )}
 
       <Footer />
     </div>

@@ -118,8 +118,7 @@ export function Dashboard({ portal }: DashboardProps) {
     return () => clearTimeout(t);
   }, [viewMode]);
 
-  // Filter appointments based on portal
-  const filteredAppointments = useMemo(() => {
+  const portalAppointments = useMemo(() => {
     let filtered = appointments;
 
     // For doctor portal, only show their appointments
@@ -136,12 +135,33 @@ export function Dashboard({ portal }: DashboardProps) {
       );
     }
 
+    return filtered;
+  }, [appointments, portal, user]);
+
+  const currentMonthAppointments = useMemo(() => {
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
+    return portalAppointments
+      .filter((apt: Appointment) => {
+        const aptDate = parseBackendDateToLocal(apt.date);
+        return aptDate >= monthStart && aptDate <= monthEnd;
+      })
+      .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
+  }, [portalAppointments]);
+
+  // Filter appointments based on selected dashboard view.
+  const filteredAppointments = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
-      return filtered
+      return portalAppointments
         .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
         .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else if (viewMode === "week") {
@@ -153,7 +173,7 @@ export function Dashboard({ portal }: DashboardProps) {
       weekEnd.setDate(weekStart.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
 
-      return filtered
+      return portalAppointments
         .filter((apt: Appointment) => {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= weekStart && aptDate <= weekEnd;
@@ -166,13 +186,14 @@ export function Dashboard({ portal }: DashboardProps) {
       const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       monthEnd.setHours(23, 59, 59, 999);
 
-      return filtered
+      return portalAppointments
         .filter((apt: Appointment) => {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= monthStart && aptDate <= monthEnd;
-        });
+        })
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     }
-  }, [appointments, viewMode, portal, user]);
+  }, [portalAppointments, viewMode]);
 
   // Get next upcoming appointment
   const nextAppointment = useMemo(() => {
@@ -297,9 +318,8 @@ export function Dashboard({ portal }: DashboardProps) {
       <div data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}>
         <DashboardStats
           portal={portal}
-          viewMode={viewMode}
           appointments={appointments}
-          filteredAppointments={filteredAppointments}
+          monthlyAppointments={currentMonthAppointments}
           totalPatients={totalPatients}
           pendingAppointmentsCount={pendingAppointmentsCount}
           user={user}
@@ -333,10 +353,8 @@ export function Dashboard({ portal }: DashboardProps) {
         />
 
         <VisitStatistics
-          appointments={appointments}
-          filteredAppointments={filteredAppointments}
+          appointments={portalAppointments}
           colorPalette={colorPalette}
-          viewMode={viewMode}
         />
 
         <QuickActions

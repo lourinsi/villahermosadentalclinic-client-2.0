@@ -24,13 +24,20 @@ export interface Appointment {
   doctorName?: string;
   duration?: number;
   notes: string;
+  treatmentNotes?: string;
   serviceType?: string;
   // Status is flexible to accept any value from the backend JSON configuration
   status: string;
   cancellationReason?: string; // Reason why appointment was cancelled
-  paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid" | "pay-at-clinic" | "over-paid";
+  paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid" | "over-paid";
+  paymentMethod?: string;
   balance?: number;
   totalPaid?: number;
+  // recurrence fields removed (backend no longer supports recurring appointments)
+  patientDateOfBirth?: string;
+  patientDob?: string;
+  patientBirthDate?: string;
+  patientBirthday?: string;
   patientProfile?: string;
   patientProfilePicture?: string;
   doctorProfile?: string;

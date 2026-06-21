@@ -1,6 +1,6 @@
 "use client";
 
-import { apiUrl, API_BASE_URL } from "@/lib/api";
+import { apiUrl } from "@/lib/api";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -8,10 +8,12 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { 
   Clock, 
   CheckCircle, 
@@ -23,6 +25,7 @@ import {
   Search,
   Calendar as CalendarIcon,
   History,
+  Plus,
   Filter,
   RotateCcw,
   ArrowUpDown,
@@ -60,7 +63,6 @@ import {
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import PastAppointmentButton from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
@@ -113,6 +115,7 @@ const getPatientImage = (appointment: any, patientRecord?: any) => {
 };
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
+  const { effectiveRole } = useAdminViewMode();
   const {
     appointments,
     updateAppointment,
@@ -124,6 +127,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   } = useAppointmentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
+  const canManagePaymentStatuses = effectiveRole === "admin";
   const [requests, setRequests] = useState<Appointment[]>([]);
   const [isRequestsLoading, setIsRequestsLoading] = useState(true);
   const [requestCurrentPage, setRequestCurrentPage] = useState(1);
@@ -131,12 +135,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [requestTotal, setRequestTotal] = useState(0);
   const [requestRefreshKey, setRequestRefreshKey] = useState(0);
   const [history, setHistory] = useState<Appointment[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [patientRecordsCache, setPatientRecordsCache] = useState<Record<string, any>>({});
+  const [activeTab, setActiveTab] = useState("requests");
+  const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
+  const { refreshAppointments, openCreateModal } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
     setIsAppointmentHistoryOpen,
@@ -199,42 +205,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   }, [APPOINTMENT_STATUSES]);
 
-  // Fetch patient records for requests and history
-  useEffect(() => {
-    const allAppointments = [...requests, ...history];
-    const patientIds = Array.from(new Set(allAppointments.map(apt => apt.patientId).filter(Boolean)));
-
-    if (patientIds.length === 0) return;
-
-    const fetchPatientRecords = async () => {
-      const newCache = { ...patientRecordsCache };
-      
-      for (const patientId of patientIds) {
-        // Skip if already cached
-        if (newCache[patientId]) continue;
-
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/patients/${patientId}`, {
-            credentials: "include",
-            headers: {
-              Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("authToken") : ""}`,
-            },
-          });
-          if (response.ok) {
-            const data = await response.json();
-            newCache[patientId] = data.data || null;
-          }
-        } catch (error) {
-          console.debug(`Failed to fetch patient record ${patientId}:`, error);
-        }
-      }
-
-      setPatientRecordsCache(newCache);
-    };
-
-    fetchPatientRecords();
-  }, [requests, history]);
-
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
     return normalizeAppointmentStatus(s);
@@ -246,6 +216,19 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const isPatientCartStatus = (status?: string) => {
     return isCartAppointmentStatus(status);
+  };
+
+  const isPaymentIncomplete = (paymentStatus?: string) => {
+    const normalized = canonicalPaymentStatus(paymentStatus);
+    return normalized !== "paid" && normalized !== "over-paid";
+  };
+
+  const canPromptPayment = (appointment: Appointment) => {
+    const normalizedStatus = canonicalStatus(appointment.status);
+    return (
+      isPaymentIncomplete(appointment.paymentStatus) &&
+      normalizedStatus !== "cancelled"
+    );
   };
 
   const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => !isPatientCartStatus(status.value));
@@ -307,7 +290,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const getCurrentPatientName = (appointment: Appointment) =>
-    getAppointmentPatientDisplayName(appointment, patientRecordsCache[appointment.patientId]);
+    getAppointmentPatientDisplayName(appointment);
 
   const sortAppointmentsForColumn = (
     items: Appointment[],
@@ -623,11 +606,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   ]);
 
   useEffect(() => {
+    if (activeTab !== "history") return;
+    setHasLoadedHistory(true);
+
     const controller = new AbortController();
     fetchHistory(historyCurrentPage, controller.signal);
 
     return () => controller.abort();
-  }, [fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
+  }, [activeTab, fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
 
   const refreshHistory = useCallback(() => {
     setHistoryRefreshKey((key) => key + 1);
@@ -635,8 +621,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const refreshAppointmentLists = useCallback(() => {
     refreshRequests();
-    refreshHistory();
-  }, [refreshHistory, refreshRequests]);
+    if (hasLoadedHistory) refreshHistory();
+  }, [hasLoadedHistory, refreshHistory, refreshRequests]);
 
   useEffect(() => {
     const handleAppointmentsUpdated = (event: Event) => {
@@ -706,6 +692,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const handleReject = async (appointment: Appointment) => {
     setPendingRejectAppointment(appointment);
     setIsRejectConfirmOpen(true);
+  };
+
+  const handleOpenPayment = async (appointment: Appointment) => {
+    try {
+      openEditModal(appointment, false, true);
+    } catch (error) {
+      console.error("Error opening payment modal:", error);
+      toast.error("Unable to open payment editor. Please try again.");
+    }
   };
 
   const confirmReject = async () => {
@@ -860,10 +855,27 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </h1>
           <p className="text-gray-500 font-medium">Review and manage appointment requests</p>
         </div>
-        <PastAppointmentButton doctorName={doctorFilter} className="rounded-xl" />
+        {(effectiveRole === "admin" || effectiveRole === "doctor") && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => openCreateModal()}
+            className="gap-2 font-semibold rounded-xl"
+          >
+            <Plus className="h-4 w-4" />
+            <span>New Appointment</span>
+          </Button>
+        )}
       </div>
 
-      <Tabs defaultValue="requests" className="space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "history" && !hasLoadedHistory) setIsHistoryLoading(true);
+        }}
+        className="space-y-6"
+      >
         <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
           <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
             Requests
@@ -885,21 +897,24 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   <div>
                     <CardTitle className="text-xl font-black text-gray-900 uppercase">Action Required</CardTitle>
                     <p className="text-sm text-gray-500 font-medium">Please review appointments that need action</p>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input 
-                      placeholder="Search patient or service..." 
-                      className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
-                      value={pendingSearchTerm}
-                      onChange={(e) => {
-                        setPendingSearchTerm(e.target.value);
-                        setRequestCurrentPage(1);
-                      }}
-                    />
+                    {sortedRequests.some(canPromptPayment) ? (
+                      <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-100 px-3 py-1 text-xs font-semibold uppercase text-amber-700">
+                        <DollarSign className="h-3.5 w-3.5" />
+                        Payment due for {sortedRequests.filter(canPromptPayment).length} appointment{sortedRequests.filter(canPromptPayment).length !== 1 ? "s" : ""}
+                      </div>
+                    ) : null}
+                    <div className="relative mt-4 md:mt-0">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input 
+                        placeholder="Search patient or service..." 
+                        className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
+                        value={pendingSearchTerm}
+                        onChange={(e) => {
+                          setPendingSearchTerm(e.target.value);
+                          setRequestCurrentPage(1);
+                        }}
+                      />
+                    </div>
                   </div>
                   
                   <Select
@@ -1034,12 +1049,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={patientName} />
-                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(patientName)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {request.id.slice(0, 8)}</div>
@@ -1081,21 +1091,25 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </Select>
                           </TableCell>
                           <TableCell>
-                            <Select 
-                              value={request.paymentStatus || "unpaid"} 
-                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
-                            >
-                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
-                                <div className="cursor-pointer">
-                                  {getPaymentStatusBadge(request.paymentStatus)}
-                                </div>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PAYMENT_STATUSES.map((status: any) => (
-                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {canManagePaymentStatuses ? (
+                              <Select
+                                value={request.paymentStatus || "unpaid"}
+                                onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
+                              >
+                                <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                  <div className="cursor-pointer">
+                                    {getPaymentStatusBadge(request.paymentStatus)}
+                                  </div>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PAYMENT_STATUSES.map((status: any) => (
+                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              getPaymentStatusBadge(request.paymentStatus)
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
@@ -1132,6 +1146,17 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                     <XCircle className="h-5 w-5" />
                                   </Button>
                                 </>
+                              ) : null}
+                              {canPromptPayment(request) ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-9 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                                  onClick={() => handleOpenPayment(request)}
+                                >
+                                  <DollarSign className="h-4 w-4 mr-2" />
+                                  Pay now
+                                </Button>
                               ) : null}
                               <Button 
                                 size="sm" 
@@ -1341,12 +1366,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={patientName} />
-                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(patientName)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-10 w-10 border-2 border-white shadow-sm" sizeClass="h-10 w-10" />
                               <div>
                                 <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {item.id.slice(0, 8)}</div>
@@ -1388,21 +1408,25 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </Select>
                           </TableCell>
                           <TableCell>
-                            <Select 
-                              value={item.paymentStatus || "unpaid"} 
-                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
-                            >
-                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
-                                <div className="cursor-pointer">
-                                  {getPaymentStatusBadge(item.paymentStatus)}
-                                </div>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PAYMENT_STATUSES.map((status: any) => (
-                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {canManagePaymentStatuses ? (
+                              <Select
+                                value={item.paymentStatus || "unpaid"}
+                                onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
+                              >
+                                <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                  <div className="cursor-pointer">
+                                    {getPaymentStatusBadge(item.paymentStatus)}
+                                  </div>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PAYMENT_STATUSES.map((status: any) => (
+                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              getPaymentStatusBadge(item.paymentStatus)
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
@@ -1417,16 +1441,29 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
-                              onClick={() => {
-                                handleViewAppointment(item);
-                              }}
-                            >
-                              <Eye className="h-5 w-5" />
-                            </Button>
+                            <div className="flex justify-end items-center gap-2">
+                              {canPromptPayment(item) ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-9 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                                  onClick={() => handleOpenPayment(item)}
+                                >
+                                  <DollarSign className="h-4 w-4 mr-2" />
+                                  Pay now
+                                </Button>
+                              ) : null}
+                              <Button 
+                                size="sm" 
+                                variant="ghost" 
+                                className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
+                                onClick={() => {
+                                  handleViewAppointment(item);
+                                }}
+                              >
+                                <Eye className="h-5 w-5" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                         );

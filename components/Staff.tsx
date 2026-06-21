@@ -3,25 +3,35 @@
 import { apiUrl } from "@/lib/api";
 
 import { toast } from "sonner";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "./ui/dialog";
-import { Textarea } from "./ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Appointment } from "../hooks/useAppointments";
+import type { Appointment } from "../hooks/useAppointments";
+import type { Attendance, Staff, StaffFinancialRecord, StaffFinancialRecordForm } from "@/lib/staff-types";
 import AddStaffModalWrapper from "./AddStaffModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { getStaffInitials, staffPasswordManagerIgnoreProps } from "./sharedAddStaffLogic";
-import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
+import { StaffAttendanceModal } from "./StaffAttendanceModal";
+import { StaffDeleteModal } from "./StaffDeleteModal";
+import { StaffFinancialDeleteModal } from "./StaffFinancialDeleteModal";
+import { StaffFinancialRecordModal } from "./StaffFinancialRecordModal";
+import { StaffScheduleModal } from "./StaffScheduleModal";
+import {
+  STAFF_FINANCIAL_STATUS_OPTIONS,
+  STAFF_FINANCIAL_TYPE_OPTIONS,
+  createEmptyStaffFinancialRecordForm,
+  getFinancialTypeLabel,
+  normalizeStaffValue,
+  prettifyStaffValue,
+} from "./staffModalOptions";
 import {
   Users,
   UserPlus,
@@ -38,59 +48,7 @@ import {
   CreditCard,
   Eye,
   CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  Clock
-}from "lucide-react";
-
-export interface Staff {
-  id: string;
-  name: string;
-  role: string;
-  department: string;
-  email: string;
-  phone: string;
-  hireDate: string;
-  baseSalary: number;
-  status: string;
-  employmentType: string;
-  specialization: string;
-  licenseNumber: string;
-  profilePicture?: string;
-}
-
-export interface StaffFinancialRecord {
-  id: string;
-  staffId: string;
-  staffName: string;
-  type: string;
-  amount: number;
-  date: string;
-  status: string;
-  notes: string;
-  repaymentSchedule: string;
-}
-
-export interface Attendance {
-  id?: string;
-  staffId: string;
-  staffName: string;
-  date?: string;
-  status?: string;
-  hoursWorked: number;
-  daysPresent: number;
-  daysAbsent: number;
-  overtimeHours: number;
-}
-
-const emptyFinancialForm = {
-  staffId: "",
-  type: "",
-  amount: 0,
-  date: "",
-  repaymentSchedule: "",
-  notes: "",
-};
+} from "lucide-react";
 
 const monthKey = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -103,8 +61,7 @@ const dateKey = (date: Date) => {
   return `${date.getFullYear()}-${month}-${day}`;
 };
 
-const normalizeFilterValue = (value?: string) =>
-  String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const normalizeFilterValue = normalizeStaffValue;
 
 const formatCurrency = (amount?: number) =>
   new Intl.NumberFormat("en-PH", {
@@ -138,6 +95,38 @@ const downloadCsv = (filename: string, rows: Record<string, string | number>[]) 
   URL.revokeObjectURL(url);
 };
 
+const buildStaffFilterOptions = (items: Staff[], getValue: (staff: Staff) => string | undefined) => {
+  const options = new Map<string, string>();
+  items.forEach((staff) => {
+    const label = String(getValue(staff) || "").trim();
+    const value = normalizeFilterValue(label);
+    if (label && value && !options.has(value)) {
+      options.set(value, label);
+    }
+  });
+
+  return Array.from(options.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+};
+
+const mergeFinancialFilterOptions = (
+  records: StaffFinancialRecord[],
+  baseOptions: readonly { value: string; label: string }[],
+  getValue: (record: StaffFinancialRecord) => string | undefined
+) => {
+  const options = new Map(baseOptions.map((option) => [normalizeFilterValue(option.value), option.label]));
+  records.forEach((record) => {
+    const rawValue = String(getValue(record) || "").trim();
+    const value = normalizeFilterValue(rawValue);
+    if (rawValue && value && !options.has(value)) {
+      options.set(value, prettifyStaffValue(rawValue));
+    }
+  });
+
+  return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
+};
+
 
 export function StaffView() {
   const [isAddStaffDialogOpen, setIsAddStaffDialogOpen] = useState(false);
@@ -154,12 +143,19 @@ export function StaffView() {
   const [financialStatusFilter, setFinancialStatusFilter] = useState("all");
   const [attendanceMonth, setAttendanceMonth] = useState(monthKey());
   
-  const [newFinancialRecord, setNewFinancialRecord] = useState(emptyFinancialForm);
+  const [newFinancialRecord, setNewFinancialRecord] = useState<StaffFinancialRecordForm>(
+    createEmptyStaffFinancialRecordForm
+  );
 
   const [staffData, setStaffData] = useState<Staff[]>([]);
   const [financialRecords, setFinancialRecords] = useState<StaffFinancialRecord[]>([]);
   const [attendanceData, setAttendanceData] = useState<Attendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("staff");
+  const [isFinancialLoading, setIsFinancialLoading] = useState(false);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+  const [hasLoadedFinancials, setHasLoadedFinancials] = useState(false);
+  const [hasLoadedAttendance, setHasLoadedAttendance] = useState(false);
   const [isEditStaffDialogOpen, setIsEditStaffDialogOpen] = useState(false);
   const [isStaffDetailsDialogOpen, setIsStaffDetailsDialogOpen] = useState(false);
   const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
@@ -178,15 +174,9 @@ export function StaffView() {
   const [isDeleteFinancialDialogOpen, setIsDeleteFinancialDialogOpen] = useState(false);
   const [editingFinancialRecord, setEditingFinancialRecord] = useState<StaffFinancialRecord | null>(null);
   const [financialRecordToDelete, setFinancialRecordToDelete] = useState<StaffFinancialRecord | null>(null);
-  const [editFinancialForm, setEditFinancialForm] = useState({
-    staffId: "",
-    type: "",
-    amount: 0,
-    date: "",
-    status: "pending",
-    notes: "",
-    repaymentSchedule: "",
-  });
+  const [editFinancialForm, setEditFinancialForm] = useState<StaffFinancialRecordForm>(
+    createEmptyStaffFinancialRecordForm
+  );
   const [financialActionLoading, setFinancialActionLoading] = useState<string | null>(null);
   const [isSavingNewFinancialRecord, setIsSavingNewFinancialRecord] = useState(false);
   const [isSavingFinancialRecord, setIsSavingFinancialRecord] = useState(false);
@@ -197,8 +187,6 @@ export function StaffView() {
   const [scheduleDate, setScheduleDate] = useState<Date>(new Date());
   const [staffAppointments, setStaffAppointments] = useState<Appointment[]>([]);
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
-  const [scheduleAppointment, setScheduleAppointment] = useState<Appointment | null>(null);
-  const [isScheduleAppointmentOpen, setIsScheduleAppointmentOpen] = useState(false);
 
   // Appointment snapshot / history handling for staff schedule
   const {
@@ -226,46 +214,71 @@ export function StaffView() {
     String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
 
-  const fetchAllStaffData = async () => {
+  const fetchStaffData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [
-        staffResponse,
-        financialResponse,
-        attendanceResponse,
-      ] = await Promise.all([
-        fetch(apiUrl("/api/staff?limit=100"), { credentials: "include" }),
-        fetch(apiUrl("/api/staff/financials"), { credentials: "include" }),
-        fetch(apiUrl(`/api/staff/attendance?month=${encodeURIComponent(attendanceMonth)}`), { credentials: "include" }),
-      ]);
+      const staffResponse = await fetch(apiUrl("/api/staff?limit=100"), { credentials: "include" });
 
       if (!staffResponse.ok) throw new Error(`HTTP error! status: ${staffResponse.status} for staff data`);
       const staffData = (await staffResponse.json()).data || [];
       setStaffData(staffData);
-
-      if (!financialResponse.ok) throw new Error(`HTTP error! status: ${financialResponse.status} for financial records`);
-      const financialRecordsData = (await financialResponse.json()).data || [];
-      setFinancialRecords(financialRecordsData);
-
-      if (!attendanceResponse.ok) throw new Error(`HTTP error! status: ${attendanceResponse.status} for attendance data`);
-      const attendanceData = (await attendanceResponse.json()).data || [];
-      setAttendanceData(attendanceData);
-
     } catch (err) {
       console.error("Error fetching staff data:", err);
       toast.error("Failed to fetch staff data. Please sign in again or check the backend server.");
-      // Ensure all data arrays are empty on error
       setStaffData([]);
-      setFinancialRecords([]);
-      setAttendanceData([]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const fetchFinancialRecords = useCallback(async () => {
+    setIsFinancialLoading(true);
+    try {
+      const response = await fetch(apiUrl("/api/staff/financials"), { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status} for financial records`);
+      const financialRecordsData = (await response.json()).data || [];
+      setFinancialRecords(financialRecordsData);
+      setHasLoadedFinancials(true);
+    } catch (err) {
+      console.error("Error fetching staff financial records:", err);
+      toast.error("Failed to fetch financial records.");
+      setFinancialRecords([]);
+    } finally {
+      setIsFinancialLoading(false);
+    }
+  }, []);
+
+  const fetchAttendanceData = useCallback(async () => {
+    setIsAttendanceLoading(true);
+    try {
+      const response = await fetch(apiUrl(`/api/staff/attendance?month=${encodeURIComponent(attendanceMonth)}`), { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status} for attendance data`);
+      const attendanceData = (await response.json()).data || [];
+      setAttendanceData(attendanceData);
+      setHasLoadedAttendance(true);
+    } catch (err) {
+      console.error("Error fetching attendance data:", err);
+      toast.error("Failed to fetch attendance data.");
+      setAttendanceData([]);
+    } finally {
+      setIsAttendanceLoading(false);
+    }
+  }, [attendanceMonth]);
+
+  const refreshLoadedStaffData = useCallback(() => {
+    fetchStaffData();
+    if (hasLoadedFinancials) fetchFinancialRecords();
+    if (hasLoadedAttendance) fetchAttendanceData();
+  }, [fetchAttendanceData, fetchFinancialRecords, fetchStaffData, hasLoadedAttendance, hasLoadedFinancials]);
 
   useEffect(() => {
-    fetchAllStaffData();
-  }, [attendanceMonth]);
+    fetchStaffData();
+    fetchFinancialRecords();
+  }, [fetchFinancialRecords, fetchStaffData]);
+
+  useEffect(() => {
+    if (activeTab === "attendance") fetchAttendanceData();
+  }, [activeTab, fetchAttendanceData]);
 
   const getStaffIdentifier = (staff: Staff) => String(staff.id || staff.email || staff.name);
 
@@ -295,7 +308,7 @@ export function StaffView() {
       if (!response.ok) throw new Error("Failed to delete staff member");
       toast.success("Staff member removed");
       setIsDeleteStaffDialogOpen(false);
-      fetchAllStaffData();
+      refreshLoadedStaffData();
     } catch (error) {
       console.error("Error deleting staff member:", error);
       toast.error("Failed to delete staff member");
@@ -401,8 +414,8 @@ export function StaffView() {
       if (response.ok) {
         toast.success("Financial record added successfully!");
         setIsAddFinancialDialogOpen(false);
-        setNewFinancialRecord(emptyFinancialForm);
-        fetchAllStaffData(); // Refresh data
+        setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+        fetchFinancialRecords();
       } else {
         const errorData = await response.json();
         toast.error(errorData.message || "Failed to add financial record.");
@@ -420,11 +433,11 @@ export function StaffView() {
     setEditFinancialForm({
       staffId: record.staffId,
       type: record.type,
-      amount: record.amount,
-      date: record.date,
-      status: record.status,
-      notes: record.notes,
-      repaymentSchedule: record.repaymentSchedule,
+      amount: Number(record.amount) || 0,
+      date: record.date || "",
+      status: record.status || "pending",
+      notes: record.notes || "",
+      repaymentSchedule: record.repaymentSchedule || "",
     });
     setIsEditFinancialDialogOpen(true);
   };
@@ -433,15 +446,7 @@ export function StaffView() {
     setIsEditFinancialDialogOpen(open);
     if (!open) {
       setEditingFinancialRecord(null);
-      setEditFinancialForm({
-        staffId: "",
-        type: "",
-        amount: 0,
-        date: "",
-        status: "pending",
-        notes: "",
-        repaymentSchedule: "",
-      });
+      setEditFinancialForm(createEmptyStaffFinancialRecordForm());
     }
   };
 
@@ -464,7 +469,7 @@ export function StaffView() {
         throw new Error(result?.message || "Failed to approve financial record");
       }
       toast.success("Financial record approved");
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error approving financial record:", error);
       toast.error("Failed to approve financial record");
@@ -498,7 +503,7 @@ export function StaffView() {
       }
       toast.success("Financial record updated");
       handleFinancialEditDialogChange(false);
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error updating financial record:", error);
       toast.error("Failed to update financial record");
@@ -546,68 +551,9 @@ export function StaffView() {
     }
   };
 
-  const handleScheduleMonthChange = (newDate: Date) => {
-    setScheduleDate(newDate);
-    if (scheduleStaff) {
-      fetchStaffAppointments(scheduleStaff.name, newDate);
-    }
-  };
-
-  const getAppointmentsForDate = (date: Date) => {
-    // Use local date formatting to avoid timezone issues
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const dateStr = `${year}-${month}-${day}`;
-    return staffAppointments.filter(apt => apt.date === dateStr);
-  };
-
-  const formatTime = (time: string) => {
-    if (!time) return '';
-    const [hours, minutes] = time.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  const sortedStaffAppointments = useMemo(
-    () =>
-      [...staffAppointments].sort((a, b) => {
-        const dateCompare = a.date.localeCompare(b.date);
-        if (dateCompare !== 0) return dateCompare;
-        return (a.time || "").localeCompare(b.time || "");
-      }),
-    [staffAppointments]
-  );
-
-  const upcomingStaffAppointments = useMemo(() => {
-    const now = new Date();
-    const today = dateKey(now);
-    const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-
-    return sortedStaffAppointments.filter((appointment) => {
-      const status = normalizeFilterValue(appointment.status);
-      if (status === "cancelled" || status === "completed") return false;
-      if (appointment.date > today) return true;
-      if (appointment.date < today) return false;
-      return String(appointment.time || "00:00").slice(0, 5) >= currentTime;
-    });
-  }, [sortedStaffAppointments]);
-
-  const getAppointmentStatusClass = (status?: string) => {
-    const colors = getDefaultAppointmentStatusColors(normalizeFilterValue(status));
-    return `${colors.bgColor} ${colors.textColor}`;
-  };
-
   const openScheduleAppointment = (appointment: Appointment) => {
     // Open the appointment history view instead of the booking/edit modal
     handleViewAppointment(appointment);
-  };
-
-  const handleScheduleAppointmentOpenChange = (open: boolean) => {
-    setIsScheduleAppointmentOpen(open);
-    if (!open) setScheduleAppointment(null);
   };
 
   const handleEditAppointment = async (appointmentId: string) => {
@@ -626,12 +572,6 @@ export function StaffView() {
     await handleEditAppointment(appointmentId);
   };
 
-  const refreshScheduleAppointments = () => {
-    if (scheduleStaff) {
-      fetchStaffAppointments(scheduleStaff.name, scheduleDate);
-    }
-  };
-
   const handleDeleteFinancialRecord = async () => {
     if (!financialRecordToDelete) return;
     setIsDeletingFinancialRecord(true);
@@ -646,7 +586,7 @@ export function StaffView() {
       }
       toast.success("Financial record removed");
       handleDeleteFinancialDialogChange(false);
-      fetchAllStaffData();
+      fetchFinancialRecords();
     } catch (error) {
       console.error("Error deleting financial record:", error);
       toast.error("Failed to delete financial record");
@@ -682,6 +622,31 @@ export function StaffView() {
       );
     });
   }, [departmentFilter, employmentTypeFilter, roleFilter, searchQuery, staffData, statusFilter]);
+
+  const departmentOptions = useMemo(
+    () => buildStaffFilterOptions(staffData, (staff) => staff.department),
+    [staffData]
+  );
+  const roleOptions = useMemo(
+    () => buildStaffFilterOptions(staffData, (staff) => staff.role),
+    [staffData]
+  );
+  const employmentTypeOptions = useMemo(
+    () => buildStaffFilterOptions(staffData, (staff) => staff.employmentType),
+    [staffData]
+  );
+  const staffStatusOptions = useMemo(
+    () => buildStaffFilterOptions(staffData, (staff) => staff.status),
+    [staffData]
+  );
+  const financialTypeOptions = useMemo(
+    () => mergeFinancialFilterOptions(financialRecords, STAFF_FINANCIAL_TYPE_OPTIONS, (record) => record.type),
+    [financialRecords]
+  );
+  const financialStatusOptions = useMemo(
+    () => mergeFinancialFilterOptions(financialRecords, STAFF_FINANCIAL_STATUS_OPTIONS, (record) => record.status),
+    [financialRecords]
+  );
 
   const financialDateRange = useMemo(() => {
     const today = new Date();
@@ -783,7 +748,7 @@ export function StaffView() {
           <AddStaffModalWrapper
             open={isAddStaffDialogOpen}
             onOpenChange={setIsAddStaffDialogOpen}
-            onStaffAdded={fetchAllStaffData}
+            onStaffAdded={refreshLoadedStaffData}
           />
         </div>
       </div>
@@ -847,7 +812,15 @@ export function StaffView() {
         </Card>
       </div>
 
-      <Tabs defaultValue="staff" className="space-y-6" onValueChange={() => fetchAllStaffData()}>
+      <Tabs
+        value={activeTab}
+        className="space-y-6"
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "financial" && !hasLoadedFinancials) fetchFinancialRecords();
+          if (value === "attendance" && !hasLoadedAttendance) setIsAttendanceLoading(true);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="staff" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Staff Directory</TabsTrigger>
           <TabsTrigger value="financial" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
@@ -878,10 +851,11 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Departments</SelectItem>
-                      <SelectItem value="dentistry">Dentistry</SelectItem>
-                      <SelectItem value="hygiene">Hygiene</SelectItem>
-                      <SelectItem value="assistance">Assistance</SelectItem>
-                      <SelectItem value="administration">Administration</SelectItem>
+                      {departmentOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={roleFilter} onValueChange={setRoleFilter}>
@@ -890,11 +864,11 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Roles</SelectItem>
-                      <SelectItem value="dentist">Dentist</SelectItem>
-                      <SelectItem value="hygienist">Hygienist</SelectItem>
-                      <SelectItem value="assistant">Assistant</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="receptionist">Receptionist</SelectItem>
+                      {roleOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={employmentTypeFilter} onValueChange={setEmploymentTypeFilter}>
@@ -903,9 +877,11 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="fulltime">Full-time</SelectItem>
-                      <SelectItem value="parttime">Part-time</SelectItem>
-                      <SelectItem value="contract">Contract</SelectItem>
+                      {employmentTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -914,9 +890,11 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                      <SelectItem value="onleave">On Leave</SelectItem>
+                      {staffStatusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button variant="outline" size="icon" onClick={resetStaffFilters} title="Reset filters">
@@ -956,7 +934,7 @@ export function StaffView() {
                       </TableRow>
                     ) : (
                       filteredStaffData.map((staff) => (
-                        <TableRow key={staff.id}>
+                        <TableRow key={getStaffIdentifier(staff)}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-9 w-9 border bg-white">
@@ -1062,10 +1040,11 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="cash_advance">Cash Advance</SelectItem>
-                      <SelectItem value="bonus">Bonus</SelectItem>
-                      <SelectItem value="salary_adjustment">Salary Adjustment</SelectItem>
-                      <SelectItem value="deduction">Deduction</SelectItem>
+                      {financialTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={financialStatusFilter} onValueChange={setFinancialStatusFilter}>
@@ -1074,90 +1053,25 @@ export function StaffView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="paid">Paid</SelectItem>
-                      <SelectItem value="approved">Approved</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
+                      {financialStatusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button variant="outline" size="icon" onClick={resetFinancialFilters} title="Reset filters">
                     <Filter className="h-4 w-4" />
                   </Button>
-                  <Dialog open={isAddFinancialDialogOpen} onOpenChange={(open) => {
-                    setIsAddFinancialDialogOpen(open);
-                    if (!open) setNewFinancialRecord(emptyFinancialForm);
-                  }}>
-                    <DialogTrigger asChild>
-                      <Button className="bg-blue-600 hover:bg-blue-700">
-                        <DollarSign className="h-4 w-4 mr-2" />
-                        Add Transaction
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add Financial Transaction</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="staff">Staff Member</Label>
-                          <Select value={newFinancialRecord.staffId} onValueChange={(value) => setNewFinancialRecord({ ...newFinancialRecord, staffId: value })}>
-                            <SelectTrigger id="staff">
-                              <SelectValue placeholder="Select staff member" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {staffData.map((staff) => (
-                                <SelectItem key={staff.id} value={staff.id.toString()}>
-                                  {staff.name} - {staff.role}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="transactionType">Transaction Type</Label>
-                          <Select value={newFinancialRecord.type} onValueChange={(value) => setNewFinancialRecord({ ...newFinancialRecord, type: value })}>
-                            <SelectTrigger id="transactionType">
-                              <SelectValue placeholder="Select type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="cash_advance">Cash Advance</SelectItem>
-                              <SelectItem value="bonus">Bonus</SelectItem>
-                              <SelectItem value="salary_adjustment">Salary Adjustment</SelectItem>
-                              <SelectItem value="deduction">Deduction</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="staff-financial-amount">Amount (PHP)</Label>
-                          <Input id="staff-financial-amount" type="number" placeholder="500" {...staffPasswordManagerIgnoreProps} value={newFinancialRecord.amount} onChange={(e) => setNewFinancialRecord({ ...newFinancialRecord, amount: Number(e.target.value) })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="staff-financial-date">Date</Label>
-                          <Input id="staff-financial-date" type="date" {...staffPasswordManagerIgnoreProps} value={newFinancialRecord.date} onChange={(e) => setNewFinancialRecord({ ...newFinancialRecord, date: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="staff-financial-repayment">Repayment Schedule (if applicable)</Label>
-                          <Input id="staff-financial-repayment" placeholder="e.g., 2 months" {...staffPasswordManagerIgnoreProps} value={newFinancialRecord.repaymentSchedule} onChange={(e) => setNewFinancialRecord({ ...newFinancialRecord, repaymentSchedule: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="staff-financial-notes">Notes</Label>
-                          <Textarea id="staff-financial-notes" placeholder="Enter details..." {...staffPasswordManagerIgnoreProps} value={newFinancialRecord.notes} onChange={(e) => setNewFinancialRecord({ ...newFinancialRecord, notes: e.target.value })} />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAddFinancialDialogOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleAddFinancialRecord} disabled={isSavingNewFinancialRecord} className="bg-blue-600 hover:bg-blue-700">
-                          {isSavingNewFinancialRecord ? "Adding..." : "Add Transaction"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                  <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setIsAddFinancialDialogOpen(true)}>
+                    <DollarSign className="h-4 w-4 mr-2" />
+                    Add Transaction
+                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isFinancialLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
@@ -1191,11 +1105,11 @@ export function StaffView() {
                           <TableCell className="font-medium">{record.staffName}</TableCell>
                           <TableCell>
                             <Badge variant={
-                              record.type === "cash_advance" ? "default" :
-                              record.type === "bonus" ? "secondary" :
+                              normalizeFilterValue(record.type) === "cashadvance" ? "default" :
+                              normalizeFilterValue(record.type) === "bonus" ? "secondary" :
                               "outline"
                             }>
-                              {record.type.replace('_', ' ')}
+                              {getFinancialTypeLabel(record.type)}
                             </Badge>
                           </TableCell>
                           <TableCell className="font-medium">{formatCurrency(record.amount)}</TableCell>
@@ -1204,16 +1118,16 @@ export function StaffView() {
                           <TableCell className="max-w-xs truncate">{record.notes}</TableCell>
                           <TableCell>
                             <Badge className={
-                              record.status === "paid" ? "bg-green-100 text-green-800" :
-                              record.status === "approved" ? "bg-blue-100 text-blue-800" :
+                              normalizeFilterValue(record.status) === "paid" ? "bg-green-100 text-green-800" :
+                              normalizeFilterValue(record.status) === "approved" ? "bg-blue-100 text-blue-800" :
                               "bg-yellow-100 text-yellow-800"
                             }>
-                              {record.status}
+                              {prettifyStaffValue(record.status)}
                             </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex space-x-2">
-                              {record.status === "pending" && (
+                              {normalizeFilterValue(record.status) === "pending" && (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -1271,7 +1185,7 @@ export function StaffView() {
               </div>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isAttendanceLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
@@ -1355,416 +1269,72 @@ export function StaffView() {
         onOpenChange={setIsEditStaffDialogOpen}
         staffMode="edit"
         staff={selectedStaff}
-        onStaffSaved={fetchAllStaffData}
+        onStaffSaved={refreshLoadedStaffData}
       />
 
-      <Dialog open={isDeleteStaffDialogOpen} onOpenChange={setIsDeleteStaffDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Remove Staff Member</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {selectedStaff ? `Are you sure you want to remove ${selectedStaff.name}?` : "Are you sure you want to remove this staff member?"}
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteStaffDialogOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteStaff} disabled={isDeletingStaff}>
-              {isDeletingStaff ? "Removing..." : "Remove"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StaffDeleteModal
+        open={isDeleteStaffDialogOpen}
+        staff={selectedStaff}
+        isDeleting={isDeletingStaff}
+        onOpenChange={setIsDeleteStaffDialogOpen}
+        onDelete={handleDeleteStaff}
+      />
 
-      <Dialog open={isEditFinancialDialogOpen} onOpenChange={handleFinancialEditDialogChange}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit Financial Record</DialogTitle>
-          </DialogHeader>
-          {editingFinancialRecord ? (
-            <div className="grid grid-cols-2 gap-4 py-4">
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="edit-financial-staff">Staff Member</Label>
-                <Select
-                  value={editFinancialForm.staffId}
-                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, staffId: value })}
-                >
-                  <SelectTrigger id="edit-financial-staff">
-                    <SelectValue placeholder="Select staff member" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staffData.map((staff) => (
-                      <SelectItem key={staff.id} value={staff.id.toString()}>
-                        {staff.name} - {staff.role}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-financial-type">Transaction Type</Label>
-                <Select
-                  value={editFinancialForm.type}
-                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, type: value })}
-                >
-                  <SelectTrigger id="edit-financial-type">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash_advance">Cash Advance</SelectItem>
-                    <SelectItem value="bonus">Bonus</SelectItem>
-                    <SelectItem value="salary_adjustment">Salary Adjustment</SelectItem>
-                    <SelectItem value="deduction">Deduction</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-financial-status">Status</Label>
-                <Select
-                  value={editFinancialForm.status}
-                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, status: value })}
-                >
-                  <SelectTrigger id="edit-financial-status">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="approved">Approved</SelectItem>
-                    <SelectItem value="paid">Paid</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-financial-amount">Amount</Label>
-                <Input
-                  id="edit-financial-amount"
-                  type="number"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={editFinancialForm.amount}
-                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, amount: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-financial-date">Date</Label>
-                <Input
-                  id="edit-financial-date"
-                  type="date"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={editFinancialForm.date}
-                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, date: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-financial-repayment">Repayment Schedule</Label>
-                <Input
-                  id="edit-financial-repayment"
-                  placeholder="e.g., 2 months"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={editFinancialForm.repaymentSchedule}
-                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, repaymentSchedule: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="edit-financial-notes">Notes</Label>
-                <Textarea
-                  id="edit-financial-notes"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={editFinancialForm.notes}
-                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, notes: e.target.value })}
-                />
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No financial record selected.</p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => handleFinancialEditDialogChange(false)}>Cancel</Button>
-            <Button onClick={handleUpdateFinancialRecord} disabled={isSavingFinancialRecord || !editingFinancialRecord} className="bg-blue-600 hover:bg-blue-700">
-              {isSavingFinancialRecord ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StaffFinancialRecordModal
+        open={isAddFinancialDialogOpen}
+        mode="create"
+        form={newFinancialRecord}
+        staffMembers={staffData}
+        isSaving={isSavingNewFinancialRecord}
+        formatCurrency={formatCurrency}
+        onOpenChange={(open) => {
+          setIsAddFinancialDialogOpen(open);
+          if (!open) setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+        }}
+        onFormChange={setNewFinancialRecord}
+        onSave={handleAddFinancialRecord}
+      />
 
-      <Dialog open={isDeleteFinancialDialogOpen} onOpenChange={handleDeleteFinancialDialogChange}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Remove Financial Record</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {financialRecordToDelete ? `Remove ${financialRecordToDelete.staffName}'s ${financialRecordToDelete.type.replace(/_/g, " ")} record?` : "Remove this financial record?"}
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => handleDeleteFinancialDialogChange(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteFinancialRecord} disabled={isDeletingFinancialRecord}>
-              {isDeletingFinancialRecord ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StaffFinancialRecordModal
+        open={isEditFinancialDialogOpen}
+        mode="edit"
+        form={editFinancialForm}
+        staffMembers={staffData}
+        isSaving={isSavingFinancialRecord}
+        formatCurrency={formatCurrency}
+        onOpenChange={handleFinancialEditDialogChange}
+        onFormChange={setEditFinancialForm}
+        onSave={handleUpdateFinancialRecord}
+      />
 
-      <Dialog open={isAttendanceDialogOpen} onOpenChange={setIsAttendanceDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Update Attendance</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <p className="text-xs text-muted-foreground">Staff Member</p>
-              <p className="font-medium">{attendanceForm.staffName}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="attendance-hours">Hours Worked</Label>
-                <Input
-                  id="attendance-hours"
-                  type="number"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={attendanceForm.hoursWorked}
-                  onChange={(e) => setAttendanceForm({ ...attendanceForm, hoursWorked: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="attendance-overtime">Overtime Hours</Label>
-                <Input
-                  id="attendance-overtime"
-                  type="number"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={attendanceForm.overtimeHours}
-                  onChange={(e) => setAttendanceForm({ ...attendanceForm, overtimeHours: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="attendance-present">Days Present</Label>
-                <Input
-                  id="attendance-present"
-                  type="number"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={attendanceForm.daysPresent}
-                  onChange={(e) => setAttendanceForm({ ...attendanceForm, daysPresent: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="attendance-absent">Days Absent</Label>
-                <Input
-                  id="attendance-absent"
-                  type="number"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={attendanceForm.daysAbsent}
-                  onChange={(e) => setAttendanceForm({ ...attendanceForm, daysAbsent: Number(e.target.value) })}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAttendanceDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAttendanceSave} disabled={isSavingAttendance} className="bg-blue-600 hover:bg-blue-700">
-              {isSavingAttendance ? "Saving..." : "Save Attendance"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StaffFinancialDeleteModal
+        open={isDeleteFinancialDialogOpen}
+        record={financialRecordToDelete}
+        isDeleting={isDeletingFinancialRecord}
+        formatCurrency={formatCurrency}
+        onOpenChange={handleDeleteFinancialDialogChange}
+        onDelete={handleDeleteFinancialRecord}
+      />
 
-      {/* Staff Schedule Dialog */}
-      <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-        <DialogContent className="w-[min(1120px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] sm:max-w-[1120px] max-h-[92vh] overflow-hidden bg-gray-50 p-0 flex flex-col">
-          <DialogHeader className="shrink-0 border-b bg-white p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border-2 border-white shadow-sm">
-                  {scheduleStaff?.profilePicture ? (
-                    <AvatarImage src={scheduleStaff.profilePicture} alt={scheduleStaff.name} className="object-cover" />
-                  ) : null}
-                  <AvatarFallback className="bg-blue-100 text-lg font-bold text-blue-700">
-                    {getStaffInitials(scheduleStaff?.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <DialogTitle className="flex items-center gap-2 text-xl font-bold text-gray-900">
-                    <CalendarDays className="h-5 w-5 text-blue-600" />
-                    {scheduleStaff?.name}&apos;s Schedule
-                  </DialogTitle>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                    {scheduleStaff?.role ? <Badge variant="secondary">{scheduleStaff.role}</Badge> : null}
-                    {scheduleStaff?.specialization ? <span>{scheduleStaff.specialization}</span> : null}
-                    {scheduleStaff?.email ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Mail className="h-3.5 w-3.5" />
-                        {scheduleStaff.email}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-lg border bg-blue-50 px-4 py-3 text-sm">
-                <p className="font-semibold text-blue-900">{staffAppointments.length} appointments</p>
-                <p className="text-blue-700">
-                  {scheduleDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-                </p>
-              </div>
-            </div>
-          </DialogHeader>
+      <StaffAttendanceModal
+        open={isAttendanceDialogOpen}
+        attendance={attendanceForm}
+        month={attendanceMonth}
+        isSaving={isSavingAttendance}
+        onOpenChange={setIsAttendanceDialogOpen}
+        onAttendanceChange={setAttendanceForm}
+        onSave={handleAttendanceSave}
+      />
 
-          <div className="flex-1 overflow-auto p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const newDate = new Date(scheduleDate);
-                  newDate.setMonth(newDate.getMonth() - 1);
-                  handleScheduleMonthChange(newDate);
-                }}
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" />
-                Previous
-              </Button>
-              <h3 className="text-xl font-bold text-gray-900">
-                {scheduleDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </h3>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const newDate = new Date(scheduleDate);
-                  newDate.setMonth(newDate.getMonth() + 1);
-                  handleScheduleMonthChange(newDate);
-                }}
-              >
-                Next
-                <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-
-            {isLoadingSchedule ? (
-              <div className="rounded-2xl bg-white text-center py-16 text-muted-foreground">
-                <div className="inline-block">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                  Loading schedule...
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <div className="grid grid-cols-7 gap-2">
-                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                    <div key={day} className="text-center text-sm font-semibold text-muted-foreground py-2">
-                      {day}
-                    </div>
-                  ))}
-
-                  {(() => {
-                    const year = scheduleDate.getFullYear();
-                    const month = scheduleDate.getMonth();
-                    const firstDay = new Date(year, month, 1);
-                    const lastDay = new Date(year, month + 1, 0);
-                    const daysInMonth = lastDay.getDate();
-                    const startingDay = firstDay.getDay();
-
-                    const days = [];
-
-                    // Empty cells for days before the first day of the month
-                    for (let i = 0; i < startingDay; i++) {
-                      days.push(
-                        <div key={`empty-${i}`} className="min-h-[76px] sm:min-h-[100px] bg-gray-50 rounded-xl"></div>
-                      );
-                    }
-
-                    // Days of the month
-                    for (let day = 1; day <= daysInMonth; day++) {
-                      const currentDate = new Date(year, month, day);
-                      const appointments = getAppointmentsForDate(currentDate);
-                      const isToday = new Date().toDateString() === currentDate.toDateString();
-
-                      days.push(
-                        <div
-                          key={day}
-                          className={`min-h-[86px] sm:min-h-[112px] rounded-xl border p-2 transition-colors ${
-                            isToday ? 'border-blue-500 bg-blue-50' : appointments.length ? 'border-blue-100 bg-white' : 'border-gray-200 bg-gray-50/60'
-                          }`}
-                        >
-                          <div className={`text-sm font-bold mb-2 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                            {day}
-                          </div>
-                          <div className="space-y-1">
-                            {appointments.slice(0, 3).map((apt, idx) => (
-                              <button
-                                key={apt.id || `${apt.date}-${apt.time}-${idx}`}
-                                type="button"
-                                onClick={() => openScheduleAppointment(apt)}
-                                className="flex w-full items-center gap-1 rounded-md bg-blue-100 px-1.5 py-1 text-left text-[11px] font-semibold text-blue-800 transition-colors hover:bg-blue-200"
-                                title={`${formatTime(apt.time)} - ${apt.patientName}`}
-                              >
-                                <Clock className="h-3 w-3 shrink-0" />
-                                <span className="truncate">{formatTime(apt.time)}</span>
-                              </button>
-                            ))}
-                            {appointments.length > 3 && (
-                              <div className="text-xs font-medium text-muted-foreground">
-                                +{appointments.length - 3} more
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return days;
-                  })()}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="font-semibold mb-3 flex items-center gap-2 text-gray-900">
-                    <Calendar className="h-4 w-4" />
-                    Upcoming appointments ({upcomingStaffAppointments.length})
-                  </h4>
-                  {upcomingStaffAppointments.length === 0 ? (
-                    <p className="rounded-2xl border bg-white py-10 text-center text-sm text-muted-foreground">
-                      No upcoming appointments scheduled
-                    </p>
-                  ) : (
-                    <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
-                      {upcomingStaffAppointments
-                        .map((apt, idx) => (
-                          <button
-                            key={apt.id || `${apt.date}-${apt.time}-${idx}`}
-                            type="button"
-                            onClick={() => openScheduleAppointment(apt)}
-                            className="flex w-full items-center justify-between gap-4 rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/50"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="min-w-[54px] text-center">
-                                <div className="text-lg font-bold text-blue-600">
-                                  {new Date(apt.date + 'T00:00:00').getDate()}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {new Date(apt.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
-                                </div>
-                              </div>
-                              <div>
-                                <p className="font-medium">{apt.patientName}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  <Clock className="h-3 w-3 inline mr-1" />
-                                  {formatTime(apt.time)}
-                                  {apt.duration && ` - ${apt.duration} min`}
-                                </p>
-                              </div>
-                            </div>
-                            <Badge className={getAppointmentStatusClass(apt.status)}>
-                              {apt.status}
-                            </Badge>
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StaffScheduleModal
+        open={isScheduleDialogOpen}
+        staff={scheduleStaff}
+        scheduleDate={scheduleDate}
+        appointments={staffAppointments}
+        isLoading={isLoadingSchedule}
+        onOpenChange={setIsScheduleDialogOpen}
+        onOpenAppointment={openScheduleAppointment}
+      />
 
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}

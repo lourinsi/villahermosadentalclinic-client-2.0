@@ -9,6 +9,9 @@ export interface Patient {
   firstName?: string;
   lastName?: string;
   dateOfBirth?: string;
+  birthDate?: string;
+  dob?: string;
+  birthday?: string;
   address?: string;
   city?: string;
   zipCode?: string;

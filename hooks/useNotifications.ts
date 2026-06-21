@@ -28,7 +28,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
   const [nextOffset, setNextOffset] = useState(0);
   const enabled = options?.enabled ?? true;
   const includeDeleted = options?.includeDeleted ?? false;
-  const limit = options?.limit ?? (includeDeleted ? undefined : 20);
+  const limit = options?.limit ?? 10;
 
   const userId = user?.patientId || user?.staffId || user?.username;
 

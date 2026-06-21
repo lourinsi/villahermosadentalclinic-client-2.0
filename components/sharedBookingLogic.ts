@@ -1,4 +1,5 @@
 import { apiUrl } from "@/lib/api";
+import React, { useEffect, useRef } from "react";
 import {
   CART_APPOINTMENT_STATUS,
   CART_APPOINTMENT_STATUS_LABEL,
@@ -26,7 +27,7 @@ type Toast = { error?: (msg: string) => void } | ((msg: string) => void);
 
 type BookingFlow = 'details-payment' | 'multi-step';
 type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
-type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
+type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | 'receptionist' | '';
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past' | 'edit';
 
@@ -48,6 +49,27 @@ export function parseLocalDateOnly(dateInput?: Date | string | null): Date | nul
     const year = Number(dateMatch[1]);
     const month = Number(dateMatch[2]);
     const day = Number(dateMatch[3]);
+    const date = new Date(year, month - 1, day);
+
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+
+    return null;
+  }
+
+  const slashDateMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+
+  if (slashDateMatch) {
+    const first = Number(slashDateMatch[1]);
+    const second = Number(slashDateMatch[2]);
+    const year = Number(slashDateMatch[3]);
+    const day = first > 12 ? first : second > 12 ? second : first;
+    const month = first > 12 ? second : second > 12 ? first : second;
     const date = new Date(year, month - 1, day);
 
     if (
@@ -121,6 +143,7 @@ export type BookingStatusOption = {
 export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS;
 
 export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS;
+const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
 
 export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
@@ -181,6 +204,9 @@ export type BookingSlot = {
   time: string;
 };
 
+const isRecord = (value: unknown): value is Record<string, any> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
 export function getBookingAppointmentTypeIndex(typeName: string): number {
   const typeMap: Record<string, number> = {
     "Routine Cleaning": 0,
@@ -217,9 +243,10 @@ export function formatBookingHistoryStatusLabel(value?: unknown) {
 
   const labels: Record<string, string> = {
     "add-to-cart": "Add to Cart",
-    "half-paid": "Half Paid",
+    "half paid": "Partial",
+    "half-paid": "Partial",
+    "half_paid": "Partial",
     "paid": "Fully Paid",
-    "pay-at-clinic": "Pay at Clinic",
     "tbd": "TBD",
   };
 
@@ -267,12 +294,12 @@ const normalizeBookingHistoryNotes = (value?: unknown) => {
 export function getBookingHistoryNotes(log: any) {
   if (!log) return "";
 
+  const topLevelNotes = normalizeBookingHistoryNotes(log.notes);
+  if (topLevelNotes) return topLevelNotes;
+
   if (hasHistoryNotesField(log.newState)) {
     return normalizeBookingHistoryNotes(log.newState.notes);
   }
-
-  const topLevelNotes = normalizeBookingHistoryNotes(log.notes);
-  if (topLevelNotes) return topLevelNotes;
 
   if (hasHistoryNotesField(log.previousState)) {
     return normalizeBookingHistoryNotes(log.previousState.notes);
@@ -382,15 +409,25 @@ export function getBookingPaymentStatusConfig<T extends BookingStatusOption>({
   fallbackStatusOptions?: T[];
 }) {
   const currentPaymentStatusValue = normalizePaymentStatus(paymentStatus || existingStatus || "unpaid");
-  const fetchedPaymentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
-  const basePaymentStatusOptions = [
-    ...fetchedPaymentStatusOptions,
-    ...fallbackStatusOptions.filter(
-      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === fallbackStatus.value)
-    ),
-  ];
+  const sourcePaymentStatusOptions = statusOptions.length > 0
+    ? [...statusOptions, ...fallbackStatusOptions]
+    : fallbackStatusOptions;
+  const basePaymentStatusOptions = sourcePaymentStatusOptions.reduce<T[]>((options, status) => {
+    const normalizedValue = normalizePaymentStatus(status.value);
+    if (
+      !normalizedValue ||
+      HIDDEN_PAYMENT_STATUS_VALUES.has(normalizedValue) ||
+      options.some((option) => normalizePaymentStatus(option.value) === normalizedValue)
+    ) {
+      return options;
+    }
+
+    return [...options, status];
+  }, []);
+  const isHiddenCurrentPaymentStatus = HIDDEN_PAYMENT_STATUS_VALUES.has(currentPaymentStatusValue);
   const paymentStatusOptions =
     currentPaymentStatusValue &&
+    !isHiddenCurrentPaymentStatus &&
     !basePaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === currentPaymentStatusValue)
       ? [
           buildCurrentStatusOption<T>(
@@ -430,6 +467,40 @@ export function getBookingDefaultDate(defaultDate?: Date | null) {
 
 export function getBookingDefaultTime(defaultTime?: string | null) {
   return defaultTime ?? "";
+}
+
+export type UseBookingPaymentPrefillArgs = {
+  open: boolean;
+  modalStep: BookingStep;
+  amountToPay: string;
+  remainingBalance: number;
+  setAmountToPay: (value: string) => void;
+};
+
+export function useBookingPaymentPrefill({
+  open,
+  modalStep,
+  amountToPay,
+  remainingBalance,
+  setAmountToPay,
+}: UseBookingPaymentPrefillArgs) {
+  const paymentAmountPrefilledRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) {
+      paymentAmountPrefilledRef.current = false;
+      return;
+    }
+
+    if (modalStep !== "payment" || remainingBalance <= 0 || paymentAmountPrefilledRef.current) return;
+    if (amountToPay.trim() !== "") {
+      paymentAmountPrefilledRef.current = true;
+      return;
+    }
+
+    setAmountToPay(String(remainingBalance));
+    paymentAmountPrefilledRef.current = true;
+  }, [open, modalStep, amountToPay, remainingBalance, setAmountToPay]);
 }
 
 export function getBookingEditDate({
@@ -570,7 +641,7 @@ export async function findNextAvailableBookingSlot({
 }: {
   startDate: Date;
   doctorToCheck: string;
-  durationToCheck: string;
+  durationToCheck: string | number;
   patientToCheck?: string;
   timeSlots: string[];
   maxDaysToCheck?: number;
@@ -640,10 +711,22 @@ export async function findNextAvailableBookingSlot({
           patientAppointmentsForDate = localPatientAppointmentsForDate;
         }
 
+        patientAppointmentsForDate = patientAppointmentsForDate.filter(
+          (appointment) => appointment.status !== "cancelled" && !isCartAppointmentStatus(appointment.status)
+        );
+
         console.log(`[${logPrefix}] findNextAvailableSlot fetched patient appointments for`, dateStr, {
           patientToCheck,
           patientCount: patientAppointmentsForDate.length,
         });
+      }
+
+      if (patientAppointmentsForDate.length > 0) {
+        console.log(`[${logPrefix}] Blocking date for patient because an appointment already exists`, dateStr, {
+          patientToCheck,
+          patientCount: patientAppointmentsForDate.length,
+        });
+        return [];
       }
 
       const now = new Date();
@@ -717,6 +800,39 @@ export async function findNextAvailableBookingSlot({
   return null;
 }
 
+export async function findNextAvailableRepeatSlot({
+  startDate,
+  doctorToCheck,
+  durationToCheck,
+  patientToCheck,
+  timeToCheck,
+  maxDaysToCheck = 30,
+  availabilityMode = "authenticated",
+  localBlockingAppointments = [],
+}: {
+  startDate: Date;
+  doctorToCheck: string;
+  durationToCheck: string | number;
+  patientToCheck?: string;
+  timeToCheck: string;
+  maxDaysToCheck?: number;
+  availabilityMode?: "authenticated" | "public";
+  localBlockingAppointments?: any[];
+}): Promise<BookingSlot | null> {
+  if (!timeToCheck) return null;
+
+  return findNextAvailableBookingSlot({
+    startDate,
+    doctorToCheck,
+    durationToCheck,
+    patientToCheck,
+    timeSlots: [timeToCheck],
+    maxDaysToCheck,
+    availabilityMode,
+    localBlockingAppointments,
+  });
+}
+
 export function getBookingActor({
   userRole,
   bookingMode = 'standard',
@@ -728,9 +844,10 @@ export function getBookingActor({
 }) {
   const isPublicBookingMode = bookingMode === 'public';
   const effectiveRole = (isPublicBookingMode ? 'public' : userRole || '') as BookingActorRole;
-  const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor';
+  const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor' || effectiveRole === 'receptionist';
   const isPatientLevelBookingMode = effectiveRole === 'patient' || effectiveRole === 'public';
   const canManageStatuses = Boolean(effectiveRole) && !isPatientLevelBookingMode;
+  const canManagePaymentStatuses = effectiveRole === 'admin';
 
   return {
     effectiveRole,
@@ -740,6 +857,7 @@ export function getBookingActor({
     canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
     canManagePricing: isStaffBookingMode,
     canManageStatuses,
+    canManagePaymentStatuses,
     // Doctors should have the doctor selection locked in the doctor portal
     // (they should not be able to pick other doctors). Keep this true
     // regardless of editing mode so the doctor step is hidden for doctors.
@@ -779,6 +897,7 @@ type UseSharedBookingLogicArgs = {
   toast: Toast;
   durationConflict?: string;
   patientConflict?: string;
+  patientDateConflict?: string;
   skipDoctorStep?: boolean;
   allowConflictSummary?: boolean;
   scheduleMode?: BookingCreationMode;
@@ -821,6 +940,40 @@ export function getBookingSummaryNotes(notes?: string | null) {
   return {
     hasNotes: text.length > 0,
     text: text || 'No notes added.',
+  };
+}
+
+export function normalizeBookingTreatmentNotes(notes?: unknown) {
+  return String(notes ?? '').trim();
+}
+
+export function getBookingTreatmentNotesValue(appointment?: any) {
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+
+    if (source.treatmentNotes !== undefined && source.treatmentNotes !== null) {
+      return normalizeBookingTreatmentNotes(source.treatmentNotes);
+    }
+
+    if (source.treatment_notes !== undefined && source.treatment_notes !== null) {
+      return normalizeBookingTreatmentNotes(source.treatment_notes);
+    }
+  }
+
+  return "";
+}
+
+export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown) {
+  return {
+    treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),
   };
 }
 
@@ -896,10 +1049,6 @@ export function getProjectedPaymentStatus({
   previouslyPaidAmount: number;
   totalPrice: number;
 }) {
-  if (String(paymentMethod || '').trim().toLowerCase() === 'pay at clinic') {
-    return 'pay-at-clinic';
-  }
-
   if (statusChangedByUser) {
     return selectedStatus || existingStatus || 'unpaid';
   }
@@ -940,6 +1089,7 @@ export default function useSharedBookingLogic({
   toast,
   durationConflict,
   patientConflict,
+  patientDateConflict,
   skipDoctorStep = false,
   allowConflictSummary = false,
   scheduleMode = 'standard',
@@ -972,8 +1122,23 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (patientDateConflict) {
+      safeToastError(toast, patientDateConflict);
+      return false;
+    }
+
     if (patientConflict) {
       safeToastError(toast, patientConflict);
+      return false;
+    }
+
+    return true;
+  }
+
+  function validateSelectedDate() {
+    const appointmentDate = parseLocalDateOnly(selectedDate);
+    if (!appointmentDate) {
+      safeToastError(toast, 'Please choose a valid date for the appointment.');
       return false;
     }
 
@@ -986,6 +1151,7 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (!validateSelectedDate()) return false;
     if (!validateScheduleWindow()) return false;
 
     return validateScheduleAvailability();
@@ -997,6 +1163,7 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (!validateSelectedDate()) return false;
     return validateScheduleWindow();
   }
 

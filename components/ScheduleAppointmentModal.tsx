@@ -11,6 +11,7 @@ import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
@@ -33,6 +34,7 @@ export function ScheduleAppointmentModal() {
     appointments
   } = useAppointmentModal();
   const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
 
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
   const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
@@ -80,13 +82,13 @@ export function ScheduleAppointmentModal() {
       }
 
       // If the user is a doctor or admin, show the slot picker first
-      if (user?.role === "doctor" || user?.role === "admin") {
+      if (effectiveRole === "doctor" || effectiveRole === "admin") {
         setShowSlotPicker(true);
       } else {
         setShowSlotPicker(false);
       }
     }
-  }, [isScheduleModalOpen, reloadDoctors, user]);
+  }, [effectiveRole, isScheduleModalOpen, reloadDoctors, user]);
 
   // Fetch all appointments for the selected date to check for clinic-wide conflicts
   // This bypasses view filters to ensure global conflict detection
@@ -229,7 +231,7 @@ export function ScheduleAppointmentModal() {
         </DialogHeader>
         
         {/* If doctor or admin, first show a compact date + available slots picker. Once a slot is chosen, show the full form. */}
-        {(user?.role === "doctor" || user?.role === "admin") && showSlotPicker ? (
+        {(effectiveRole === "doctor" || effectiveRole === "admin") && showSlotPicker ? (
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-transparent">
               <div className="p-4 bg-white rounded-l-[1rem] border border-gray-50 shadow-sm">

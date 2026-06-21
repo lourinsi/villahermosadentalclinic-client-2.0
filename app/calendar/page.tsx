@@ -1,7 +1,5 @@
-"use client";
-
-import PublicCalendarPage from "@/components/PublicCalendarPage";
+import { redirect } from "next/navigation";
 
 export default function CalendarPage() {
-  return <PublicCalendarPage />;
+  redirect("/");
 }

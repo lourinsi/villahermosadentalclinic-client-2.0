@@ -21,7 +21,11 @@ import { Notification, NotificationType } from "../lib/notification-types";
 import { format } from "date-fns";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { useDoctors } from "../hooks/useDoctors";
+import PatientAvatar from "./PatientAvatar";
+// Avoid fetching global doctors list per-notification — prefer images embedded
+// in the notification metadata (notificationImage) or doctorProfile. See
+// server-side change suggestions below.
+import { formatPaymentStatusLabel } from "@/lib/status-colors";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +57,9 @@ type NotificationChangeSummaryItem = {
 };
 
 const ignoredChangeFields = new Set(["changedAt", "updatedAt"]);
+
+const isPaymentStatusField = (field: string) =>
+  field.replace(/[\s_-]+/g, "").toLowerCase() === "paymentstatus";
 
 const labelForChangeField = (field: string) => {
   const labels: Record<string, string> = {
@@ -109,10 +116,18 @@ const getNotificationChangeSummary = (notification: Notification): NotificationC
   });
 };
 
+const formatEmbeddedPaymentStatusText = (text: string) =>
+  text.replace(/\bhalf[\s_-]+paid\b/gi, () => formatPaymentStatusLabel("half-paid").toLowerCase());
+
+const formatChangeStatusValue = (change: NotificationChangeSummaryItem, value: string) =>
+  isPaymentStatusField(change.field) ? formatPaymentStatusLabel(value) : value;
+
 const formatChangeValue = (change: NotificationChangeSummaryItem) => {
-  if (change.from && change.to) return `${change.from} -> ${change.to}`;
-  if (change.to) return `Now ${change.to}`;
-  if (change.from) return `Was ${change.from}`;
+  if (change.from && change.to) {
+    return `${formatChangeStatusValue(change, change.from)} -> ${formatChangeStatusValue(change, change.to)}`;
+  }
+  if (change.to) return `Now ${formatChangeStatusValue(change, change.to)}`;
+  if (change.from) return `Was ${formatChangeStatusValue(change, change.from)}`;
   return "Updated";
 };
 
@@ -131,15 +146,19 @@ export function NotificationItem({
   portal,
   variant = 'full'
 }: NotificationItemProps) {
-  const { doctors } = useDoctors();
+  // Do not fetch global doctors here to avoid triggering `/api/staff` on every
+  // rendered notification. Prefer an explicit `notification.metadata.notificationImage`
+  // or `notification.metadata.doctorProfile` provided when the notification is
+  // created on the server. We'll fall back to DiceBear avatars.
   const isCompact = variant === 'compact';
 
   const statusRaw = (notification.metadata?.currentStatus || '').toString().toLowerCase();
   const status = statusRaw.replace(/[\s-]/g, '');
   const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
   const isLog = notification.isLog;
-  const appointmentId = notification.metadata?.appointmentId;
+  const appointmentId = (notification as any).appointmentId || notification.metadata?.appointmentId;
   const changeSummary = getNotificationChangeSummary(notification);
+  const displayMessage = formatEmbeddedPaymentStatusText(notification.message);
   const hasStatusChange = changeSummary.some((change) => change.field === "status");
   const isCreatedRequest = Boolean(notification.metadata?.isRequest && changeSummary.length === 0);
   const shouldShowAppointmentActions = Boolean(
@@ -162,15 +181,12 @@ export function NotificationItem({
 
   const avatarSrc = (() => {
     try {
-      if (notification.type === 'appointment' || notification.type === 'payment') {
-        const meta: any = notification.metadata || {};
-        if (meta.doctorProfile) return meta.doctorProfile;
-        const doctorKey = meta.doctor || meta.doctorId || meta.doctorName;
-        if (doctorKey && Array.isArray(doctors)) {
-          const doc = doctors.find((d: any) => String(d.id) === String(doctorKey) || String(d.name) === String(doctorKey));
-          if (doc) return doc.profilePicture || (doc as any).profilePictureUrl || undefined;
-        }
-      }
+      const meta: any = notification.metadata || {};
+      // Prefer a top-level `notificationImage` column (added server-side),
+      // then fall back to metadata fields.
+      if ((notification as any).notificationImage) return (notification as any).notificationImage;
+      if (meta.notificationImage) return meta.notificationImage;
+      if (meta.doctorProfile) return meta.doctorProfile;
     } catch (e) {}
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`;
   })();
@@ -225,10 +241,14 @@ export function NotificationItem({
   return (
     <div className={itemClasses} onClick={handleItemClick}>
       <div className="relative flex-shrink-0">
-        <Avatar className={`${isCompact ? 'h-12 w-12' : 'h-14 w-14'} border border-gray-100`}>
-          <AvatarImage src={avatarSrc} />
-          <AvatarFallback>{notification.title.substring(0, 2).toUpperCase()}</AvatarFallback>
-        </Avatar>
+        {notification.metadata?.patientName || notification.metadata?.patientId ? (
+          <PatientAvatar src={avatarSrc} name={notification.metadata?.patientName || notification.title} dob={notification.metadata?.patientDateOfBirth || notification.metadata?.patientDob || notification.metadata?.patientBirthDate || notification.metadata?.patientBirthday} className={`${isCompact ? 'h-12 w-12' : 'h-14 w-14'} border border-gray-100`} sizeClass={`${isCompact ? 'h-12 w-12' : 'h-14 w-14'}`} />
+        ) : (
+          <Avatar className={`${isCompact ? 'h-12 w-12' : 'h-14 w-14'} border border-gray-100`}>
+            <AvatarImage src={avatarSrc} />
+            <AvatarFallback>{notification.title.substring(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+        )}
         <div className={`absolute -bottom-1 -right-1 ${isCompact ? 'p-0.5' : 'p-1'} rounded-full border-2 border-white ${getIconBg(notification.type as NotificationType)}`}>
           {getIcon(notification.type as NotificationType)}
         </div>
@@ -238,7 +258,7 @@ export function NotificationItem({
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <p className={`${isCompact ? 'text-xs line-clamp-3' : 'text-sm'} leading-snug ${!notification.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
-              {notification.message}
+              {displayMessage}
             </p>
             {isLog && (
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full ${isCompact ? 'text-[10px]' : 'text-xs'} font-medium bg-gray-200 text-gray-700 flex-shrink-0`}>

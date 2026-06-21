@@ -1,20 +1,7 @@
-"use client";
+import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 
-import DoctorLayout from "@/components/DoctorLayout";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import { usePathname } from "next/navigation";
-
-export default function Layout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const isLoginPage = pathname === "/doctor/login";
-
-  if (isLoginPage) {
-    return <>{children}</>;
-  }
-
-  return (
-    <ProtectedRoute allowedRoles={["doctor", "admin"]}>
-      <DoctorLayout>{children}</DoctorLayout>
-    </ProtectedRoute>
-  );
+export default function DoctorLayout({ children }: { children: ReactNode }) {
+  void children;
+  redirect("/admin/dashboard");
 }

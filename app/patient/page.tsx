@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function PatientIndexPage() {
-  redirect("/patient/dashboard");
+  redirect("/admin/dashboard");
 }

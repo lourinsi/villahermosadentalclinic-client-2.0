@@ -4,8 +4,9 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound, AlertTriangle, CheckCircle2, RefreshCw, History } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
@@ -13,7 +14,13 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { formatBookingHistoryStatusLabel, normalizeBookingHistoryStatus, isSignificantBookingPaymentStatus } from "./sharedBookingLogic";
+import {
+  formatBookingHistoryStatusLabel,
+  formatBookingDateKey,
+  getBookingTreatmentNotesValue,
+  normalizeBookingHistoryStatus,
+} from "./sharedBookingLogic";
+
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
@@ -280,6 +287,19 @@ const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
 const isLogSnapshot = (snapshot: any) =>
   Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState || snapshot?._isHistorical);
 
+
+const parseBookingDateTime = (date?: unknown, time?: unknown) => {
+  const dateKey = formatBookingDateKey(date as any);
+  if (!dateKey) return NaN;
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if ([year, month, day].some((part) => Number.isNaN(part))) return NaN;
+  const [hours, minutes] = String(time || "").split(":").map((part) => Number(part));
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return new Date(year, month - 1, day).getTime();
+  }
+  return new Date(year, month - 1, day, hours, minutes).getTime();
+};
+
 const isPatientChange = (snapshot: any) => {
   const prev = snapshot?.previousState;
   const next = snapshot?.newState;
@@ -310,6 +330,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
+  const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
   const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
@@ -332,6 +353,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : Boolean(isHistorical);
     setSnapshotState(derivedHistorical ? "historical" : "current");
   }, [appointmentSnapshot, isHistorical]);
+
+  useEffect(() => {
+    if (!open) {
+      setSnapshotHistory([]);
+    }
+  }, [open]);
+
+  const pushSnapshotHistory = (snapshot: any, state: SnapshotState) => {
+    if (!snapshot) return;
+    setSnapshotHistory((prev) => [...prev, { snapshot, snapshotState: state }]);
+  };
+
+  const goBackSnapshot = () => {
+    const lastEntry = snapshotHistory[snapshotHistory.length - 1];
+    if (!lastEntry) return;
+    setSnapshotHistory((prev) => prev.slice(0, -1));
+    setDisplayedSnapshot(lastEntry.snapshot);
+    setSnapshotState(lastEntry.snapshotState);
+    setLatestComparisonSnapshot(null);
+  };
 
   useEffect(() => {
     const patientId = String(displayedPatientId || "").trim();
@@ -486,6 +527,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
   const patientName = getAppointmentPatientDisplayName(displayedSnapshot, patientRecord);
   const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
+  const snapshotPatientDob =
+    displayedSnapshot?.patientDateOfBirth ||
+    displayedSnapshot?.patient?.dateOfBirth ||
+    displayedSnapshot?.patient?.birthDate ||
+    displayedSnapshot?.patient?.dob ||
+    displayedSnapshot?.patient?.birthday ||
+    displayedSnapshot?.patientBirthDate ||
+    displayedSnapshot?.patientBirthday;
   const rawDisplayedDoctorName = resolveDoctorName(displayedSnapshot.doctor || displayedSnapshot.doctorName || displayedSnapshot.doctorId);
   const doctorRecord = findDoctorForSnapshot(doctors, displayedSnapshot) || doctors.find((doctor: any) =>
     String(doctor.id) === String(displayedSnapshot.doctorId || rawDisplayedDoctorName) ||
@@ -506,7 +555,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const resolvedDoctorImage = resolveImageSource(pickImageSource(doctorImage));
 
-  // Prepare previous / next state values for explicit change lines
+  if (!displayedSnapshot) return null;
+
   const prevState = displayedSnapshot?.previousState || null;
   const nextState = displayedSnapshot?.newState || displayedSnapshot || null;
 
@@ -665,6 +715,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? latestStateForComparison.notes || (latestStateForComparison.status === 'cancelled' ? latestStateForComparison.cancellationReason || "" : "")
     : undefined;
   const displayedNotesText = displayedNotesComparisonText || "No additional notes provided for this snapshot.";
+  const displayedTreatmentNotesComparisonText = getBookingTreatmentNotesValue(displayedSnapshot);
+  const latestTreatmentNotesComparisonText = latestStateForComparison
+    ? getBookingTreatmentNotesValue(latestStateForComparison)
+    : undefined;
+  const displayedTreatmentNotesText = displayedTreatmentNotesComparisonText || "No treatment notes provided for this snapshot.";
 
   const statusCurrentChange = createCurrentFieldChange(
     "status",
@@ -757,6 +812,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     displayedNotesComparisonText || "No notes",
     latestNotesComparisonText || "No notes"
   );
+  const treatmentNotesCurrentChange = createCurrentFieldChange(
+    "treatment notes",
+    displayedTreatmentNotesComparisonText,
+    latestTreatmentNotesComparisonText,
+    displayedTreatmentNotesComparisonText || "No treatment notes",
+    latestTreatmentNotesComparisonText || "No treatment notes"
+  );
 
   const currentFieldChanges = [
     statusCurrentChange,
@@ -771,6 +833,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     totalPaidCurrentChange,
     cancellationReasonCurrentChange,
     notesCurrentChange,
+    treatmentNotesCurrentChange,
   ];
   const hasLaterChanges = Boolean(
     latestStateForComparison &&
@@ -796,12 +859,65 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
 
   const viewLatestSnapshot = () => {
+    if (!displayedSnapshot) return;
+    pushSnapshotHistory(displayedSnapshot, snapshotState);
+
     if (appointmentId && typeof onViewCurrent === "function") {
       onViewCurrent(appointmentId);
       return;
     }
 
     fetchLatestLogSnapshot();
+  };
+
+  const fetchLatestLogSnapshotForAppointment = async (targetAppointmentId: string) => {
+    if (!targetAppointmentId) {
+      toast.error("No appointment id available for logs");
+      return;
+    }
+
+    if (displayedSnapshot) {
+      pushSnapshotHistory(displayedSnapshot, snapshotState);
+    }
+
+    setIsFetchingLogs(true);
+    try {
+      const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(targetAppointmentId)}/logs`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload?.message || "Failed to fetch appointment logs");
+        return;
+      }
+
+      const logs = Array.isArray(payload.data) ? payload.data : [];
+      if (!logs.length) {
+        toast.error("No logs found for this appointment");
+        return;
+      }
+
+      const latest = logs[0];
+      const snap = latest.newState && Object.keys(latest.newState).length > 0 ? latest.newState : latest.previousState;
+      if (!snap) {
+        toast.error("No snapshot data available in latest log");
+        return;
+      }
+
+      snap.id = snap.id || targetAppointmentId;
+      snap.changedAt = latest.changedAt;
+      snap.changedByName = latest.changedByName;
+
+      setDisplayedSnapshot(snap);
+      setSnapshotState("current");
+      setLatestComparisonSnapshot(null);
+    } catch (err) {
+      console.error("Failed to load logs:", err);
+      toast.error("Failed to load appointment logs");
+    } finally {
+      setIsFetchingLogs(false);
+    }
   };
 
   // Action handlers mirroring RequestsView behavior
@@ -911,32 +1027,45 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       <DialogContent className="w-[95vw] sm:max-w-[480px] overflow-hidden p-0 sm:p-0 rounded-[2.5rem]">
         <DialogHeader className="bg-white border-b border-slate-50">
           <div className="flex w-full flex-col gap-2 p-5 pb-3 pr-10 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex-1 min-w-0 pr-2">
-              <DialogTitle className="flex flex-wrap items-center gap-2 text-primary">
-                <Clock className="w-4 h-4 shrink-0" />
-                <span className="text-base tracking-tight font-black">Snapshot</span>
-                {showsLogSnapshotState ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 cursor-help ${stateBadgeClass}`}>
-                        <StateIcon className="h-3 w-3" />
-                        {stateLabel}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-[220px] text-center bg-amber-50 text-amber-800 border-amber-200">
-                      {stateTooltipText}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${stateBadgeClass}`}>
-                    <StateIcon className="h-3 w-3" />
-                    {stateLabel}
-                  </span>
-                )}
-              </DialogTitle>
-              <DialogDescription className="truncate text-[10px] font-medium text-slate-400 mt-0.5 uppercase tracking-widest">
-                {timestampPrefix} {snapshotDate}{changeSuffix ? ` • ${changeSuffix}` : ""}
-              </DialogDescription>
+            <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+              {snapshotHistory.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 w-8 rounded-full p-0 text-slate-600 hover:bg-slate-100"
+                  title="Go back to previous snapshot"
+                  onClick={goBackSnapshot}
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </Button>
+              ) : null}
+              <div className="min-w-0">
+                <DialogTitle className="flex flex-wrap items-center gap-2 text-primary">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span className="text-base tracking-tight font-black">Snapshot</span>
+                  {showsLogSnapshotState ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 cursor-help ${stateBadgeClass}`}>
+                          <StateIcon className="h-3 w-3" />
+                          {stateLabel}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[220px] text-center bg-amber-50 text-amber-800 border-amber-200">
+                        {stateTooltipText}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${stateBadgeClass}`}>
+                      <StateIcon className="h-3 w-3" />
+                      {stateLabel}
+                    </span>
+                  )}
+                </DialogTitle>
+                <DialogDescription className="truncate text-[10px] font-medium text-slate-400 mt-0.5 uppercase tracking-widest">
+                  {timestampPrefix} {snapshotDate}{changeSuffix ? ` • ${changeSuffix}` : ""}
+                </DialogDescription>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0 sm:ml-2">
@@ -1030,12 +1159,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           {/* Participants - More compact */}
           <div className="bg-white p-3 rounded-[1.25rem] border border-slate-200/50 shadow-sm grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2.5">
-              <Avatar className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0">
-                <AvatarImage src={resolvedPatientImage} alt={patientName} className="object-cover" />
-                <AvatarFallback className="rounded-xl bg-slate-50">
-                  <UserRound className="w-4 h-4 text-blue-400" />
-                </AvatarFallback>
-              </Avatar>
+              <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-9 w-9 rounded-xl border border-slate-50 shadow-sm shrink-0" sizeClass="h-9 w-9 rounded-xl" />
               <div className="min-w-0">
                 <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest mb-0.5 block">Patient</Label>
                 <div className="flex min-w-0 items-center gap-1">
@@ -1178,7 +1302,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </div>
               )}
 
-              {totalPaidAmount !== null ? (
+              {/* {totalPaidAmount !== null ? (
                 <div className="flex justify-between items-center pt-1.5 border-t border-slate-50">
                   <span className="inline-flex items-center gap-1.5 text-slate-400 font-bold text-[9px] uppercase tracking-wider">
                     Total Paid
@@ -1186,7 +1310,20 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </span>
                   <span className="font-black text-slate-800 text-[12px]">₱{Number(totalPaidAmount).toLocaleString()}</span>
                 </div>
-              ) : null}
+              ) : null} */}
+
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-2.5">
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <History className="w-2.5 h-2.5 text-blue-400" />
+                  <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest">Treatment Notes</Label>
+                  <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
+                </div>
+                <p className={`max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-[10px] font-medium leading-relaxed custom-scrollbar ${
+                  displayedTreatmentNotesComparisonText ? "text-slate-600" : "text-slate-400 italic"
+                }`}>
+                  {displayedTreatmentNotesText}
+                </p>
+              </div>
             </div>
           </div>
 

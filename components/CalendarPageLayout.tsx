@@ -7,7 +7,6 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
 import { CalendarView } from "./CalendarView";
 import { Suspense } from "react";
-import PastAppointmentButton from "./PastAppointmentButton";
 import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 interface CalendarPageLayoutProps {
@@ -17,7 +16,7 @@ interface CalendarPageLayoutProps {
 }
 
 export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: CalendarPageLayoutProps) {
-  const { openCreateModal, appointments } = useAppointmentModal();
+  const { openCreateModal, appointments, refreshAppointments } = useAppointmentModal();
   const { user } = useAuth();
   const router = useRouter();
 
@@ -123,12 +122,6 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {(portal === "admin" || portal === "doctor") && (
-            <PastAppointmentButton
-              doctorName={portal === "doctor" ? user?.username : doctorName}
-              className="rounded-xl"
-            />
-          )}
           <Button 
             onClick={onClick}
             data-tour-id={`${portal}-calendar-new-appointment`}
@@ -139,7 +132,7 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
           </Button>
         </div>
       </div>
-      
+
       {/* Calendar */}
       <Suspense fallback={<div>Loading calendar...</div>}>
         <CalendarView 

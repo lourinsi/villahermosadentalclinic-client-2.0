@@ -1,11 +1,5 @@
-"use client";
-
-import { useParams } from "next/navigation";
-import PublicDoctorAvailabilityPage from "@/components/PublicDoctorAvailabilityPage";
+import { redirect } from "next/navigation";
 
 export default function DoctorAvailabilityPage() {
-  const params = useParams();
-  const doctorName = decodeURIComponent(params.name as string);
-
-  return <PublicDoctorAvailabilityPage doctorName={doctorName} />;
+  redirect("/");
 }
