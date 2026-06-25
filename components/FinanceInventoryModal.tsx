@@ -24,6 +24,7 @@ type FinanceInventoryModalProps = {
   mode: FinanceInventoryModalMode;
   form: InventoryForm;
   isSaving: boolean;
+  fieldErrors?: Partial<Record<keyof InventoryForm, string>>;
   historyLogs?: FinanceHistoryLog[];
   isHistoryLoading?: boolean;
   inventoryItems?: InventoryLookupItem[];
@@ -111,6 +112,7 @@ export function FinanceInventoryModal({
   mode,
   form,
   isSaving,
+  fieldErrors = {},
   historyLogs = [],
   isHistoryLoading = false,
   inventoryItems = [],
@@ -122,6 +124,9 @@ export function FinanceInventoryModal({
   const [isCreatingSupplier, setIsCreatingSupplier] = useState(false);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<InventoryForm>) => onFormChange({ ...form, ...updates });
+  const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
+  const renderFieldError = (field: keyof InventoryForm) =>
+    fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
 
   useEffect(() => {
     if (!open) {
@@ -215,7 +220,8 @@ export function FinanceInventoryModal({
                   id="inventory-name"
                   placeholder="e.g., Nitrile gloves"
                   value={form.item}
-                  className={existingItemMatch ? "border-amber-400 focus-visible:ring-amber-500" : undefined}
+                  className={fieldErrors.item ? errorClassName : existingItemMatch ? "border-amber-400 focus-visible:ring-amber-500" : undefined}
+                  aria-invalid={Boolean(fieldErrors.item)}
                   onChange={(event) => updateForm({ item: event.target.value })}
                 />
               </TooltipTrigger>
@@ -223,15 +229,25 @@ export function FinanceInventoryModal({
                 Did you mean {existingItemMatch?.item}? It already exists in your inventory.
               </TooltipContent>
             </Tooltip>
+            {renderFieldError("item")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="inventory-quantity">Quantity</Label>
-            <Input id="inventory-quantity" type="number" min="0" value={form.quantity} onChange={(event) => updateForm({ quantity: Number(event.target.value) })} />
+            <Input
+              id="inventory-quantity"
+              type="number"
+              min="0"
+              value={form.quantity}
+              className={fieldErrors.quantity ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.quantity)}
+              onChange={(event) => updateForm({ quantity: Number(event.target.value) })}
+            />
+            {renderFieldError("quantity")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="inventory-unit">Unit</Label>
             <Select value={form.unit} onValueChange={(unit) => updateForm({ unit })}>
-              <SelectTrigger id="inventory-unit">
+              <SelectTrigger id="inventory-unit" className={fieldErrors.unit ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.unit)}>
                 <SelectValue placeholder="Select unit" />
               </SelectTrigger>
               <SelectContent>
@@ -242,10 +258,20 @@ export function FinanceInventoryModal({
                 ))}
               </SelectContent>
             </Select>
+            {renderFieldError("unit")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="inventory-cost">Unit Cost (PHP)</Label>
-            <Input id="inventory-cost" type="number" min="0" value={form.costPerUnit} onChange={(event) => updateForm({ costPerUnit: Number(event.target.value) })} />
+            <Input
+              id="inventory-cost"
+              type="number"
+              min="0"
+              value={form.costPerUnit}
+              className={fieldErrors.costPerUnit ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.costPerUnit)}
+              onChange={(event) => updateForm({ costPerUnit: Number(event.target.value) })}
+            />
+            {renderFieldError("costPerUnit")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="inventory-supplier">Supplier</Label>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { History, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
@@ -35,6 +36,7 @@ type FinanceExpenseModalProps = {
   inventoryItems: ExpenseInventoryItem[];
   vendorOptions: string[];
   canManageStatus?: boolean;
+  fieldErrors?: Partial<Record<keyof ExpenseForm, string>>;
   historyLogs?: FinanceHistoryLog[];
   isHistoryLoading?: boolean;
   originalInventoryItemId?: string;
@@ -71,6 +73,7 @@ export function FinanceExpenseModal({
   inventoryItems,
   vendorOptions,
   canManageStatus = true,
+  fieldErrors = {},
   historyLogs = [],
   isHistoryLoading = false,
   originalInventoryItemId = "",
@@ -82,6 +85,9 @@ export function FinanceExpenseModal({
   const [isCreatingVendor, setIsCreatingVendor] = useState(false);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
+  const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
+  const renderFieldError = (field: keyof ExpenseForm) =>
+    fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
   const selectedInventoryItem = inventoryItems.find((item) => item.id === form.inventoryItemId);
   const linkedQuantity = Number(form.inventoryQuantity) || 0;
   const savedInventoryItemId = String(originalInventoryItemId || "").trim();
@@ -207,7 +213,7 @@ export function FinanceExpenseModal({
           <div className="space-y-2">
             <Label htmlFor="expense-category">Category</Label>
             <Select value={form.category} onValueChange={(value) => updateForm({ category: value })}>
-              <SelectTrigger id="expense-category">
+              <SelectTrigger id="expense-category" className={fieldErrors.category ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.category)}>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
@@ -218,10 +224,19 @@ export function FinanceExpenseModal({
                 ))}
               </SelectContent>
             </Select>
+            {renderFieldError("category")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="expense-date">Date</Label>
-            <Input id="expense-date" type="date" value={form.date} onChange={(event) => updateForm({ date: event.target.value })} />
+            <Input
+              id="expense-date"
+              type="date"
+              value={form.date}
+              className={fieldErrors.date ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.date)}
+              onChange={(event) => updateForm({ date: event.target.value })}
+            />
+            {renderFieldError("date")}
           </div>
           <div className="space-y-2 sm:col-span-2">
             <Label htmlFor="expense-description">Description</Label>
@@ -229,12 +244,24 @@ export function FinanceExpenseModal({
               id="expense-description"
               placeholder="e.g., Crown prep lab fee"
               value={form.description}
+              className={fieldErrors.description ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.description)}
               onChange={(event) => updateForm({ description: event.target.value })}
             />
+            {renderFieldError("description")}
           </div>
           <div className="space-y-2">
             <Label htmlFor="expense-amount">Amount (PHP)</Label>
-            <Input id="expense-amount" type="number" min="0" value={form.amount} onChange={(event) => updateForm({ amount: Number(event.target.value) })} />
+            <Input
+              id="expense-amount"
+              type="number"
+              min="0"
+              value={form.amount}
+              className={fieldErrors.amount ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.amount)}
+              onChange={(event) => updateForm({ amount: Number(event.target.value) })}
+            />
+            {renderFieldError("amount")}
             {mode === "create" && selectedInventoryItem ? (
               <p className="text-xs text-muted-foreground">
                 This is the total receipt amount for all units, not the per-unit price.
@@ -307,13 +334,17 @@ export function FinanceExpenseModal({
             {!canManageStatus ? (
               <div
                 id="expense-status"
-                className="flex h-10 items-center rounded-md border bg-yellow-50 px-3 text-sm font-medium text-yellow-800"
+                className={cn(
+                  "flex h-10 items-center rounded-md border bg-yellow-50 px-3 text-sm font-medium text-yellow-800",
+                  fieldErrors.status && "border-red-500 bg-red-50 text-red-700"
+                )}
+                aria-invalid={Boolean(fieldErrors.status)}
               >
                 {form.status ? form.status.charAt(0).toUpperCase() + form.status.slice(1) : "Pending"}
               </div>
             ) : (
               <Select value={form.status} onValueChange={(value) => updateForm({ status: value })}>
-                <SelectTrigger id="expense-status">
+                <SelectTrigger id="expense-status" className={fieldErrors.status ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.status)}>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -325,6 +356,7 @@ export function FinanceExpenseModal({
                 </SelectContent>
               </Select>
             )}
+            {renderFieldError("status")}
           </div>
           <div className="space-y-4 rounded-md border bg-gray-50 p-4 sm:col-span-2">
             <div>
@@ -339,7 +371,7 @@ export function FinanceExpenseModal({
               <div className="space-y-2">
                 <Label htmlFor="expense-stock-item">Stock Item</Label>
                 <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
-                  <SelectTrigger id="expense-stock-item">
+                  <SelectTrigger id="expense-stock-item" className={fieldErrors.inventoryItemId ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.inventoryItemId)}>
                     <SelectValue placeholder="No stock item" />
                   </SelectTrigger>
                   <SelectContent>
@@ -360,8 +392,11 @@ export function FinanceExpenseModal({
                   min="0"
                   disabled={!selectedInventoryItem}
                   value={form.inventoryQuantity}
+                  className={fieldErrors.inventoryQuantity ? errorClassName : undefined}
+                  aria-invalid={Boolean(fieldErrors.inventoryQuantity)}
                   onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
                 />
+                {renderFieldError("inventoryQuantity")}
               </div>
             </div>
             {selectedInventoryItem ? (

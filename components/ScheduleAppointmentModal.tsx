@@ -22,6 +22,8 @@ import { DoctorCalendar } from "./DoctorCalendar";
 import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 
+type ScheduleFieldErrors = Partial<Record<"patientName" | "date" | "time" | "type" | "customType" | "doctor", string>>;
+
 export function ScheduleAppointmentModal() {
   const {
     isScheduleModalOpen,
@@ -42,7 +44,9 @@ export function ScheduleAppointmentModal() {
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [dateError, setDateError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<ScheduleFieldErrors>({});
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: isScheduleModalOpen });
+  const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
 
   const [formData, setFormData] = useState({
     date: "",
@@ -60,6 +64,15 @@ export function ScheduleAppointmentModal() {
   const [showSlotPicker, setShowSlotPicker] = useState<boolean>(false);
   const [selectedSlot, setSelectedSlot] = useState<string>("");
 
+  const clearFieldError = (field: keyof ScheduleFieldErrors) => {
+    setFieldErrors((currentErrors) => {
+      if (!currentErrors[field]) return currentErrors;
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[field];
+      return nextErrors;
+    });
+  };
+
   // Update formData when patientName or patientId props change
   useEffect(() => {
     if (newAppointmentPatientName || newAppointmentPatientId) {
@@ -75,6 +88,7 @@ export function ScheduleAppointmentModal() {
   useEffect(() => {
     if (isScheduleModalOpen) {
       reloadDoctors();
+      setFieldErrors({});
       
       // Update doctor if logged in as doctor
       if (user?.role === "doctor") {
@@ -141,7 +155,17 @@ export function ScheduleAppointmentModal() {
     console.log("PatientName prop:", newAppointmentPatientName);
     console.log("PatientId prop:", newAppointmentPatientId);
 
-    if (!formData.patientName || !formData.date || !formData.time || formData.type === -1 || !formData.doctor) {
+    const errors: ScheduleFieldErrors = {};
+    if (!formData.patientName) errors.patientName = "Select a patient.";
+    if (!formData.date) errors.date = "Choose a date.";
+    if (!formData.time) errors.time = "Choose a time.";
+    if (formData.type === -1) errors.type = "Choose an appointment type.";
+    if (formData.type === APPOINTMENT_TYPES.length - 1 && !formData.customType.trim()) {
+      errors.customType = "Enter the custom appointment type.";
+    }
+    if (!formData.doctor) errors.doctor = "Choose a doctor.";
+
+    if (Object.keys(errors).length > 0) {
       console.error("Validation failed - missing required fields:", {
         patientName: formData.patientName,
         date: formData.date,
@@ -149,9 +173,12 @@ export function ScheduleAppointmentModal() {
         type: formData.type,
         doctor: formData.doctor
       });
+      setFieldErrors(errors);
       toast.error("Please complete all required fields");
       return;
     }
+
+    setFieldErrors({});
 
     // Check if date has error
     if (dateError) {
@@ -197,6 +224,7 @@ export function ScheduleAppointmentModal() {
       
       console.log("Closing modal and resetting form...");
       closeScheduleModal();
+      setFieldErrors({});
       setFormData({
         date: "",
         time: "",
@@ -332,10 +360,11 @@ export function ScheduleAppointmentModal() {
                   const found = patients.find(p => p.id === value);
                   if (found) {
                     setFormData(prev => ({ ...prev, patientId: found.id, patientName: found.name }));
+                    clearFieldError("patientName");
                   }
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className={fieldErrors.patientName ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.patientName)}>
                   <SelectValue placeholder="Select patient" />
                 </SelectTrigger>
                 <SelectContent>
@@ -348,6 +377,7 @@ export function ScheduleAppointmentModal() {
                   )}
                 </SelectContent>
               </Select>
+              {fieldErrors.patientName ? <p className="text-xs font-medium text-red-600">{fieldErrors.patientName}</p> : null}
             </div>
           )}
 
@@ -357,6 +387,8 @@ export function ScheduleAppointmentModal() {
               <Input
                 type="date"
                 value={formData.date}
+                className={(fieldErrors.date || dateError) ? errorClassName : undefined}
+                aria-invalid={Boolean(fieldErrors.date || dateError)}
                 onChange={(e) => {
                   const selectedDate = new Date(`${e.target.value}T00:00:00`);
                   const today = new Date();
@@ -369,10 +401,12 @@ export function ScheduleAppointmentModal() {
                   }
                   
                   setFormData(prev => ({ ...prev, date: e.target.value }));
+                  clearFieldError("date");
                 }}
                 min={formatDateToYYYYMMDD(new Date())}
                 required
               />
+              {fieldErrors.date ? <p className="text-xs font-medium text-red-600">{fieldErrors.date}</p> : null}
               {dateError && <p className="text-red-500 text-sm">{dateError}</p>}
             </div>
             <div className="space-y-2">
@@ -383,10 +417,11 @@ export function ScheduleAppointmentModal() {
                   const index = parseInt(value);
                   if (index >= 0) {
                     setFormData(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                    clearFieldError("time");
                   }
                 }}
               >
-                <SelectTrigger id="time">
+                <SelectTrigger id="time" className={fieldErrors.time ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.time)}>
                   <SelectValue placeholder="Select time" />
                 </SelectTrigger>
                 <SelectContent>
@@ -400,6 +435,7 @@ export function ScheduleAppointmentModal() {
                   })}
                 </SelectContent>
               </Select>
+              {fieldErrors.time ? <p className="text-xs font-medium text-red-600">{fieldErrors.time}</p> : null}
             </div>
           </div>
 
@@ -429,9 +465,13 @@ export function ScheduleAppointmentModal() {
             <Label>Appointment Type</Label>
             <Select
               value={formData.type === -1 ? "" : formData.type.toString()}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, type: parseInt(value), customType: "" }))}
+              onValueChange={(value) => {
+                setFormData(prev => ({ ...prev, type: parseInt(value), customType: "" }));
+                clearFieldError("type");
+                clearFieldError("customType");
+              }}
             >
-              <SelectTrigger>
+              <SelectTrigger className={fieldErrors.type ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.type)}>
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
@@ -440,6 +480,7 @@ export function ScheduleAppointmentModal() {
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors.type ? <p className="text-xs font-medium text-red-600">{fieldErrors.type}</p> : null}
           </div>
 
           {formData.type === APPOINTMENT_TYPES.length - 1 && (
@@ -448,9 +489,15 @@ export function ScheduleAppointmentModal() {
               <Input
                 placeholder="Enter custom appointment type"
                 value={formData.customType}
-                onChange={(e) => setFormData(prev => ({ ...prev, customType: e.target.value }))}
+                className={fieldErrors.customType ? errorClassName : undefined}
+                aria-invalid={Boolean(fieldErrors.customType)}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, customType: e.target.value }));
+                  clearFieldError("customType");
+                }}
                 required
               />
+              {fieldErrors.customType ? <p className="text-xs font-medium text-red-600">{fieldErrors.customType}</p> : null}
             </div>
           )}
           
@@ -458,10 +505,13 @@ export function ScheduleAppointmentModal() {
             <Label>Doctor</Label>
             <Select
               value={formData.doctor}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, doctor: value }))}
+              onValueChange={(value) => {
+                setFormData(prev => ({ ...prev, doctor: value }));
+                clearFieldError("doctor");
+              }}
               disabled={isLoadingDoctors || user?.role === "doctor"}
             >
-              <SelectTrigger>
+              <SelectTrigger className={fieldErrors.doctor ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.doctor)}>
                 <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : user?.role === "doctor" ? `${user.username}` : "Select doctor"} />
               </SelectTrigger>
               <SelectContent>
@@ -480,6 +530,7 @@ export function ScheduleAppointmentModal() {
                 )}
               </SelectContent>
             </Select>
+            {fieldErrors.doctor ? <p className="text-xs font-medium text-red-600">{fieldErrors.doctor}</p> : null}
           </div>
           
           <div className="space-y-2">
