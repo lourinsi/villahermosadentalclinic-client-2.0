@@ -21,6 +21,7 @@ type FinanceInventoryReorderModalProps = {
   form: ReorderForm;
   isSaving: boolean;
   formatCurrency: (amount?: number) => string;
+  fieldErrors?: Partial<Record<keyof ReorderForm, string>>;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ReorderForm) => void;
   onSave: () => void;
@@ -31,6 +32,7 @@ export function FinanceInventoryReorderModal({
   form,
   isSaving,
   formatCurrency,
+  fieldErrors = {},
   onOpenChange,
   onFormChange,
   onSave,
@@ -65,8 +67,13 @@ export function FinanceInventoryReorderModal({
                 id="stock-quantity"
                 type="number"
                 value={form.quantityToAdd}
+                className={fieldErrors.quantityToAdd ? "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500" : undefined}
+                aria-invalid={Boolean(fieldErrors.quantityToAdd)}
                 onChange={(event) => onFormChange({ quantityToAdd: Number(event.target.value) })}
               />
+              {fieldErrors.quantityToAdd ? (
+                <p className="text-xs font-medium text-red-600">{fieldErrors.quantityToAdd}</p>
+              ) : null}
               <p className="text-xs text-muted-foreground">Use positive numbers to add stock, negative numbers to reduce stock.</p>
             </div>
 

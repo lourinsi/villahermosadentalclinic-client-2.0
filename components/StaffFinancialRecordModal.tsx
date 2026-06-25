@@ -27,6 +27,7 @@ type StaffFinancialRecordModalProps = {
   staffMembers: Staff[];
   isSaving: boolean;
   formatCurrency: (amount?: number) => string;
+  fieldErrors?: Partial<Record<keyof StaffFinancialRecordForm, string>>;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: StaffFinancialRecordForm) => void;
   onSave: () => void;
@@ -39,6 +40,7 @@ export function StaffFinancialRecordModal({
   staffMembers,
   isSaving,
   formatCurrency,
+  fieldErrors = {},
   onOpenChange,
   onFormChange,
   onSave,
@@ -48,7 +50,9 @@ export function StaffFinancialRecordModal({
   const selectedStaff = staffOptions.find((staff) => String(staff.id) === String(form.staffId));
   const typeDescription = getFinancialTypeDescription(form.type);
   const isCashAdvance = form.type === "cash_advance";
-  const hasRequiredFields = Boolean(form.staffId && form.type && form.date && Number(form.amount) > 0);
+  const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
+  const renderFieldError = (field: keyof StaffFinancialRecordForm) =>
+    fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,7 +73,7 @@ export function StaffFinancialRecordModal({
           <div className="space-y-2 sm:col-span-2">
             <Label htmlFor="staff-financial-staff">Staff Member</Label>
             <Select value={form.staffId} onValueChange={(value) => updateForm({ staffId: value })}>
-              <SelectTrigger id="staff-financial-staff">
+              <SelectTrigger id="staff-financial-staff" className={fieldErrors.staffId ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.staffId)}>
                 <SelectValue placeholder="Select staff member" />
               </SelectTrigger>
               <SelectContent>
@@ -80,12 +84,13 @@ export function StaffFinancialRecordModal({
                 ))}
               </SelectContent>
             </Select>
+            {renderFieldError("staffId")}
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="staff-financial-type">Transaction Type</Label>
             <Select value={form.type} onValueChange={(value) => updateForm({ type: value })}>
-              <SelectTrigger id="staff-financial-type">
+              <SelectTrigger id="staff-financial-type" className={fieldErrors.type ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.type)}>
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
@@ -96,6 +101,7 @@ export function StaffFinancialRecordModal({
                 ))}
               </SelectContent>
             </Select>
+            {renderFieldError("type")}
             {typeDescription ? <p className="text-xs text-muted-foreground">{typeDescription}</p> : null}
           </div>
 
@@ -144,8 +150,11 @@ export function StaffFinancialRecordModal({
               placeholder="500"
               {...staffPasswordManagerIgnoreProps}
               value={form.amount}
+              className={fieldErrors.amount ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.amount)}
               onChange={(event) => updateForm({ amount: Number(event.target.value) })}
             />
+            {renderFieldError("amount")}
           </div>
 
           <div className="space-y-2">
@@ -155,8 +164,11 @@ export function StaffFinancialRecordModal({
               type="date"
               {...staffPasswordManagerIgnoreProps}
               value={form.date}
+              className={fieldErrors.date ? errorClassName : undefined}
+              aria-invalid={Boolean(fieldErrors.date)}
               onChange={(event) => updateForm({ date: event.target.value })}
             />
+            {renderFieldError("date")}
           </div>
 
           <div className="space-y-2 sm:col-span-2">
@@ -209,7 +221,7 @@ export function StaffFinancialRecordModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSave} disabled={isSaving || !hasRequiredFields}>
+          <Button onClick={onSave} disabled={isSaving}>
             {isSaving ? "Saving..." : mode === "edit" ? "Save Changes" : "Add Transaction"}
           </Button>
         </DialogFooter>

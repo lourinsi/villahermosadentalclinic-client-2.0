@@ -5,13 +5,14 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { useAuth } from "@/hooks/useAuth";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -43,6 +44,9 @@ import {
   getPayrollMonthOptions,
   resolveOptionValue,
   todayDate,
+  type ExpenseForm,
+  type InventoryForm,
+  type ReorderForm,
 } from "./financeModalOptions";
 import { 
   DollarSign, 
@@ -360,6 +364,10 @@ type StaffRecordUpdate = {
   baseSalary?: number;
 };
 
+type ExpenseFieldErrors = Partial<Record<keyof ExpenseForm, string>>;
+type InventoryFieldErrors = Partial<Record<keyof InventoryForm, string>>;
+type ReorderFieldErrors = Partial<Record<keyof ReorderForm, string>>;
+
 const MANAGED_PAYROLL_ADJUSTMENT_PREFIX = "[payroll-adjustment]";
 
 const resolvePayrollFormDate = (payrollMonth: string, entry?: PayrollEntry | null) =>
@@ -469,24 +477,28 @@ export interface RecentTransaction {
 }
 
 export function FinanceView() {
-  const { user } = useAuth();
+  const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
-  const canManageExpenseStatus = normalizeFilterValue(user?.role) === "admin";
+  const canManageExpenseStatus = normalizeFilterValue(effectiveRole) === "admin";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
+  const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
   const [inventoryForm, setInventoryForm] = useState(createEmptyInventoryItem);
+  const [inventoryFieldErrors, setInventoryFieldErrors] = useState<InventoryFieldErrors>({});
   const [inventoryChangesToReview, setInventoryChangesToReview] = useState<InventoryChange[]>([]);
   const [inventoryItemToReorder, setInventoryItemToReorder] = useState<InventoryItem | null>(null);
   const [reorderForm, setReorderForm] = useState(createEmptyReorderForm);
+  const [reorderFieldErrors, setReorderFieldErrors] = useState<ReorderFieldErrors>({});
   const [inventoryStockFilter, setInventoryStockFilter] = useState("all");
   const [selectedPayrollMonth, setSelectedPayrollMonth] = useState(currentPayrollMonthKey);
   const [payrollModalMode, setPayrollModalMode] = useState<FinancePayrollModalMode | null>(null);
   const [selectedPayrollEntry, setSelectedPayrollEntry] = useState<PayrollEntry | null>(null);
+  const [payrollEntryToUnpay, setPayrollEntryToUnpay] = useState<PayrollEntry | null>(null);
   const [payrollPaymentDate, setPayrollPaymentDate] = useState(todayDate());
   const [isPayrollBonusModalOpen, setIsPayrollBonusModalOpen] = useState(false);
   const [payrollBonusForm, setPayrollBonusForm] = useState(() => createPayrollBonusForm(currentPayrollMonthKey()));
@@ -725,9 +737,23 @@ export function FinanceView() {
     };
   }, [payrollData]);
 
+  const handleExpenseFormChange = (nextForm: ExpenseForm) => {
+    setExpenseFieldErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      (Object.keys(nextErrors) as (keyof ExpenseForm)[]).forEach((field) => {
+        if (nextForm[field] !== expenseForm[field]) {
+          delete nextErrors[field];
+        }
+      });
+      return nextErrors;
+    });
+    setExpenseForm(nextForm);
+  };
+
   const openExpenseModal = (mode: FinanceExpenseModalMode, expense?: DetailedExpense) => {
     setSelectedExpense(expense || null);
     setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
+    setExpenseFieldErrors({});
     resetFinanceHistory();
     if (mode === "edit" && expense?.id) {
       void loadFinanceHistory("expense", { entityId: expense.id });
@@ -739,6 +765,7 @@ export function FinanceView() {
     setExpenseModalMode(null);
     setSelectedExpense(null);
     setExpenseForm(createEmptyExpense());
+    setExpenseFieldErrors({});
     resetFinanceHistory();
   };
 
@@ -748,20 +775,31 @@ export function FinanceView() {
   };
 
   const handleSaveExpense = async () => {
-    if (!expenseForm.category || !expenseForm.description || !expenseForm.date || Number(expenseForm.amount) <= 0) {
+    const requiredErrors: ExpenseFieldErrors = {};
+    if (!expenseForm.category) requiredErrors.category = "Choose a category.";
+    if (!expenseForm.date) requiredErrors.date = "Choose a date.";
+    if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
+    if (Number(expenseForm.amount) <= 0) requiredErrors.amount = "Enter an amount greater than zero.";
+
+    if (Object.keys(requiredErrors).length > 0) {
+      setExpenseFieldErrors(requiredErrors);
       toast.error("Please complete the required expense fields");
       return;
     }
 
     if (expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
+      setExpenseFieldErrors({ inventoryQuantity: "Enter a stock quantity greater than zero." });
       toast.error("Enter the stock quantity to add");
       return;
     }
 
     if (expenseForm.inventoryItemId && normalizeFilterValue(expenseForm.status) === "cancelled") {
+      setExpenseFieldErrors({ status: "Linked stock expenses cannot be cancelled." });
       toast.error("Linked stock expenses must be pending or paid");
       return;
     }
+
+    setExpenseFieldErrors({});
 
     setIsSavingExpense(true);
     try {
@@ -877,9 +915,32 @@ export function FinanceView() {
     downloadCsv(`invoice-summary-${dateKey(new Date())}.csv`, invoiceRows);
   };
 
+  const validateInventoryForm = () => {
+    const errors: InventoryFieldErrors = {};
+    if (!inventoryForm.item.trim()) errors.item = "Enter the item name.";
+    if (Number(inventoryForm.quantity) < 0) errors.quantity = "Quantity cannot be negative.";
+    if (!inventoryForm.unit) errors.unit = "Choose a unit.";
+    if (Number(inventoryForm.costPerUnit) <= 0) errors.costPerUnit = "Enter a unit cost greater than zero.";
+    return errors;
+  };
+
+  const handleInventoryFormChange = (nextForm: InventoryForm) => {
+    setInventoryFieldErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      (Object.keys(nextErrors) as (keyof InventoryForm)[]).forEach((field) => {
+        if (nextForm[field] !== inventoryForm[field]) {
+          delete nextErrors[field];
+        }
+      });
+      return nextErrors;
+    });
+    setInventoryForm(nextForm);
+  };
+
   const openInventoryModal = (mode: FinanceInventoryModalMode, item?: InventoryItem) => {
     setSelectedInventoryItem(item || null);
     setInventoryForm(item ? createInventoryFormFromItem(item) : createEmptyInventoryItem());
+    setInventoryFieldErrors({});
     setInventoryChangesToReview([]);
     resetFinanceHistory();
     if (mode === "edit" && item?.id) {
@@ -893,12 +954,14 @@ export function FinanceView() {
     setSelectedInventoryItem(null);
     setInventoryChangesToReview([]);
     setInventoryForm(createEmptyInventoryItem());
+    setInventoryFieldErrors({});
     resetFinanceHistory();
   };
 
   const openReorderModal = (item: InventoryItem) => {
     setInventoryItemToReorder(item);
     setReorderForm(createEmptyReorderForm());
+    setReorderFieldErrors({});
   };
 
   const buildInventoryChanges = (current: InventoryItem, form: typeof inventoryForm): InventoryChange[] => {
@@ -932,11 +995,14 @@ export function FinanceView() {
   };
 
   const saveInventoryItem = async () => {
-    if (!inventoryForm.item || Number(inventoryForm.quantity) < 0 || !inventoryForm.unit || Number(inventoryForm.costPerUnit) <= 0) {
+    const errors = validateInventoryForm();
+    if (Object.keys(errors).length > 0) {
+      setInventoryFieldErrors(errors);
       toast.error("Please complete the required inventory fields");
       return;
     }
 
+    setInventoryFieldErrors({});
     setIsSavingInventory(true);
     try {
       const isEditingItem = inventoryModalMode === "edit" && selectedInventoryItem;
@@ -970,11 +1036,14 @@ export function FinanceView() {
   };
 
   const handleSaveInventoryItem = async () => {
-    if (!inventoryForm.item || Number(inventoryForm.quantity) < 0 || !inventoryForm.unit || Number(inventoryForm.costPerUnit) <= 0) {
+    const errors = validateInventoryForm();
+    if (Object.keys(errors).length > 0) {
+      setInventoryFieldErrors(errors);
       toast.error("Please complete the required inventory fields");
       return;
     }
 
+    setInventoryFieldErrors({});
     const isEditingItem = inventoryModalMode === "edit" && selectedInventoryItem;
     if (isEditingItem) {
       const changes = buildInventoryChanges(selectedInventoryItem, inventoryForm);
@@ -995,10 +1064,12 @@ export function FinanceView() {
 
   const handleReorderInventoryItem = async () => {
     if (!inventoryItemToReorder || Number(reorderForm.quantityToAdd) === 0) {
+      setReorderFieldErrors({ quantityToAdd: "Enter a positive or negative stock change." });
       toast.error("Please enter a stock change");
       return;
     }
 
+    setReorderFieldErrors({});
     setIsSavingReorder(true);
     try {
       const stockChange = Number(reorderForm.quantityToAdd) || 0;
@@ -1006,6 +1077,7 @@ export function FinanceView() {
       const newQuantity = Number(inventoryItemToReorder.quantity) + stockChange;
 
       if (newQuantity < 0) {
+        setReorderFieldErrors({ quantityToAdd: "Stock change would make inventory negative." });
         toast.error("Stock cannot go below zero");
         return;
       }
@@ -1021,6 +1093,7 @@ export function FinanceView() {
       toast.success("Stock quantity updated");
       setInventoryItemToReorder(null);
       setReorderForm(createEmptyReorderForm());
+      setReorderFieldErrors({});
       await fetchData();
     } catch (error) {
       console.error("Error adding inventory stock:", error);
@@ -1078,6 +1151,7 @@ export function FinanceView() {
   const handlePayrollMonthChange = async (value: string) => {
     setSelectedPayrollMonth(value);
     closePayrollModal();
+    setPayrollEntryToUnpay(null);
     setIsPayrollBonusModalOpen(false);
     setPayrollEntryToEdit(null);
     setPayrollBonusForm(createPayrollBonusForm(value));
@@ -1131,6 +1205,18 @@ export function FinanceView() {
         body: JSON.stringify({
           month: selectedPayrollMonth,
           paymentDate,
+        }),
+      }
+    );
+
+  const unpayPayrollEmployee = (entry: PayrollEntry) =>
+    fetchApiData<PayrollEntry>(
+      `/api/finance/payroll/${encodeURIComponent(entry.id)}/unpay`,
+      "payroll payment reversal",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          month: selectedPayrollMonth,
         }),
       }
     );
@@ -1338,6 +1424,23 @@ export function FinanceView() {
     } catch (error) {
       console.error("Error paying payroll entry:", error);
       toast.error(error instanceof Error ? error.message : "Failed to pay payroll entry");
+    } finally {
+      setIsSavingPayroll(false);
+    }
+  };
+
+  const handleReversePayrollPayment = async () => {
+    if (!payrollEntryToUnpay) return;
+
+    setIsSavingPayroll(true);
+    try {
+      await unpayPayrollEmployee(payrollEntryToUnpay);
+      toast.success(`${payrollEntryToUnpay.name} payment cancelled`);
+      setPayrollEntryToUnpay(null);
+      await fetchData(selectedPayrollMonth);
+    } catch (error) {
+      console.error("Error reversing payroll payment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to reverse payroll payment");
     } finally {
       setIsSavingPayroll(false);
     }
@@ -2086,6 +2189,7 @@ export function FinanceView() {
                           payrollData.map((employee) => {
                             const payrollStatus = normalizeFilterValue(employee.status);
                             const isPaid = payrollStatus === "paid";
+                            const canReversePayment = isPaid && Boolean(employee.salaryRecordId);
                             return (
                               <TableRow key={employee.id}>
                                 <TableCell className="font-medium">{employee.name}</TableCell>
@@ -2121,10 +2225,22 @@ export function FinanceView() {
                                         Pay
                                       </Button>
                                     ) : (
-                                      <span className="inline-flex h-9 items-center gap-1 rounded-md border border-green-200 bg-green-50 px-3 text-sm font-medium text-green-700">
-                                        <CheckCircle2 className="h-3 w-3" />
-                                        Paid
-                                      </span>
+                                      <>
+                                        <span className="inline-flex h-9 items-center gap-1 rounded-md border border-green-200 bg-green-50 px-3 text-sm font-medium text-green-700">
+                                          <CheckCircle2 className="h-3 w-3" />
+                                          Paid
+                                        </span>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          disabled={!canReversePayment}
+                                          title={canReversePayment ? "Cancel this payroll payment" : "No salary payment record to reverse"}
+                                          onClick={() => setPayrollEntryToUnpay(employee)}
+                                        >
+                                          <RotateCcw className="h-3 w-3 mr-1" />
+                                          Unpay
+                                        </Button>
+                                      </>
                                     )}
                                     <Button variant="outline" size="sm" onClick={() => openPayrollBonusModal(employee)}>
                                       <Gift className="h-3 w-3 mr-1" />
@@ -2328,12 +2444,13 @@ export function FinanceView() {
         inventoryItems={inventoryData}
         vendorOptions={expenseVendorOptions}
         canManageStatus={canManageExpenseStatus}
+        fieldErrors={expenseFieldErrors}
         historyLogs={financeHistoryLogs}
         isHistoryLoading={isFinanceHistoryLoading}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         onOpenChange={(open) => !open && closeExpenseModal()}
-        onFormChange={setExpenseForm}
+        onFormChange={handleExpenseFormChange}
         onSave={handleSaveExpense}
       />
       <FinanceExpensePaymentModal
@@ -2354,8 +2471,9 @@ export function FinanceView() {
         isHistoryLoading={isFinanceHistoryLoading}
         inventoryItems={inventoryData}
         currentItemId={selectedInventoryItem?.id}
+        fieldErrors={inventoryFieldErrors}
         onOpenChange={(open) => !open && closeInventoryModal()}
-        onFormChange={setInventoryForm}
+        onFormChange={handleInventoryFormChange}
         onSave={handleSaveInventoryItem}
       />
       <FinanceInventoryChangeReviewModal
@@ -2371,8 +2489,19 @@ export function FinanceView() {
         form={reorderForm}
         isSaving={isSavingReorder}
         formatCurrency={formatCurrency}
-        onOpenChange={(open) => !open && setInventoryItemToReorder(null)}
-        onFormChange={setReorderForm}
+        fieldErrors={reorderFieldErrors}
+        onOpenChange={(open) => {
+          if (!open) {
+            setInventoryItemToReorder(null);
+            setReorderFieldErrors({});
+          }
+        }}
+        onFormChange={(nextForm) => {
+          setReorderFieldErrors((currentErrors) => (
+            nextForm.quantityToAdd !== reorderForm.quantityToAdd ? {} : currentErrors
+          ));
+          setReorderForm(nextForm);
+        }}
         onSave={handleReorderInventoryItem}
       />
       <FinancePayrollBonusModal
@@ -2414,6 +2543,40 @@ export function FinanceView() {
         onProcess={handleProcessPayroll}
         onPay={handlePayPayrollEntry}
       />
+      <Dialog open={Boolean(payrollEntryToUnpay)} onOpenChange={(open) => !open && setPayrollEntryToUnpay(null)}>
+        <DialogContent className="p-0 sm:max-w-md">
+          <div className="border-b bg-gray-50 px-6 py-5">
+            <DialogHeader>
+              <DialogTitle>Cancel Payroll Payment</DialogTitle>
+              <DialogDescription>
+                Move this payroll entry back to pending for {formatPayrollMonthLabel(selectedPayrollMonth)}.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          {payrollEntryToUnpay ? (
+            <div className="space-y-4 px-6 py-5">
+              <div className="rounded-md border bg-white p-4">
+                <div className="font-medium text-gray-900">{payrollEntryToUnpay.name}</div>
+                <div className="mt-1 text-sm text-muted-foreground">{payrollEntryToUnpay.role}</div>
+                <div className="mt-3 text-2xl font-bold">{formatCurrency(payrollEntryToUnpay.total)}</div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This keeps the salary record and history, but changes the payment status back to pending so it can be paid again later.
+              </p>
+            </div>
+          ) : null}
+
+          <DialogFooter className="border-t px-6 py-4">
+            <Button variant="outline" onClick={() => setPayrollEntryToUnpay(null)} disabled={isSavingPayroll}>
+              Keep Paid
+            </Button>
+            <Button variant="destructive" onClick={handleReversePayrollPayment} disabled={isSavingPayroll || !payrollEntryToUnpay}>
+              {isSavingPayroll ? "Cancelling..." : "Cancel Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {

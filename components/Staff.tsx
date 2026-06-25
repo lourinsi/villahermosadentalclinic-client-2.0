@@ -63,6 +63,8 @@ const dateKey = (date: Date) => {
 
 const normalizeFilterValue = normalizeStaffValue;
 
+type StaffFinancialFieldErrors = Partial<Record<keyof StaffFinancialRecordForm, string>>;
+
 const formatCurrency = (amount?: number) =>
   new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -146,6 +148,7 @@ export function StaffView() {
   const [newFinancialRecord, setNewFinancialRecord] = useState<StaffFinancialRecordForm>(
     createEmptyStaffFinancialRecordForm
   );
+  const [newFinancialFieldErrors, setNewFinancialFieldErrors] = useState<StaffFinancialFieldErrors>({});
 
   const [staffData, setStaffData] = useState<Staff[]>([]);
   const [financialRecords, setFinancialRecords] = useState<StaffFinancialRecord[]>([]);
@@ -177,6 +180,7 @@ export function StaffView() {
   const [editFinancialForm, setEditFinancialForm] = useState<StaffFinancialRecordForm>(
     createEmptyStaffFinancialRecordForm
   );
+  const [editFinancialFieldErrors, setEditFinancialFieldErrors] = useState<StaffFinancialFieldErrors>({});
   const [financialActionLoading, setFinancialActionLoading] = useState<string | null>(null);
   const [isSavingNewFinancialRecord, setIsSavingNewFinancialRecord] = useState(false);
   const [isSavingFinancialRecord, setIsSavingFinancialRecord] = useState(false);
@@ -393,11 +397,49 @@ export function StaffView() {
 
   const attendanceTableRows = [...derivedAttendanceRecords, ...orphanAttendanceRecords];
 
+  const validateFinancialRecordForm = (form: StaffFinancialRecordForm, requireAmount = true) => {
+    const errors: StaffFinancialFieldErrors = {};
+    if (!form.staffId) errors.staffId = "Select a staff member.";
+    if (!form.type) errors.type = "Select a transaction type.";
+    if (requireAmount && Number(form.amount) <= 0) errors.amount = "Enter an amount greater than zero.";
+    if (!form.date) errors.date = "Choose a date.";
+    return errors;
+  };
+
+  const updateNewFinancialRecord = (nextForm: StaffFinancialRecordForm) => {
+    setNewFinancialFieldErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      (Object.keys(nextErrors) as (keyof StaffFinancialRecordForm)[]).forEach((field) => {
+        if (nextForm[field] !== newFinancialRecord[field]) {
+          delete nextErrors[field];
+        }
+      });
+      return nextErrors;
+    });
+    setNewFinancialRecord(nextForm);
+  };
+
+  const updateEditFinancialRecord = (nextForm: StaffFinancialRecordForm) => {
+    setEditFinancialFieldErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      (Object.keys(nextErrors) as (keyof StaffFinancialRecordForm)[]).forEach((field) => {
+        if (nextForm[field] !== editFinancialForm[field]) {
+          delete nextErrors[field];
+        }
+      });
+      return nextErrors;
+    });
+    setEditFinancialForm(nextForm);
+  };
+
   const handleAddFinancialRecord = async () => {
-    if (!newFinancialRecord.staffId || !newFinancialRecord.type || !newFinancialRecord.date || Number(newFinancialRecord.amount) <= 0) {
+    const errors = validateFinancialRecordForm(newFinancialRecord);
+    if (Object.keys(errors).length > 0) {
+      setNewFinancialFieldErrors(errors);
       toast.error("Staff member, type, amount, and date are required");
       return;
     }
+    setNewFinancialFieldErrors({});
     setIsSavingNewFinancialRecord(true);
     try {
       const response = await fetch(apiUrl("/api/staff/financials"), {
@@ -415,6 +457,7 @@ export function StaffView() {
         toast.success("Financial record added successfully!");
         setIsAddFinancialDialogOpen(false);
         setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+        setNewFinancialFieldErrors({});
         fetchFinancialRecords();
       } else {
         const errorData = await response.json();
@@ -439,6 +482,7 @@ export function StaffView() {
       notes: record.notes || "",
       repaymentSchedule: record.repaymentSchedule || "",
     });
+    setEditFinancialFieldErrors({});
     setIsEditFinancialDialogOpen(true);
   };
 
@@ -447,6 +491,7 @@ export function StaffView() {
     if (!open) {
       setEditingFinancialRecord(null);
       setEditFinancialForm(createEmptyStaffFinancialRecordForm());
+      setEditFinancialFieldErrors({});
     }
   };
 
@@ -480,10 +525,13 @@ export function StaffView() {
 
   const handleUpdateFinancialRecord = async () => {
     if (!editingFinancialRecord) return;
-    if (!editFinancialForm.staffId || !editFinancialForm.type || !editFinancialForm.date) {
+    const errors = validateFinancialRecordForm(editFinancialForm, false);
+    if (Object.keys(errors).length > 0) {
+      setEditFinancialFieldErrors(errors);
       toast.error("Please complete all required fields");
       return;
     }
+    setEditFinancialFieldErrors({});
     setIsSavingFinancialRecord(true);
     try {
       const response = await fetch(apiUrl(`/api/staff/financials/${editingFinancialRecord.id}`), {
@@ -1287,11 +1335,15 @@ export function StaffView() {
         staffMembers={staffData}
         isSaving={isSavingNewFinancialRecord}
         formatCurrency={formatCurrency}
+        fieldErrors={newFinancialFieldErrors}
         onOpenChange={(open) => {
           setIsAddFinancialDialogOpen(open);
-          if (!open) setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+          if (!open) {
+            setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+            setNewFinancialFieldErrors({});
+          }
         }}
-        onFormChange={setNewFinancialRecord}
+        onFormChange={updateNewFinancialRecord}
         onSave={handleAddFinancialRecord}
       />
 
@@ -1302,8 +1354,9 @@ export function StaffView() {
         staffMembers={staffData}
         isSaving={isSavingFinancialRecord}
         formatCurrency={formatCurrency}
+        fieldErrors={editFinancialFieldErrors}
         onOpenChange={handleFinancialEditDialogChange}
-        onFormChange={setEditFinancialForm}
+        onFormChange={updateEditFinancialRecord}
         onSave={handleUpdateFinancialRecord}
       />
 
