@@ -801,6 +801,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
   const patientPhotoInputId = React.useId();
   const patientDisplayName = [formData.firstName, formData.lastName].filter(Boolean).join(" ") || patient.name || "Patient";
+  const rawPatientIdForBooking = patient.id || loadedPatient.id;
+  const patientIdForBooking = rawPatientIdForBooking ? String(rawPatientIdForBooking) : undefined;
   const patientInitials = patientDisplayName
     .split(" ")
     .filter(Boolean)
@@ -2420,7 +2422,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       size="sm"
                       type="button"
                       variant="outline"
-                      onClick={() => openCreateModal()}
+                      onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
                       className="gap-2 font-semibold"
                     >
                       <Plus className="h-4 w-4" />

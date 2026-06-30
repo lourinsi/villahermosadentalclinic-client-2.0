@@ -96,6 +96,55 @@ export function isPastAppointmentDate(dateInput?: Date | string | null, now: Dat
   return appointmentDate.getTime() < today.getTime();
 }
 
+const parseBookingTimeParts = (timeInput?: string | null) => {
+  const value = String(timeInput || '').trim();
+  if (!value) return null;
+
+  const match = /^(\d{1,2}):(\d{2})(?:\s*([ap]m))?$/i.exec(value);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const period = match[3]?.toLowerCase();
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  if (period) {
+    if (hours < 1 || hours > 12) return null;
+    if (period === 'pm' && hours !== 12) hours += 12;
+    if (period === 'am' && hours === 12) hours = 0;
+  } else if (hours < 0 || hours > 23) {
+    return null;
+  }
+
+  return { hours, minutes };
+};
+
+export function getBookingAppointmentDateTime(
+  dateInput?: Date | string | null,
+  timeInput?: string | null
+) {
+  const appointmentDate = parseLocalDateOnly(dateInput);
+  const timeParts = parseBookingTimeParts(timeInput);
+  if (!appointmentDate || !timeParts) return null;
+
+  appointmentDate.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+  return appointmentDate;
+}
+
+export function isPastAppointmentSchedule(
+  dateInput?: Date | string | null,
+  timeInput?: string | null,
+  now: Date = new Date()
+) {
+  const appointmentDateTime = getBookingAppointmentDateTime(dateInput, timeInput);
+  if (appointmentDateTime) return appointmentDateTime.getTime() <= now.getTime();
+
+  return isPastAppointmentDate(dateInput, now);
+}
+
 export function isPastAppointmentStatusValue(status?: string | null): status is PastAppointmentStatus {
   return PAST_APPOINTMENT_STATUS_VALUES.includes(
     String(status || '').toLowerCase().trim() as PastAppointmentStatus
@@ -173,6 +222,9 @@ export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
   "Extraction": 60,
   "Whitening": 60,
   "Other": 30,
+  "Dentures": 60,
+  "Crowns": 90,
+  "Braces": 90,
 };
 
 type DefaultScheduleAction =
@@ -216,6 +268,9 @@ export function getBookingAppointmentTypeIndex(typeName: string): number {
     "Extraction": 4,
     "Whitening": 5,
     "Other": 6,
+    "Dentures": 7,
+    "Crowns": 8,
+    "Braces": 9,
   };
   return typeMap[typeName] ?? 6;
 }

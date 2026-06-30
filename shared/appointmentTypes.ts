@@ -12,7 +12,12 @@ export const APPOINTMENT_TYPES = [
   "Extraction",
   "Whitening",
   "Other",
+  "Dentures",
+  "Crowns",
+  "Braces",
 ];
+
+export const OTHER_APPOINTMENT_TYPE_INDEX = 6;
 
 export const APPOINTMENT_PRICES: Record<string, number> = {
   "Routine Cleaning": 1500,
@@ -22,6 +27,9 @@ export const APPOINTMENT_PRICES: Record<string, number> = {
   "Extraction": 1500,
   "Whitening": 3000,
   "Other": 0,
+  "Dentures": 10000,
+  "Crowns": 8000,
+  "Braces": 50000,
 };
 
 export const APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
@@ -32,14 +40,15 @@ export const APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
   "Extraction": 60,
   "Whitening": 60,
   "Other": 30,
+  "Dentures": 60,
+  "Crowns": 90,
+  "Braces": 90,
 };
 
 export const getAppointmentTypeName = (typeIndex: number, customType?: string): string => {
-  // Type 6 (index) is the "Other" type
-  if (typeIndex === 6) {
+  if (typeIndex === OTHER_APPOINTMENT_TYPE_INDEX) {
     return customType || "Other";
   }
-  // For types 0-5, return the standard type name
   return APPOINTMENT_TYPES[typeIndex] || "Unknown";
 };
 

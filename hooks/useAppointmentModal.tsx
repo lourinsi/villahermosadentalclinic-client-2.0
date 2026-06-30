@@ -3,7 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
-import { BookingCreationMode, isPastAppointmentDate } from "@/components/sharedBookingLogic";
+import { BookingCreationMode, isPastAppointmentSchedule } from "@/components/sharedBookingLogic";
 import { useAppointments, Appointment, AppointmentFilters } from "./useAppointments";
 
 interface AppointmentModalContextType {
@@ -22,7 +22,7 @@ interface AppointmentModalContextType {
   newAppointmentDoctorName?: string;
   newAppointmentServiceType?: string;
   newAppointmentCreationMode?: BookingCreationMode;
-  openCreateModal: (date?: Date, time?: string, doctorName?: string) => void;
+  openCreateModal: (date?: Date, time?: string, doctorName?: string, defaultPatientId?: string) => void;
   closeCreateModal: () => void;
   openScheduleModal: (patientName?: string, patientId?: string) => void;
   closeScheduleModal: () => void;
@@ -97,13 +97,14 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  const openCreateModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
+  const openCreateModal = useCallback((date?: Date, time?: string, doctorName?: string, defaultPatientId?: string) => {
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
     setNewAppointmentDoctorName(doctorName ?? "");
-    // If a date is provided and it's a past date, open the modal in 'past' creation mode.
+    setNewAppointmentPatientId(defaultPatientId);
+    // If a selected schedule has already passed, open the modal in 'past' creation mode.
     try {
-      const creationMode: BookingCreationMode = isPastAppointmentDate(date) ? "past" : "standard";
+      const creationMode: BookingCreationMode = isPastAppointmentSchedule(date, time) ? "past" : "standard";
       setNewAppointmentCreationMode(creationMode);
     } catch (err) {
       setNewAppointmentCreationMode("standard");
@@ -113,6 +114,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
 
   const closeCreateModal = useCallback(() => {
     setCreateModalOpen(false);
+    setNewAppointmentPatientId(undefined);
     setNewAppointmentCreationMode("standard");
   }, []);
 

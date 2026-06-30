@@ -1033,9 +1033,9 @@ export function StaffView() {
                           </TableCell>
                           <TableCell>
                             <div className="flex space-x-2">
-                              <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)} title="View Details">
+                              {/* <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)} title="View Details">
                                 <Eye className="h-3 w-3" />
-                              </Button>
+                              </Button> */}
                               <Button variant="outline" size="sm" onClick={() => openScheduleDialog(staff)} title="View Schedule">
                                 <CalendarDays className="h-3 w-3" />
                               </Button>

@@ -45,8 +45,9 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
     selectedAppointment,
     isPatientFieldReadOnly,
     newAppointmentDate,
-    newAppointmentTime
-  , newAppointmentCreationMode
+    newAppointmentTime,
+    newAppointmentPatientId,
+    newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -228,6 +229,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             appointmentToEdit={selectedAppointment}
             defaultDate={newAppointmentDate}
             defaultTime={newAppointmentTime}
+            defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
             appointmentCreationMode={newAppointmentCreationMode}
           />
         )}

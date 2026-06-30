@@ -783,18 +783,10 @@ export function UserTour() {
     setIsMounted(true);
 
     const storedActive = localStorage.getItem(ACTIVE_KEY) === "true";
-    const storedStep = Number(localStorage.getItem(STEP_KEY) || "0");
-    const completed = localStorage.getItem(COMPLETED_KEY) === "true";
 
     if (storedActive) {
       localStorage.removeItem(ACTIVE_KEY);
       localStorage.removeItem(STEP_KEY);
-    }
-
-    if (!storedActive && !completed && window.location.pathname === "/") {
-      setStepIndex(0);
-      setIsActive(true);
-      persistStep(0);
     }
   }, [persistStep]);
 

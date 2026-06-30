@@ -20,7 +20,7 @@ export default function ReceptionistLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const fillDemoCredentials = () => {
-    setUsername("carlo.mendoza@example.com");
+    setUsername("hannah@villahermosa");
     setPassword("password");
     setShowPassword(true);
   };
@@ -162,7 +162,7 @@ export default function ReceptionistLoginPage() {
             <div className="mt-6 p-4 bg-sky-50 rounded-lg border border-sky-200">
               <p className="text-xs font-semibold text-sky-900 mb-2">Demo Credentials:</p>
               <p className="text-xs text-sky-800 font-mono">
-                <strong>Email:</strong> carlo.mendoza@example.com<br />
+                <strong>Email:</strong> hannah@villahermosa<br />
                 <strong>Password:</strong> password
               </p>
               <Button
