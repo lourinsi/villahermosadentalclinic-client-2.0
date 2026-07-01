@@ -28,6 +28,7 @@ export type PublicBookingPatient = {
 export type PublicBookingAppointment = Omit<Appointment, "paymentStatus"> & {
   paymentStatus?: Appointment["paymentStatus"];
   paymentMethod?: string;
+  paymentDate?: string;
   publicToken?: string;
   publicAccessToken?: string;
   publicPatient?: PublicBookingPatient;
@@ -276,6 +277,7 @@ export async function createPublicBookingAppointment({
   status = CART_APPOINTMENT_STATUS,
   paymentStatus = "unpaid",
   paymentMethod,
+  paymentDate,
   totalPaid = 0,
   balance,
   // recurrence / isRecurring removed
@@ -294,6 +296,7 @@ export async function createPublicBookingAppointment({
   status?: string;
   paymentStatus?: PublicBookingAppointment["paymentStatus"];
   paymentMethod?: string;
+  paymentDate?: string;
   totalPaid?: number;
   balance?: number;
   // recurrence / isRecurring removed
@@ -328,6 +331,7 @@ export async function createPublicBookingAppointment({
     status,
     paymentStatus,
     paymentMethod,
+    paymentDate,
     totalPaid,
     balance: appointmentBalance,
     // recurrence removed

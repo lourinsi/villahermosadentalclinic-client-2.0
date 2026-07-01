@@ -329,6 +329,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
+  const [latestPaymentLogDate, setLatestPaymentLogDate] = useState<string>("");
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
   const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
@@ -406,14 +407,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   useEffect(() => {
     setLatestPaymentLogAmount(null);
+    setLatestPaymentLogDate("");
 
     const appointmentId = String(displayedAppointmentId || "").trim();
-    const explicitAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
     if (
       !open ||
-      !appointmentId ||
-      snapshotState === "historical" ||
-      (explicitAmount !== null && explicitAmount > 0)
+      !appointmentId
     ) return;
 
     const controller = new AbortController();
@@ -426,15 +425,22 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         });
         const result = await response.json().catch(() => null);
         const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
-        const latestPositiveAmount = logs
-          .map((log: any) => Number(log?.amount || 0))
-          .find((amount: number) => amount > 0);
+        const latestPositiveLog = logs.find((log: any) => Number(log?.amount || 0) > 0);
+        const latestPositiveAmount = latestPositiveLog ? Number(latestPositiveLog.amount || 0) : undefined;
 
         setLatestPaymentLogAmount(latestPositiveAmount ?? 0);
+        setLatestPaymentLogDate(
+          latestPositiveLog?.paymentDate ||
+          latestPositiveLog?.date ||
+          latestPositiveLog?.createdAt ||
+          latestPositiveLog?.changedAt ||
+          ""
+        );
       } catch (error: any) {
         if (error?.name !== "AbortError") {
           console.warn("[AppointmentHistoryView] Failed to load payment logs:", error);
           setLatestPaymentLogAmount(0);
+          setLatestPaymentLogDate("");
         }
       }
     };
@@ -623,13 +629,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
-  const isLogView = isPastSnapshot; // authoritative
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
-  const snapshotPaymentAmount = isLogView
-    ? // historical log: show any explicit payment amount recorded on the log (or 0)
-      explicitSnapshotPaymentAmount ?? 0
-    : // current view: prefer explicit snapshot payment if present, else fall back to latest payment log amount
-      (explicitSnapshotPaymentAmount && explicitSnapshotPaymentAmount > 0 ? explicitSnapshotPaymentAmount : latestPaymentLogAmount ?? 0);
 
   // Detect payment logs: explicit payment markers, log/change type that mentions "payment",
   // or transaction identifiers produced by the seeder like `SEED-PAY-0003`.
@@ -649,6 +649,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     (explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0) ||
     isSeedPaymentId
   );
+  const paidInSnapshotAmount = explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
+    ? explicitSnapshotPaymentAmount
+    : 0;
+  const hasPaidInSnapshot = isPaymentLogSnapshot && paidInSnapshotAmount > 0;
+  const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
+  const shouldShowLatestPayment = !hasPaidInSnapshot && latestPaymentAmount > 0;
+  const shouldShowPaymentLine = hasPaidInSnapshot || shouldShowLatestPayment;
+  const snapshotPaymentLabel = hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+  const snapshotPaymentAmount = hasPaidInSnapshot
+    ? paidInSnapshotAmount
+    : shouldShowLatestPayment
+      ? latestPaymentAmount
+      : 0;
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
   const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
@@ -674,6 +687,33 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       day: 'numeric'
     });
   };
+  const paidInSnapshotPaymentDateRaw =
+    displayedSnapshot?.paymentDate ||
+    displayedSnapshot?.newState?.paymentDate ||
+    displayedSnapshot?.previousState?.paymentDate ||
+    displayedSnapshot?.paymentDetails?.date ||
+    displayedSnapshot?.transaction?.date ||
+    appointmentSnapshot?.paymentDate ||
+    appointmentSnapshot?.newState?.paymentDate ||
+    displayedSnapshot?.changedAt ||
+    logDate ||
+    displayedSnapshot?.createdAt ||
+    displayedSnapshot?.newState?.createdAt ||
+    appointmentSnapshot?.createdAt;
+  const latestPaymentDateRaw =
+    latestComparisonSnapshot?.paymentDate ||
+    latestComparisonSnapshot?.newState?.paymentDate ||
+    appointmentSnapshot?.paymentDate ||
+    appointmentSnapshot?.newState?.paymentDate ||
+    latestPaymentLogDate ||
+    latestComparisonSnapshot?.createdAt ||
+    appointmentSnapshot?.createdAt;
+  const snapshotPaymentDateRaw = hasPaidInSnapshot
+    ? paidInSnapshotPaymentDateRaw
+    : shouldShowLatestPayment
+      ? latestPaymentDateRaw
+      : "";
+  const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
   const getPatientIdentity = (snapshot: any) => {
     const patient = snapshot?.patient;
     if (patient && typeof patient !== "string" && patient.id) return String(patient.id);
@@ -1295,12 +1335,18 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </div>
               </div>
 
-              {(((isLogSnapshot(displayedSnapshot) || isPastSnapshot) && openedFromBookingModal) || isPaymentLogSnapshot) && (
+              {shouldShowPaymentLine && (
                 <div className="flex justify-between items-center py-0.5 border-t border-slate-50 pt-1.5">
-                  <span className="text-emerald-500/80 font-black text-[9px] uppercase tracking-wider">Paid in Snapshot</span>
+                  <span className="text-emerald-500/80 font-black text-[9px] uppercase tracking-wider">{snapshotPaymentLabel}</span>
                   <span className="font-black text-emerald-600 text-[12px]">₱{snapshotPaymentAmount.toLocaleString()}</span>
                 </div>
               )}
+              {shouldShowPaymentLine && snapshotPaymentDateLabel ? (
+                <div className="flex justify-between items-center py-0.5 border-t border-slate-50 pt-1.5">
+                  <span className="text-slate-400 font-black text-[9px] uppercase tracking-wider">Payment Date:</span>
+                  <span className="text-right font-black text-slate-700 text-[12px]">{snapshotPaymentDateLabel}</span>
+                </div>
+              ) : null}
 
               {/* {totalPaidAmount !== null ? (
                 <div className="flex justify-between items-center pt-1.5 border-t border-slate-50">

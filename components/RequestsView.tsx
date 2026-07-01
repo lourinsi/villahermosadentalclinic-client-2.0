@@ -41,6 +41,7 @@ import {
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
@@ -227,11 +228,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     const normalizedStatus = canonicalStatus(appointment.status);
     return (
       isPaymentIncomplete(appointment.paymentStatus) &&
-      normalizedStatus !== "cancelled"
+      normalizedStatus !== "cancelled" &&
+      normalizedStatus !== "deleted"
     );
   };
 
-  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => !isPatientCartStatus(status.value));
+  const canSeeDeletedAppointments = effectiveRole === "admin";
+  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => {
+    const normalizedStatus = canonicalStatus(status.value);
+    if (isPatientCartStatus(status.value)) return false;
+    if (normalizedStatus === "deleted" && !canSeeDeletedAppointments) return false;
+    return true;
+  });
 
   const isActionableStatus = (status?: string) => {
     const k = canonicalStatus(status);
@@ -241,7 +249,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // History shows completed appointments (not pending payments)
   const isHistoryStatus = (status?: string) => {
     const k = canonicalStatus(status);
-    return k === "scheduled" || k === "completed" || k === "cancelled";
+    return k === "scheduled" || k === "completed" || k === "cancelled" || (canSeeDeletedAppointments && k === "deleted");
   };
 
   // Appointment requests include these statuses (action required)
@@ -1062,7 +1070,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell>
                             <div className="flex flex-col">
                               <span className="font-bold text-gray-900">{parseBackendDateToLocal(request.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{request.time}</span>
+                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
                             </div>
                           </TableCell>
                           {!doctorFilter && (
@@ -1355,7 +1363,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <History className="h-10 w-10 text-gray-300" />
                             </div>
                             <h3 className="text-lg font-bold text-gray-900 uppercase">No History Found</h3>
-                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No completed or cancelled appointments recorded yet.</p>
+                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No appointment history matches your filters.</p>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1379,7 +1387,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell>
                             <div className="flex flex-col">
                               <span className="font-bold text-gray-900">{parseBackendDateToLocal(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{item.time}</span>
+                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
                             </div>
                           </TableCell>
                           {!doctorFilter && (

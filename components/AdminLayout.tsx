@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -44,6 +44,7 @@ const navItems = [
   { path: "/requests", label: "Requests", icon: ClipboardList },
   { path: "/patients", label: "Patients", icon: Users },
   { path: "/doctors", label: "Find Doctors", icon: Stethoscope },
+  { path: "/services", label: "Services", icon: ListChecks },
   { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/finance", label: "Finance", icon: DollarSign },
   { path: "/staff", label: "Staff", icon: Shield },

@@ -31,6 +31,7 @@ export interface Appointment {
   cancellationReason?: string; // Reason why appointment was cancelled
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid" | "over-paid";
   paymentMethod?: string;
+  paymentDate?: string;
   balance?: number;
   totalPaid?: number;
   // recurrence fields removed (backend no longer supports recurring appointments)

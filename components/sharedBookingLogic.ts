@@ -212,7 +212,7 @@ export function normalizeBookingDuration(
   return isAllowedBookingDuration(duration) ? (duration as BookingDuration) : fallback;
 }
 
-type AppointmentTypeDurations = Record<string, BookingDuration>;
+type AppointmentTypeDurations = Record<string, number>;
 
 export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
   "Routine Cleaning": 30,
@@ -510,6 +510,33 @@ export function formatBookingDateKey(dateInput?: Date | string | null) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+export function getDefaultBookingPaymentDate(now: Date = new Date()) {
+  return formatBookingDateKey(now);
+}
+
+export function normalizeBookingPaymentDate(dateInput?: Date | string | null) {
+  return formatBookingDateKey(dateInput);
+}
+
+export function isFutureBookingPaymentDate(dateInput?: Date | string | null, now: Date = new Date()) {
+  const paymentDate = parseLocalDateOnly(dateInput);
+  if (!paymentDate) return false;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return paymentDate.getTime() > today.getTime();
+}
+
+export function formatBookingPaymentDateLabel(dateInput?: Date | string | null) {
+  const paymentDate = parseLocalDateOnly(dateInput);
+  if (!paymentDate) return "";
+
+  return paymentDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export function bookingTimeToMinutes(time: string) {
   const [hours, minutes] = String(time || "").split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
@@ -547,13 +574,13 @@ export function useBookingPaymentPrefill({
       return;
     }
 
-    if (modalStep !== "payment" || remainingBalance <= 0 || paymentAmountPrefilledRef.current) return;
+    if (modalStep !== "payment" || paymentAmountPrefilledRef.current) return;
     if (amountToPay.trim() !== "") {
       paymentAmountPrefilledRef.current = true;
       return;
     }
 
-    setAmountToPay(String(remainingBalance));
+    setAmountToPay("0");
     paymentAmountPrefilledRef.current = true;
   }, [open, modalStep, amountToPay, remainingBalance, setAmountToPay]);
 }
@@ -927,10 +954,10 @@ export function getBookingCancellationConfig({
   appointmentToEdit?: any;
   appointmentStatus?: string | null;
 }) {
-  const currentStatus = String(
-    appointmentStatus || appointmentToEdit?.status || ""
-  ).toLowerCase();
-  const isCancelled = currentStatus === "cancelled";
+  const selectedStatus = normalizeAppointmentStatus(appointmentStatus || "");
+  const existingStatus = normalizeAppointmentStatus(appointmentToEdit?.status || "");
+  const currentStatus = selectedStatus || existingStatus;
+  const isCancelled = currentStatus === "cancelled" || existingStatus === "cancelled";
 
   return {
     isCancelled,

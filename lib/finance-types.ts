@@ -36,6 +36,7 @@ export interface RecentTransaction {
   type: string;
   method: string;
   appointmentId?: string;
+  paymentDate?: string;
   appointmentType?: string;
   appointmentDate?: string;
   doctor?: string;

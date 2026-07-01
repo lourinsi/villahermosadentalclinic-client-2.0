@@ -250,7 +250,7 @@ const TOUR_STEPS: TourStep[] = [
     route: "/admin/dashboard",
     target: '[data-tour-id="add-patient-first-name"]',
     title: "Patient record form",
-    body: "This form collects the patient basics: first name, last name, email, phone, and date of birth.",
+    body: "This form collects the required patient basics: first name, last name, and phone number.",
     primaryLabel: "Show review button",
     placement: "left",
   },

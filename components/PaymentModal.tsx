@@ -16,6 +16,7 @@ import { CheckCircle, Edit } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
 
 export function PaymentModal() {
   const {
@@ -353,7 +354,7 @@ export function PaymentModal() {
                 <SelectContent>
                   {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${apt.time}` : ""} (Balance: ₱{(((apt.price || 0) - (apt.totalPaid || 0))).toFixed(2)})
+                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${formatTimeTo12h(apt.time)}` : ""} (Balance: ₱{(((apt.price || 0) - (apt.totalPaid || 0))).toFixed(2)})
                     </SelectItem>
                   ))}
                 </SelectContent>

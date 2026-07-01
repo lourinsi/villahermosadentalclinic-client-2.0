@@ -1076,8 +1076,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       title={`${formatTime(apt.time)} - ${typeName}`}
                     >
                       <PatientAvatar src={patientImageSrc} name={appointmentDisplayName} dob={appointmentPatientDob} birthdayReferenceDate={apt.date} className="h-5 w-5 border border-gray-100 flex-shrink-0" sizeClass="h-5 w-5 rounded-full" />
-                      <div className="flex min-w-0 items-center gap-1 truncate"> {/* This will now just trigger a clone */}
-                        {apt.patientName || `${apt.time} • Dr. ${apt.doctor}`}
+                      <div className="flex min-w-0 items-center gap-1 truncate">
+                        {apt.patientName || `${formatTime(apt.time)} - Dr. ${apt.doctor}`}
                         {isReservedAppointmentStatus(apt.status) && " (R)"}
                         {normalizeAppointmentStatus(apt.status) === "to-pay" && " (P)"}
                       </div>
@@ -1144,7 +1144,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {formatTime(apt.time)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4" />

@@ -22,7 +22,7 @@ import {
   Mail,
   Eye,
 } from "lucide-react";
-import { TIME_SLOTS } from "@/lib/time-slots";
+import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -443,7 +443,7 @@ export function DoctorAvailabilityView({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span>{slot.time}</span>
+                      <span>{formatTimeTo12h(slot.time)}</span>
                       <div className="flex items-center gap-1">
                         <Badge 
                           variant="secondary" 
@@ -475,7 +475,7 @@ export function DoctorAvailabilityView({
                                     <div key={idx} className="text-xs border-t border-emerald-700 pt-1 flex items-center justify-between">
                                       <div>
                                         <p className="font-medium">{apt.patientName}</p>
-                                        <p className="text-emerald-200">{apt.time} - {apt.duration} min</p>
+                                        <p className="text-emerald-200">{formatTimeTo12h(apt.time)} - {apt.duration} min</p>
                                       </div>
                                       <button
                                         onClick={(e) => {
@@ -569,7 +569,7 @@ export function DoctorAvailabilityView({
                             }}
                               className="w-full px-2 py-1 rounded text-[10px] font-bold transition-all text-center bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
                             >
-                              {slot.time}
+                              {formatTimeTo12h(slot.time)}
                             </button>
                           ))}
                         </div>
@@ -689,7 +689,7 @@ export function DoctorAvailabilityView({
                           }}
                           className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-all text-left"
                         >
-                          {slot.time}
+                          {formatTimeTo12h(slot.time)}
                         </button>
                       ))}
                       {hasMore && (

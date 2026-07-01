@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AlertCircle, Loader2, Clock, Calendar as CalendarIcon } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
 import { DatePickerModal } from "./DatePickerModal";
-import { parseLocalDateOnly } from "./sharedBookingLogic";
+import { formatBookingPaymentDateLabel, parseLocalDateOnly } from "./sharedBookingLogic";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
@@ -66,6 +66,7 @@ interface ConfirmAppointmentModalProps {
   // Payment tracking
   previouslyPaidAmount: number;
   paymentAmountNow: number;
+  paymentDate?: string;
 
   // Repeat / follow-up clone
   repeatOption: string;
@@ -120,6 +121,7 @@ export function ConfirmAppointmentModal({
   discountedPrice,
   previouslyPaidAmount,
   paymentAmountNow,
+  paymentDate,
   getPersonInitials,
   getDoctorInitials,
   getBookingStatusLabel,
@@ -199,6 +201,7 @@ export function ConfirmAppointmentModal({
 
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
   const treatmentNotesText = String(treatmentNotes || "").trim();
+  const paymentDateLabel = paymentAmountNow > 0 ? formatBookingPaymentDateLabel(paymentDate) : "";
   const handleConfirmClick = () => {
     return onConfirm({ repeatOption, customRepeatDate });
   };
@@ -459,7 +462,7 @@ export function ConfirmAppointmentModal({
               </div>
 
               {/* Payment breakdown */}
-              <div className="grid grid-cols-3 gap-3 border-t border-gray-100/70 pt-4">
+              <div className={`grid gap-3 border-t border-gray-100/70 pt-4 ${paymentDateLabel ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
                 <div className="text-center">
                   <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Already Paid</p>
                   <p className="text-sm font-black text-emerald-600 tracking-tight">₱{previouslyPaidAmount.toLocaleString()}</p>
@@ -468,6 +471,12 @@ export function ConfirmAppointmentModal({
                   <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Paying Now</p>
                   <p className="text-sm font-black text-blue-600 tracking-tight">₱{paymentAmountNow.toLocaleString()}</p>
                 </div>
+                {paymentDateLabel && (
+                  <div className="text-center">
+                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Payment Date</p>
+                    <p className="text-sm font-black text-gray-700 tracking-tight">{paymentDateLabel}</p>
+                  </div>
+                )}
                 <div className="text-center">
                   <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Remaining</p>
                   <p className="text-sm font-black text-gray-400 tracking-tight">₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>

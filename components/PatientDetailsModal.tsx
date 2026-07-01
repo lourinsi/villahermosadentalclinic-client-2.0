@@ -68,6 +68,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
@@ -527,6 +528,7 @@ type PaymentLogRow = {
   changedBy?: string;
   changedByName?: string;
   changedAt?: string | Date;
+  createdAt?: string | Date;
   previousBalance?: number;
   newBalance?: number;
 };
@@ -572,7 +574,7 @@ const parsePaymentTimestamp = (value?: string | Date) => {
 const getPaymentEventTimestamps = (txn: RecentTransaction) => {
   const row = txn as PaymentRow;
 
-  return [row.createdAt, row.updatedAt, txn.date]
+  return [txn.date, row.createdAt, row.updatedAt]
     .map(parsePaymentTimestamp)
     .filter((timestamp, index, timestamps) => timestamp > 0 && timestamps.indexOf(timestamp) === index);
 };
@@ -580,7 +582,7 @@ const getPaymentEventTimestamps = (txn: RecentTransaction) => {
 const getPaymentEventDateKey = (txn: RecentTransaction) => {
   const row = txn as PaymentRow;
 
-  return toDateOnly(row.createdAt) || toDateOnly(row.updatedAt) || toDateOnly(txn.date);
+  return toDateOnly(txn.date) || toDateOnly(row.createdAt) || toDateOnly(row.updatedAt);
 };
 
 const hasClosePaymentTimestamp = (a: RecentTransaction, b: RecentTransaction) =>
@@ -938,7 +940,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     const appointmentType = getHistoryAppointmentType(apt);
     const appointmentDate = String(apt.date || "");
-    const paymentDate = toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate) || toDateOnly(apt.createdAt);
+    const paymentDate = toDateOnly((apt as any).paymentDate) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate);
 
     return {
       id: `legacy-${apt.id}`,
@@ -947,6 +949,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       appointmentDate,
       doctor: apt.doctor || "",
       date: paymentDate,
+      paymentDate,
       description: `Recorded payment total for ${appointmentType}`,
       amount: totalPaid,
       type: "payment",
@@ -967,11 +970,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
         const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
+        const paymentDate = toDateOnly(payment.date) || toDateOnly(payment.createdAt);
 
         return {
           ...payment,
           id: payment.id || payment.transactionId || `payment-${payment.appointmentId || "unknown"}-${payment.date}`,
-          date: toDateOnly(payment.date) || toDateOnly(payment.createdAt),
+          date: paymentDate,
+          paymentDate,
           description: payment.description || `Payment for ${appointmentType}`,
           amount: Number(payment.amount || 0),
           type: payment.type || "payment",
@@ -993,10 +998,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       txns.forEach((rawTxn: any) => {
         const appointmentType = rawTxn.appointmentType || getHistoryAppointmentType(apt);
         const appointmentDate = rawTxn.appointmentDate || String(apt.date || "");
+        const paymentDate = toDateOnly(rawTxn.paymentDate) || toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt);
         const txn: RecentTransaction = {
           ...rawTxn,
           id: rawTxn.id || rawTxn.transactionId || `apt-${apt.id}-txn-${rawTxn.date || ''}-${rawTxn.method || ''}-${rawTxn.amount || 0}`,
-          date: toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.updatedAt) || toDateOnly(apt.createdAt),
+          date: paymentDate,
+          paymentDate,
           description: rawTxn.description || rawTxn.notes || `Payment for ${appointmentType}`,
           amount: Number(rawTxn.amount || 0),
           type: rawTxn.type || "payment",
@@ -1026,6 +1033,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentDate = appointment ? String(appointment.date || "") : "";
         const changedAt = log.changedAt || new Date().toISOString();
         const matchingAppointmentLog = findMatchingAppointmentPaymentLog(log, appointmentLogs);
+        const actualPaymentDate = toDateOnly(
+          (matchingAppointmentLog?.newState as any)?.paymentDate ||
+          (matchingAppointmentLog as any)?.paymentDate
+        );
+        const recordedPaymentDate = actualPaymentDate;
+        const paymentCreatedDate = toDateOnly(log.createdAt) || toDateOnly(changedAt);
+        const paymentDisplayDate = recordedPaymentDate || paymentCreatedDate || toDateOnly(appointmentDate);
         const appointmentSnapshotBase = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
           ? {
               ...(matchingAppointmentLog.newState || {}),
@@ -1040,6 +1054,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               changedByName: matchingAppointmentLog.changedByName || log.changedByName,
               amount: Number(log.amount || 0),
               paymentAmount: Number(log.amount || 0),
+              paymentDate: paymentDisplayDate,
               paymentMethod: log.paymentMethod,
               paymentStatus: log.paymentStatus,
               previousBalance: log.previousBalance,
@@ -1064,7 +1079,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentType,
           appointmentDate,
           doctor: appointment?.doctor || "",
-          date: toDateOnly(changedAt) || toDateOnly(appointmentDate),
+          date: paymentDisplayDate,
+          paymentDate: paymentDisplayDate,
           description: `Payment for ${appointmentType}`,
           amount: Number(log.amount || 0),
           type: "payment",
@@ -1079,7 +1095,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           changedByName: log.changedByName,
           previousBalance: log.previousBalance,
           newBalance: log.newBalance,
-          createdAt: changedAt,
+          createdAt: paymentCreatedDate || changedAt,
           updatedAt: changedAt,
         } as RecentTransaction;
       })
@@ -1254,7 +1270,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       : Number.isFinite(snapshotBalance)
         ? snapshotBalance
         : Math.max(0, price - totalPaid);
-    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transaction?.date || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
+    const transactionPaymentDate =
+      toDateOnly(transactionRow?.paymentDate) ||
+      toDateOnly(transaction?.date) ||
+      toDateOnly(snapshotBase.paymentDate);
+    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
       snapshotBase.patientName ||
       appointment.patientName ||
@@ -1320,6 +1340,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       balance,
       amount: transaction?.amount,
       paymentAmount: transaction?.amount,
+      paymentDate: transactionPaymentDate || snapshotBase.paymentDate,
       paymentMethod: transaction?.method,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
       transactionId: transaction?.transactionId,
@@ -1697,7 +1718,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         return {
             ...apt,
             id,
-            date: apt.date + (apt.time ? ` ${apt.time}` : ''),
+            date: apt.date + (apt.time ? ` ${formatTimeTo12h(apt.time)}` : ''),
             // keep internal type numeric if available
             type: (typeof apt.type === 'number' ? apt.type : 0) as number,
             doctor: apt.doctor || '',
@@ -2856,6 +2877,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   {filteredTransactions.length > 0 ? (
                     filteredTransactions.map((txn) => {
                       const paymentDisplay = getTransactionPaymentDisplay(txn);
+                      const txnPaymentDate = toDateOnly((txn as any).paymentDate) || toDateOnly(txn.date);
 
                       return (
                       <div
@@ -2870,7 +2892,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div>
                               <div className="font-medium">{txn.method}</div>
                               <div className="text-sm text-muted-foreground">
-                                {txn.appointmentType} - {txn.appointmentDate}
+                                {txn.appointmentType} - Appointment: {txn.appointmentDate}
                               </div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Dr: {txn.doctor}
@@ -2880,7 +2902,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           <div className="flex items-start gap-3 sm:justify-end">
                             <div className="sm:text-right">
                               <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
-                              <div className="text-xs text-muted-foreground">{txn.date}</div>
+                              <div className="text-xs text-muted-foreground">Payment Date: {txnPaymentDate}</div>
                             </div>
                             <Button
                               variant="ghost"

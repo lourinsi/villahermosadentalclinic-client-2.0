@@ -14,6 +14,7 @@ import {
   getStatusDotColorClass,
 } from "@/lib/status-colors";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import {
   Table,
   TableBody,
@@ -252,7 +253,9 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   onClick={() => onOpenAppointment?.(appointment)}
                 >
                   <TableCell className="font-semibold text-gray-900">{appointment.patientName}</TableCell>
-                  <TableCell className="text-gray-600 font-medium">{`${appointment.date} @ ${appointment.time}`}</TableCell>
+                  <TableCell className="text-gray-600 font-medium">
+                    {appointment.date} @ {formatTimeTo12h(appointment.time)}
+                  </TableCell>
                   <TableCell>{getAppointmentTypeName(appointment.type, appointment.customType)}</TableCell>
                   <TableCell className="text-gray-600">Dr. {appointment.doctor}</TableCell>
                   <TableCell>
@@ -269,7 +272,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   {(onPay || onDelete) && (
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && (
+                        {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && appointment.status !== "deleted" && (
                           <Button 
                             size="sm" 
                             className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 shadow-sm active:scale-95 transition-all"

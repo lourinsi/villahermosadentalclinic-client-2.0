@@ -10,6 +10,7 @@ import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
@@ -437,7 +438,11 @@ export function Dashboard({ portal }: { portal?: string }) {
                   <p className="mt-4 text-sm font-medium text-gray-500">Updating schedule...</p>
                 </div>
               ) : filteredAppointments.length > 0 ? (
-                filteredAppointments.slice(0, 5).map((appointment: Appointment) => (
+                filteredAppointments.slice(0, 5).map((appointment: Appointment) => {
+                  const appointmentTimeLabel = formatTimeTo12h(appointment.time);
+                  const [timeText, meridiemText = ""] = appointmentTimeLabel.split(" ");
+
+                  return (
                   <div
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
@@ -447,8 +452,8 @@ export function Dashboard({ portal }: { portal?: string }) {
                   >
                     <div className="flex items-center space-x-4">
                       <div className="flex flex-col items-center justify-center h-14 w-14 rounded-2xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
-                        <span className="text-sm font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
-                        <span className="text-[10px] font-bold uppercase">{appointment.time.split(' ')[1]}</span>
+                        <span className="text-sm font-bold">{timeText}</span>
+                        <span className="text-[10px] font-bold uppercase">{meridiemText}</span>
                       </div>
                       <div className="flex-1">
                         <div className="text-sm font-bold text-gray-900 group-hover:text-violet-700 transition-colors">
@@ -472,7 +477,8 @@ export function Dashboard({ portal }: { portal?: string }) {
                       </Button>
                     </div>
                   </div>
-                ))
+                );
+                })
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-gray-500">
                   <div className="p-4 bg-gray-50 rounded-full mb-4">

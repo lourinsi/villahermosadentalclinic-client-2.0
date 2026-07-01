@@ -225,16 +225,8 @@ export function AddPatientModal() {
       toast.error("Please enter last name");
       return false;
     }
-    if (!formData.email.trim()) {
-      toast.error("Please enter email");
-      return false;
-    }
     if (!formData.phone.trim()) {
       toast.error("Please enter phone number");
-      return false;
-    }
-    if (!formData.dateOfBirth) {
-      toast.error("Please enter date of birth");
       return false;
     }
     return true;
@@ -359,18 +351,6 @@ export function AddPatientModal() {
             </div>
 
             <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input 
-                type="email"
-                data-tour-id="add-patient-email"
-                value={formData.email} 
-                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))} 
-                placeholder="Enter email"
-                required 
-              />
-            </div>
-
-            <div className="space-y-2">
               <Label>Phone Number *</Label>
               <Input 
                 type="tel"
@@ -378,17 +358,6 @@ export function AddPatientModal() {
                 value={formData.phone} 
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} 
                 placeholder="Enter phone number"
-                required 
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Date of Birth *</Label>
-              <Input 
-                type="date"
-                data-tour-id="add-patient-date-of-birth"
-                value={formData.dateOfBirth} 
-                onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))} 
                 required 
               />
             </div>
@@ -424,16 +393,8 @@ export function AddPatientModal() {
                   <div className="font-medium text-gray-900">{formData.firstName} {formData.lastName}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground font-semibold">Email</div>
-                  <div className="font-medium text-gray-900">{formData.email}</div>
-                </div>
-                <div>
                   <div className="text-xs text-muted-foreground font-semibold">Phone</div>
                   <div className="font-medium text-gray-900">{formData.phone}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground font-semibold">Date of Birth</div>
-                  <div className="font-medium text-gray-900">{formData.dateOfBirth}</div>
                 </div>
               </div>
 

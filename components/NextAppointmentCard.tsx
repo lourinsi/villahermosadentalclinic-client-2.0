@@ -9,6 +9,7 @@ import PatientAvatar from "./PatientAvatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "@/lib/utils";
 import { apiUrl } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/api";
@@ -256,7 +257,7 @@ export function NextAppointmentCard({
               </div>
               <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
                 <Clock className="h-4 w-4 text-emerald-600" />
-                <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+                <span className="font-bold text-sm text-gray-700">{formatTimeTo12h(currentAppointment.time)}</span>
               </div>
             </div>
 
@@ -354,7 +355,7 @@ export function NextAppointmentCard({
             </div>
             <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
               <Clock className="h-4 w-4 text-violet-600" />
-              <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+              <span className="font-bold text-sm text-gray-700">{formatTimeTo12h(currentAppointment.time)}</span>
             </div>
           </div>
 

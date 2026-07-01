@@ -31,6 +31,27 @@ const revenueData = [
 
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
+const getDashboardPeriodRange = (mode: "day" | "week" | "month") => {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  if (mode === "week") {
+    start.setDate(now.getDate() - now.getDay());
+  } else if (mode === "month") {
+    start.setDate(1);
+  }
+
+  return {
+    start: formatDateToYYYYMMDD(start),
+    end: formatDateToYYYYMMDD(end),
+    title: mode === "day" ? "Daily" : mode === "week" ? "Weekly" : "Monthly",
+  };
+};
+
+const isDateWithinDashboardRange = (date: string | undefined, range: { start: string; end: string }) =>
+  Boolean(date && date >= range.start && date <= range.end);
+
 interface DashboardProps {
   portal: "admin" | "doctor" | "patient";
 }
@@ -40,7 +61,8 @@ export function Dashboard({ portal }: DashboardProps) {
   const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, refreshAppointments, openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
-  const [totalPatients, setTotalPatients] = useState(0);
+  const [financeTransactions, setFinanceTransactions] = useState<any[]>([]);
+  const [detailedExpenses, setDetailedExpenses] = useState<any[]>([]);
   const [isLoadingView, setIsLoadingView] = useState(false);
   const {
     isAppointmentHistoryOpen,
@@ -89,27 +111,35 @@ export function Dashboard({ portal }: DashboardProps) {
     refreshAppointments(filters);
   }, [portal, refreshAppointments, user?.patientId, user?.username]);
 
-  // Fetch total patients from backend
+  // Fetch admin finance metrics used by the day/week/month dashboard cards.
   useEffect(() => {
     if (portal !== "admin") return;
 
-    const fetchPatientCount = async () => {
+    const fetchFinanceMetrics = async () => {
       try {
-        const response = await fetch(apiUrl("/api/patients?page=1&limit=1"), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        const result = await response.json();
-        if (result.success) {
-          const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);
-          setTotalPatients(total);
-        }
+        const [transactionsResponse, expensesResponse] = await Promise.all([
+          fetch(apiUrl("/api/finance/recent-transactions?limit=500"), {
+            headers: getAuthHeaders(),
+            credentials: "include",
+          }),
+          fetch(apiUrl("/api/finance/detailed-expenses"), {
+            headers: getAuthHeaders(),
+            credentials: "include",
+          }),
+        ]);
+        const [transactionsResult, expensesResult] = await Promise.all([
+          transactionsResponse.json(),
+          expensesResponse.json(),
+        ]);
+        setFinanceTransactions(transactionsResult.success && Array.isArray(transactionsResult.data) ? transactionsResult.data : []);
+        setDetailedExpenses(expensesResult.success && Array.isArray(expensesResult.data) ? expensesResult.data : []);
       } catch (error) {
-        console.error("Error fetching patient count:", error);
-        setTotalPatients(0);
+        console.error("Error fetching dashboard finance metrics:", error);
+        setFinanceTransactions([]);
+        setDetailedExpenses([]);
       }
     };
-    fetchPatientCount();
+    fetchFinanceMetrics();
   }, [portal, refreshTrigger]);
 
   // Show loading when view mode changes
@@ -120,7 +150,7 @@ export function Dashboard({ portal }: DashboardProps) {
   }, [viewMode]);
 
   const portalAppointments = useMemo(() => {
-    let filtered = appointments;
+    let filtered = appointments.filter((apt: Appointment) => normalizeAppointmentStatus(apt.status) !== "deleted");
 
     // For doctor portal, only show their appointments
     if (portal === "doctor" && user?.username) {
@@ -196,6 +226,20 @@ export function Dashboard({ portal }: DashboardProps) {
     }
   }, [portalAppointments, viewMode]);
 
+  const dashboardPeriodRange = useMemo(() => getDashboardPeriodRange(viewMode), [viewMode]);
+  const periodRevenue = useMemo(() => (
+    financeTransactions
+      .filter((transaction) => transaction.type === "income")
+      .filter((transaction) => isDateWithinDashboardRange(transaction.date, dashboardPeriodRange))
+      .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
+  ), [dashboardPeriodRange, financeTransactions]);
+  const periodExpenses = useMemo(() => (
+    detailedExpenses
+      .filter((expense) => String(expense.status || "").toLowerCase().trim() === "paid")
+      .filter((expense) => isDateWithinDashboardRange(expense.paymentDate || expense.date, dashboardPeriodRange))
+      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
+  ), [dashboardPeriodRange, detailedExpenses]);
+
   // Get next upcoming appointment
   const nextAppointment = useMemo(() => {
     const now = new Date();
@@ -212,7 +256,8 @@ export function Dashboard({ portal }: DashboardProps) {
     const allFutureAppointments = filteredByPortal
       .filter((apt: Appointment) => {
         const aptDateTime = new Date(`${apt.date}T${apt.time}`);
-        return aptDateTime > now && apt.status !== "cancelled";
+        const status = normalizeAppointmentStatus(apt.status);
+        return aptDateTime > now && status !== "cancelled" && status !== "deleted";
       })
       .sort((a, b) => {
         const timeA = new Date(`${a.date}T${a.time}`).getTime();
@@ -319,10 +364,12 @@ export function Dashboard({ portal }: DashboardProps) {
       <div data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}>
         <DashboardStats
           portal={portal}
-          appointments={appointments}
-          monthlyAppointments={currentMonthAppointments}
-          totalPatients={totalPatients}
+          appointments={portalAppointments}
+          monthlyAppointments={filteredAppointments}
           pendingAppointmentsCount={pendingAppointmentsCount}
+          periodLabel={dashboardPeriodRange.title}
+          periodRevenue={periodRevenue}
+          periodExpenses={periodExpenses}
           user={user}
         />
       </div>

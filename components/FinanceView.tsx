@@ -157,6 +157,33 @@ const getPeriodRange = (period: string) => {
   }
 };
 
+type FinanceMetricPeriod = "day" | "week" | "month";
+
+const getMetricPeriodRange = (period: FinanceMetricPeriod) => {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  if (period === "week") {
+    const day = now.getDay();
+    start.setDate(now.getDate() - day);
+  } else if (period === "month") {
+    start.setDate(1);
+  }
+
+  return {
+    start: dateKey(start),
+    end: dateKey(end),
+    label: period === "day" ? "Today" : period === "week" ? "This Week" : "This Month",
+    title: period === "day" ? "Daily" : period === "week" ? "Weekly" : "Monthly",
+  };
+};
+
+const isDateWithinRange = (date: string | undefined, range: { start: string; end: string }) => {
+  if (!date) return false;
+  return date >= range.start && date <= range.end;
+};
+
 const buildAuthRequest = (init: RequestInit = {}): RequestInit => ({
   ...init,
   credentials: "include",
@@ -466,6 +493,7 @@ export interface RecentTransaction {
   transactionId?: string;
   appointmentId?: string;
   appointmentSnapshot?: any;
+  paymentDate?: string;
   paymentAmount?: number;
   previousBalance?: number;
   newBalance?: number;
@@ -514,6 +542,7 @@ export function FinanceView() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
   const [timePeriodFilter, setTimePeriodFilter] = useState("all");
   const [transactionTypeFilter, setTransactionTypeFilter] = useState("all");
+  const [metricPeriod, setMetricPeriod] = useState<FinanceMetricPeriod>("day");
   
   // State for fetched data
   const [revenueData, setRevenueData] = useState<RevenueEntry[]>([]);
@@ -560,7 +589,7 @@ export function FinanceView() {
         fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
         fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data"),
-        fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions"),
+        fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions?limit=500", "recent transactions"),
       ]);
 
       setRevenueData(revenueData || []);
@@ -695,6 +724,21 @@ export function FinanceView() {
       return true;
     })
   ), [endDate, recentTransactions, startDate, transactionTypeFilter]);
+
+  const metricPeriodRange = useMemo(() => getMetricPeriodRange(metricPeriod), [metricPeriod]);
+  const metricRevenue = useMemo(() => (
+    recentTransactions
+      .filter((transaction) => transaction.type === "income" && isDateWithinRange(transaction.date, metricPeriodRange))
+      .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
+  ), [metricPeriodRange, recentTransactions]);
+  const metricExpenses = useMemo(() => (
+    detailedExpenses
+      .filter((expense) => normalizeFilterValue(expense.status) === "paid")
+      .filter((expense) => isDateWithinRange(expense.paymentDate || expense.date, metricPeriodRange))
+      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
+  ), [detailedExpenses, metricPeriodRange]);
+  const metricProfit = metricRevenue - metricExpenses;
+  const metricMargin = metricRevenue > 0 ? (metricProfit / metricRevenue) * 100 : 0;
 
   const filteredInventoryData = useMemo(() => (
     inventoryData.filter((item) => {
@@ -906,7 +950,7 @@ export function FinanceView() {
     const invoiceRows = recentTransactions
       .filter((transaction) => transaction.type === "income")
       .map((transaction) => ({
-        Date: transaction.date,
+        Date: transaction.paymentDate || transaction.date,
         Description: transaction.description,
         Method: transaction.method,
         Amount: transaction.amount,
@@ -1561,7 +1605,7 @@ export function FinanceView() {
     setLoadingAppointmentId(loadingKey);
     try {
       if (!appointmentId && !transactionToView.appointmentSnapshot) {
-        const refreshedTransactions = await fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions");
+        const refreshedTransactions = await fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions?limit=500", "recent transactions");
         setRecentTransactions(refreshedTransactions || []);
 
         transactionToView =
@@ -1624,6 +1668,7 @@ export function FinanceView() {
       const resolvedPaymentAmount = Number(transactionToView.amount ?? transactionToView.paymentAmount ?? snapshot?.paymentAmount ?? snapshot?.amount ?? 0) || undefined;
       const resolvedPaymentMethod = transactionToView.method || snapshot?.method || snapshot?.paymentMethod;
       const resolvedTransactionId = transactionToView.transactionId || transactionToView.id || snapshot?.transactionId || paymentTxnId;
+      const resolvedPaymentDate = transactionToView.paymentDate || transactionToView.date || snapshot?.paymentDate;
 
       const enrichedSnapshot = {
         ...snapshot,
@@ -1634,6 +1679,7 @@ export function FinanceView() {
         newBalance: resolvedNewBalance,
         paymentAmount: resolvedPaymentAmount ?? snapshot?.paymentAmount ?? snapshot?.amount,
         amount: resolvedPaymentAmount ?? snapshot?.amount,
+        paymentDate: resolvedPaymentDate,
         paymentMethod: resolvedPaymentMethod,
         changedBy: transactionToView.changedBy ?? snapshot?.changedBy,
         changedByName: transactionToView.changedByName ?? snapshot?.changedByName,
@@ -1657,13 +1703,6 @@ export function FinanceView() {
     }
   };
 
-  // Handle case where revenueData might be empty after fetching
-  const currentMonth = revenueData.length > 0 ? revenueData[revenueData.length - 1] : { month: "N/A", revenue: 0, expenses: 0, profit: 0 };
-  const previousMonth = revenueData.length > 1 ? revenueData[revenueData.length - 2] : { month: "N/A", revenue: 0, expenses: 0, profit: 0 };
-
-  const revenueChange = previousMonth.revenue > 0 ? ((currentMonth.revenue - previousMonth.revenue) / previousMonth.revenue * 100).toFixed(1) : "0.0";
-  const profitChange = previousMonth.profit > 0 ? ((currentMonth.profit - previousMonth.profit) / previousMonth.profit * 100).toFixed(1) : "0.0";
-
   return (
     <div data-tour-id="finance-page" className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -1671,7 +1710,25 @@ export function FinanceView() {
           <h1 className="text-2xl font-semibold text-gray-900">Financial Overview</h1>
           <p className="text-muted-foreground">Track revenue, expenses, and clinic profitability</p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex rounded-xl border border-gray-200 bg-white p-1">
+            {(["day", "week", "month"] as const).map((period) => (
+              <Button
+                key={period}
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setMetricPeriod(period)}
+                className={`h-8 rounded-lg px-3 text-xs font-bold uppercase ${
+                  metricPeriod === period
+                    ? "bg-violet-600 text-white hover:bg-violet-700 hover:text-white"
+                    : "text-gray-500 hover:text-gray-900"
+                }`}
+              >
+                {period}
+              </Button>
+            ))}
+          </div>
           <Button variant="outline" onClick={handleExportReport}>
             <Download className="h-4 w-4 mr-2" />
             Export Report
@@ -1687,50 +1744,34 @@ export function FinanceView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Revenue</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Revenue</CardTitle>
             <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(currentMonth.revenue)}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              {Number(revenueChange) > 0 ? (
-                <ArrowUpRight className="h-3 w-3 text-green-600" />
-              ) : (
-                <ArrowDownRight className="h-3 w-3 text-red-600" />
-              )}
-              <span className={Number(revenueChange) > 0 ? "text-green-600" : "text-red-600"}>
-                {revenueChange}%
-              </span>
-              <span>from last month</span>
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(metricRevenue)}</div>
+            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Expenses</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Expenses</CardTitle>
             <TrendingDown className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(currentMonth.expenses)}</div>
-            <div className="text-xs text-muted-foreground">
-              <span className="text-green-600">-2.3%</span> from last month
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(metricExpenses)}</div>
+            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Net Profit</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Net Profit</CardTitle>
             <TrendingUp className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(currentMonth.profit)}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              <ArrowUpRight className="h-3 w-3 text-green-600" />
-              <span className="text-green-600">{profitChange}%</span>
-              <span>from last month</span>
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(metricProfit)}</div>
+            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
@@ -1741,11 +1782,9 @@ export function FinanceView() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {currentMonth.revenue > 0 ? ((currentMonth.profit / currentMonth.revenue) * 100).toFixed(1) : "0.0"}%
+              {metricMargin.toFixed(1)}%
             </div>
-            <div className="text-xs text-muted-foreground">
-              <span className="text-green-600">+1.2%</span> from last month
-            </div>
+            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
       </div>
@@ -2329,6 +2368,7 @@ export function FinanceView() {
                   ) : (
                     filteredRecentTransactions.map((transaction) => {
                       const appointmentId = getTransactionAppointmentId(transaction);
+                      const transactionPaymentDate = transaction.paymentDate || transaction.date;
                       const transactionLoadingKey = appointmentId || transaction.id;
                       const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
                       const expenseForTransaction = findExpenseForTransaction(transaction);
@@ -2375,7 +2415,7 @@ export function FinanceView() {
                             <div className="min-w-0 flex-1">
                               <div className="font-medium truncate text-gray-900">{transaction.description}</div>
                               <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                <span>{transaction.date}</span>
+                                <span>Payment Date: {transactionPaymentDate}</span>
                                 <span>•</span>
                                 <span>{transaction.method}</span>
                               </div>
