@@ -27,7 +27,7 @@ export default function ReceptionistLoginPage() {
 
   useEffect(() => {
     if (!isLoading && (user?.role === "receptionist" || user?.role === "admin")) {
-      router.replace("/admin/dashboard");
+      router.replace("/receptionist/dashboard");
     }
   }, [isLoading, router, user]);
 
@@ -57,7 +57,7 @@ export default function ReceptionistLoginPage() {
       const data = await response.json();
       if (data.user?.role === "receptionist") {
         toast.success("Receptionist login successful!");
-        router.push("/admin/dashboard");
+        router.push("/receptionist/dashboard");
         return;
       }
 

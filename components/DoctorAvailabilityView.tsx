@@ -75,7 +75,14 @@ export function DoctorAvailabilityView({
   const resolvedDoctorName = String(doctor?.name || doctorName || "").trim();
   const resolvedDoctorLabel = formatDoctorDisplayName(resolvedDoctorName);
 
-  const doctorsListPath = portal === "admin" ? "/admin/doctors" : portal === "patient" ? "/patient/doctors" : "/doctors";
+  const doctorsListPath =
+    portal === "admin"
+      ? user?.role === "receptionist"
+        ? "/receptionist/doctors"
+        : "/admin/doctors"
+      : portal === "patient"
+        ? "/patient/doctors"
+        : "/doctors";
 
   const isSameDoctor = useCallback((value?: string) => {
     const matchedDoctor = findDoctorForValue(doctors, value);

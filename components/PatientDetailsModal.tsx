@@ -76,6 +76,7 @@ import {
   getPaymentStatusOptionWithColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
+import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import {
   buildPatientAppointmentSummary,
 } from "@/lib/patient-aggregates";
@@ -202,16 +203,34 @@ export function PatientDetailsModal({
     .toUpperCase() || "P";
 
   const { refreshTrigger } = useAppointmentModal();
-  const [modalAppointmentSummary, setModalAppointmentSummary] =
-    useState<ReturnType<typeof buildPatientAppointmentSummary> | null>(null);
-  const displayedBalance = modalAppointmentSummary?.balance ?? serverPatient?.balance ?? patient?.balance ?? 0;
-  const displayedStatus = modalAppointmentSummary?.status ?? serverPatient?.status ?? patient?.status ?? "active";
+  const [modalDataRefreshKey, setModalDataRefreshKey] = useState(0);
+  const [modalPatientAppointments, setModalPatientAppointments] = useState<Appointment[]>([]);
+  const [modalPatientAppointmentsLoaded, setModalPatientAppointmentsLoaded] = useState(false);
+  const [modalPatientAppointmentsPatientId, setModalPatientAppointmentsPatientId] = useState("");
+  const modalPatientAppointmentsAreFresh =
+    modalPatientAppointmentsLoaded &&
+    modalPatientAppointmentsPatientId === String(patient?.id || "");
+  const modalAppointmentSummary = React.useMemo(
+    () => patient ? buildPatientAppointmentSummary(serverPatient || patient, modalPatientAppointments) : null,
+    [modalPatientAppointments, patient, serverPatient]
+  );
+  const displayedBalance =
+    modalAppointmentSummary && modalPatientAppointmentsAreFresh
+      ? modalPatientAppointments.length > 0
+        ? modalAppointmentSummary.appointmentBalance
+        : modalAppointmentSummary.balance
+      : serverPatient?.balance ?? patient?.balance ?? 0;
+  const displayedStatus =
+    modalAppointmentSummary && modalPatientAppointmentsAreFresh
+      ? modalAppointmentSummary.status
+      : serverPatient?.status ?? patient?.status ?? "active";
   const [modalOverdueAppointmentCount, setModalOverdueAppointmentCount] = useState<number | null>(patient?.overdueAppointmentCount ?? null);
   const displayedOverdueAppointmentCount =
-    modalAppointmentSummary?.overdueAppointmentCount ??
-    modalOverdueAppointmentCount ??
-    serverPatient?.overdueAppointmentCount ??
-    patient?.overdueAppointmentCount;
+    modalAppointmentSummary && modalPatientAppointmentsAreFresh
+      ? modalAppointmentSummary.overdueAppointmentCount
+      : modalOverdueAppointmentCount ??
+        serverPatient?.overdueAppointmentCount ??
+        patient?.overdueAppointmentCount;
 
   const handleSave = async () => {
     const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
@@ -259,17 +278,75 @@ export function PatientDetailsModal({
   useEffect(() => {
     if (!open) {
       setModalOverdueAppointmentCount(null);
-      setModalAppointmentSummary(null);
+      setModalPatientAppointments([]);
+      setModalPatientAppointmentsLoaded(false);
+      setModalPatientAppointmentsPatientId("");
       return;
     }
 
     setModalOverdueAppointmentCount(serverPatient?.overdueAppointmentCount ?? patient?.overdueAppointmentCount ?? null);
-    setModalAppointmentSummary(null);
   }, [
     open,
     patient?.overdueAppointmentCount,
     serverPatient?.overdueAppointmentCount,
   ]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleDataRefresh = () => setModalDataRefreshKey((key) => key + 1);
+    window.addEventListener("appointments:updated", handleDataRefresh);
+    window.addEventListener("payments:updated", handleDataRefresh);
+
+    return () => {
+      window.removeEventListener("appointments:updated", handleDataRefresh);
+      window.removeEventListener("payments:updated", handleDataRefresh);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPatientAppointmentsForSummary = async () => {
+      if (!open || !patient?.id) {
+        setModalPatientAppointments([]);
+        setModalPatientAppointmentsLoaded(false);
+        setModalPatientAppointmentsPatientId("");
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          apiUrl(`/api/appointments?patientId=${encodeURIComponent(String(patient.id))}`),
+          { headers: getAuthHeaders(), credentials: "include" }
+        );
+        const result = await response.json().catch(() => null);
+
+        if (!mounted) return;
+
+        if (result?.success && Array.isArray(result.data)) {
+          setModalPatientAppointments(result.data as Appointment[]);
+          setModalPatientAppointmentsLoaded(true);
+          setModalPatientAppointmentsPatientId(String(patient.id));
+          return;
+        }
+
+        setModalPatientAppointmentsLoaded(false);
+        setModalPatientAppointmentsPatientId("");
+      } catch (error) {
+        if (mounted) {
+          console.warn("Failed to fetch patient appointments for summary:", error);
+          setModalPatientAppointmentsLoaded(false);
+          setModalPatientAppointmentsPatientId("");
+        }
+      }
+    };
+
+    loadPatientAppointmentsForSummary();
+    return () => {
+      mounted = false;
+    };
+  }, [open, patient?.id, refreshTrigger, modalDataRefreshKey]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
@@ -419,6 +496,7 @@ export function PatientDetailsModal({
               doctorFilter={doctorFilter}
               openBookingAppointmentId={openBookingAppointmentId}
               onOpenBookingModal={onOpenBookingModal}
+              dataRefreshKey={modalDataRefreshKey}
             />
           </div>
         ) : null}
@@ -744,6 +822,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   doctorFilter?: string;
   openBookingAppointmentId?: string | null;
   onOpenBookingModal?: (appointment: Appointment) => void;
+  dataRefreshKey?: number;
 }>(({
   patient,
   onDeletePatient,
@@ -751,9 +830,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   setIsModified,
   doctorFilter,
   openBookingAppointmentId,
-  onOpenBookingModal
+  onOpenBookingModal,
+  dataRefreshKey = 0
 }, ref) => {
-  const { refreshPatients, appointments, refreshAppointments, openCreateModal } = useAppointmentModal();
+  const { refreshPatients, appointments, refreshAppointments, openCreateModal, refreshTrigger } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const [activeTab, setActiveTab] = useState("info");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
@@ -1558,25 +1638,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       fetchPatientAppointments();
     }
-  }, [appointments, patient, doctorFilter, shouldLoadHistoryData]);
+  }, [appointments, patient, doctorFilter, shouldLoadHistoryData, refreshTrigger, dataRefreshKey]);
 
   useEffect(() => {
     const summary = buildPatientAppointmentSummary(loadedPatient, patientAppointments);
+    const summaryBalance = patientAppointments.length > 0 ? summary.appointmentBalance : summary.balance;
 
     setFormData((prev) => {
-      if (prev.balance === summary.balance && prev.status === summary.status) return prev;
+      if (prev.balance === summaryBalance && prev.status === summary.status) return prev;
       return {
         ...prev,
-        balance: summary.balance,
+        balance: summaryBalance,
         status: summary.status,
       };
     });
 
     setOriginalLoadedData((prev) => {
-      if (prev.balance === summary.balance && prev.status === summary.status) return prev;
+      if (prev.balance === summaryBalance && prev.status === summary.status) return prev;
       return {
         ...prev,
-        balance: summary.balance,
+        balance: summaryBalance,
         status: summary.status,
       };
     });
@@ -2500,9 +2581,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
                       const appointmentBalance = Number((appointment as any).balance);
-                      const displayedBalance = Number.isFinite(appointmentBalance)
+                      const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
+                      const storedDisplayedBalance = Number.isFinite(appointmentBalance)
                         ? appointmentBalance
-                        : Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
+                        : computedOutstandingBalance;
+                      const isCancelledAppointment = normalizeAppointmentStatus(String(appointment.status || "")) === "cancelled";
+                      const originalDisplayedBalance = isCancelledAppointment
+                        ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
+                        : storedDisplayedBalance;
+                      const displayedBalance = isCancelledAppointment ? 0 : originalDisplayedBalance;
 
                       // Resolve doctor image for this appointment entry (snapshot fields first, then staff list)
                       const resolveDoctorImageFor = (apt: any) => {
@@ -2551,7 +2638,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div>
                                 <div className="text-sm font-medium">Total: ${appointment.price}</div>
                                 <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
-                                {displayedBalance > 0 && (
+                                {isCancelledAppointment && originalDisplayedBalance > 0 ? (
+                                  <div className="text-sm font-medium">
+                                    <span className="text-red-500 line-through decoration-red-400 decoration-2">
+                                      Balance: ${originalDisplayedBalance}
+                                    </span>
+                                    <span className="ml-2 text-emerald-600">
+                                      Balance: $0
+                                    </span>
+                                  </div>
+                                ) : displayedBalance > 0 && (
                                   <div className="text-sm font-medium text-red-600">
                                     Balance: ${displayedBalance}
                                   </div>

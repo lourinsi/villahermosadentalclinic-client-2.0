@@ -51,7 +51,8 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
     }
 
     if (portal === "admin") {
-      router.push(`/admin/doctors/${encodeURIComponent(doctor.name)}`);
+      const basePath = user?.role === "receptionist" ? "/receptionist" : "/admin";
+      router.push(`${basePath}/doctors/${encodeURIComponent(doctor.name)}`);
     } else if (portal === "patient") {
       router.push(`/patient/doctors/${encodeURIComponent(doctor.name)}`);
     } else {

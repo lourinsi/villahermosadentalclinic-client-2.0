@@ -29,7 +29,7 @@ export function Header(_props: HeaderProps) {
   const router = useRouter();
 
   const handleDashboard = () => {
-    router.push("/admin/dashboard");
+    router.push(user?.role === "receptionist" ? "/receptionist/dashboard" : "/admin/dashboard");
   };
 
   const navLinks = [
