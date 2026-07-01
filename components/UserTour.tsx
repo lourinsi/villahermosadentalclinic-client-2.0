@@ -68,6 +68,8 @@ const ADD_PATIENT_MODAL_SELECTORS = [
   '[data-tour-id="add-patient-confirm"]',
 ];
 
+const getReceptionistTourRoute = (route: string) => route.replace(/^\/admin(?=\/|$)/, "/receptionist");
+
 const TOUR_STEPS: TourStep[] = [
   {
     id: "receptionist-credentials",
@@ -507,15 +509,16 @@ const getDialogRoot = (element: HTMLElement | null) =>
   element?.closest('[data-slot="dialog-content"]') as HTMLElement | null;
 
 const getAdminNavSelectorForPath = (path: string) => {
-  if (path.startsWith("/admin/dashboard")) return '[data-tour-id="admin-nav-dashboard"]';
-  if (path.startsWith("/admin/requests")) return '[data-tour-id="admin-nav-requests"]';
-  if (path.startsWith("/admin/patients")) return '[data-tour-id="admin-nav-patients"]';
-  if (path.startsWith("/admin/doctors")) return '[data-tour-id="admin-nav-find-doctors"]';
-  if (path.startsWith("/admin/calendar")) return '[data-tour-id="admin-nav-calendar"]';
-  if (path.startsWith("/admin/finance")) return '[data-tour-id="admin-nav-finance"]';
-  if (path.startsWith("/admin/staff")) return '[data-tour-id="admin-nav-staff"]';
-  if (path.startsWith("/admin/notifications")) return '[data-tour-id="admin-nav-notifications"]';
-  if (path.startsWith("/admin/settings")) return '[data-tour-id="admin-nav-settings"]';
+  const managementPath = path.replace(/^\/receptionist(?=\/|$)/, "/admin");
+  if (managementPath.startsWith("/admin/dashboard")) return '[data-tour-id="admin-nav-dashboard"]';
+  if (managementPath.startsWith("/admin/requests")) return '[data-tour-id="admin-nav-requests"]';
+  if (managementPath.startsWith("/admin/patients")) return '[data-tour-id="admin-nav-patients"]';
+  if (managementPath.startsWith("/admin/doctors")) return '[data-tour-id="admin-nav-find-doctors"]';
+  if (managementPath.startsWith("/admin/calendar")) return '[data-tour-id="admin-nav-calendar"]';
+  if (managementPath.startsWith("/admin/finance")) return '[data-tour-id="admin-nav-finance"]';
+  if (managementPath.startsWith("/admin/staff")) return '[data-tour-id="admin-nav-staff"]';
+  if (managementPath.startsWith("/admin/notifications")) return '[data-tour-id="admin-nav-notifications"]';
+  if (managementPath.startsWith("/admin/settings")) return '[data-tour-id="admin-nav-settings"]';
   return "";
 };
 
@@ -599,7 +602,7 @@ export function UserTour() {
     (index: number, routeOverride?: string) => {
       const nextIndex = clamp(index, 0, TOUR_STEPS.length - 1);
       const nextStep = TOUR_STEPS[nextIndex];
-      const nextRoute = routeOverride || nextStep.route;
+      const nextRoute = getReceptionistTourRoute(routeOverride || nextStep.route);
       const shouldNavigate = nextRoute !== pathname;
 
       pendingRouteStepRef.current = shouldNavigate
@@ -806,10 +809,10 @@ export function UserTour() {
     }
 
     if (!step) return;
-    if (step.route === pathname) return;
+    if (getReceptionistTourRoute(step.route) === pathname) return;
 
     const nextRouteIndex = TOUR_STEPS.findIndex(
-      (candidate, index) => index >= stepIndex && candidate.route === pathname
+      (candidate, index) => index >= stepIndex && getReceptionistTourRoute(candidate.route) === pathname
     );
 
     if (nextRouteIndex >= 0) {
@@ -831,7 +834,7 @@ export function UserTour() {
 
   useEffect(() => {
     if (!isTransitioning || !isActive || !step) return;
-    if (step.route !== pathname) return;
+    if (getReceptionistTourRoute(step.route) !== pathname) return;
     if (!getVisibleElement(step.target)) return;
 
     const frameId = window.requestAnimationFrame(() => {
@@ -896,7 +899,7 @@ export function UserTour() {
 
         let attempts = 0;
         const poll = () => {
-          if (nextStep.route !== window.location.pathname) {
+          if (getReceptionistTourRoute(nextStep.route) !== window.location.pathname) {
             goToStep(nextIndex);
             return;
           }
@@ -1021,7 +1024,7 @@ export function UserTour() {
 
         let attempts = 0;
         const poll = () => {
-          if (nextStep.route !== window.location.pathname) {
+          if (getReceptionistTourRoute(nextStep.route) !== window.location.pathname) {
             goToStep(nextIndex);
             return;
           }
@@ -1208,7 +1211,9 @@ export function UserTour() {
         type="button"
         data-tour-ui="true"
         onClick={() => {
-          const currentRouteIndex = TOUR_STEPS.findIndex((candidate) => candidate.route === pathname);
+          const currentRouteIndex = TOUR_STEPS.findIndex(
+            (candidate) => getReceptionistTourRoute(candidate.route) === pathname
+          );
           startTour(currentRouteIndex >= 0 ? currentRouteIndex : 0);
         }}
         className="fixed bottom-5 right-5 z-[80] inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-4 py-3 text-sm font-bold text-blue-700 shadow-xl shadow-blue-100/70 transition hover:-translate-y-0.5 hover:bg-blue-50"

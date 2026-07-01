@@ -40,16 +40,18 @@ export const adminLayoutTheme: AdminLayoutTheme = {
 };
 
 const navItems = [
-  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/requests", label: "Requests", icon: ClipboardList },
-  { href: "/admin/patients", label: "Patients", icon: Users },
-  { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
-  { href: "/admin/calendar", label: "Calendar", icon: Calendar },
-  { href: "/admin/finance", label: "Finance", icon: DollarSign },
-  { href: "/admin/staff", label: "Staff", icon: Shield },
-  { href: "/admin/notifications", label: "Notifications", icon: Bell },
-  { href: "/admin/settings", label: "Settings", icon: Settings },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/requests", label: "Requests", icon: ClipboardList },
+  { path: "/patients", label: "Patients", icon: Users },
+  { path: "/doctors", label: "Find Doctors", icon: Stethoscope },
+  { path: "/calendar", label: "Calendar", icon: Calendar },
+  { path: "/finance", label: "Finance", icon: DollarSign },
+  { path: "/staff", label: "Staff", icon: Shield },
+  { path: "/notifications", label: "Notifications", icon: Bell },
+  { path: "/settings", label: "Settings", icon: Settings },
 ];
+
+const MANAGEMENT_LOGOUT_REDIRECT_KEY = "villahermosa-management-logout-redirect";
 
 interface AdminLayoutShellProps {
   children: React.ReactNode;
@@ -63,6 +65,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
   const { isReceptionistView, canSwitchAdminView, toggleViewMode } = useAdminViewMode();
+  const managementBasePath = user?.role === "receptionist" ? "/receptionist" : "/admin";
   const {
     notifications,
     markAsRead,
@@ -141,6 +144,11 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const handleLogout = async () => {
     try {
       const logoutRedirect = user?.role === "receptionist" ? "/receptionist/login" : "/admin/login";
+      try {
+        sessionStorage.setItem(MANAGEMENT_LOGOUT_REDIRECT_KEY, logoutRedirect);
+      } catch {
+        // Ignore storage failures; the explicit router push below still handles normal logout.
+      }
       await logout();
       toast.success("Logged out successfully");
       router.push(logoutRedirect);
@@ -153,6 +161,11 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const getNavTourId = (label: string) =>
     `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 
+  React.useEffect(() => {
+    if (user?.role !== "receptionist" || !pathname.startsWith("/admin/")) return;
+    router.replace(pathname.replace(/^\/admin/, "/receptionist"));
+  }, [pathname, router, user?.role]);
+
   return (
     <div className="flex h-screen bg-gray-100">
       <aside data-tour-id="admin-sidebar" className={theme.sidebar}>
@@ -161,11 +174,12 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           <ul className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const itemHref = `${managementBasePath}${item.path}`;
+              const isActive = pathname === itemHref;
               return (
-                <li key={item.href}>
+                <li key={itemHref}>
                   <Link
-                    href={item.href}
+                    href={itemHref}
                     prefetch={false}
                     data-tour-id={getNavTourId(item.label)}
                     className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
@@ -233,6 +247,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
               notifications={notifications}
               unreadCount={unreadCount}
               portal="admin"
+              notificationsPath={`${managementBasePath}/notifications`}
               onUpdateAppointmentStatus={openApprovalDialog}
               onMarkAsRead={markAsRead}
               onMarkAsUnread={markAsUnread}

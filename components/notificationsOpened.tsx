@@ -18,6 +18,7 @@ interface NotificationsOpenedProps {
   notifications: Notification[];
   unreadCount: number;
   portal: "admin" | "doctor" | "patient";
+  notificationsPath?: string;
   onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
   onMarkAsRead?: (id: string) => void;
   onMarkAsUnread?: (id: string) => void;
@@ -42,6 +43,7 @@ function NotificationsOpened({
   notifications,
   unreadCount,
   portal,
+  notificationsPath,
   onUpdateAppointmentStatus,
   onMarkAsRead,
   onMarkAsUnread,
@@ -93,6 +95,7 @@ function NotificationsOpened({
     setIsPopoverOpen(false);
     onViewAppointmentSnapshot?.(appointmentId, notification);
   };
+  const notificationsHref = notificationsPath || `/${portal}/notifications`;
 
   const handleUpdateAppointmentStatus = (appointmentId: string, status: string, notificationId: string) => {
     setIsPopoverOpen(false);
@@ -314,7 +317,7 @@ function NotificationsOpened({
                 <div className="space-y-1">
                   <div className="flex items-center justify-between px-2">
                     <span className="font-bold text-sm">New</span>
-                    <Link href={`/${portal}/notifications`} prefetch={false} className="text-violet-600 text-xs font-medium hover:underline">See all</Link>
+                    <Link href={notificationsHref} prefetch={false} className="text-violet-600 text-xs font-medium hover:underline">See all</Link>
                   </div>
                   {visibleNew.map(renderItem)}
                 </div>
@@ -333,7 +336,7 @@ function NotificationsOpened({
           {renderLoadMoreSentinel()}
         </div>
         <div className="p-2 border-t">
-          <Link href={`/${portal}/notifications`} prefetch={false} className="block">
+          <Link href={notificationsHref} prefetch={false} className="block">
             <Button variant="ghost" size="sm" className="w-full text-violet-600 hover:text-violet-700 hover:bg-violet-50 font-semibold rounded-lg">
               View all notifications
             </Button>

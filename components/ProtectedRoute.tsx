@@ -8,17 +8,33 @@ import { Loader2 } from "lucide-react";
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
+  loginPath?: "/admin/login" | "/receptionist/login";
 }
 
 const MANAGEMENT_ROLES = ["admin", "receptionist"];
+const MANAGEMENT_LOGOUT_REDIRECT_KEY = "villahermosa-management-logout-redirect";
 
-export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+const getManagementLoginRedirect = (defaultLoginPath: "/admin/login" | "/receptionist/login") => {
+  try {
+    const pendingRedirect = sessionStorage.getItem(MANAGEMENT_LOGOUT_REDIRECT_KEY);
+    if (pendingRedirect === "/admin/login" || pendingRedirect === "/receptionist/login") {
+      sessionStorage.removeItem(MANAGEMENT_LOGOUT_REDIRECT_KEY);
+      return pendingRedirect;
+    }
+  } catch {
+    // Fall through to the default management login when storage is unavailable.
+  }
+
+  return defaultLoginPath;
+};
+
+export default function ProtectedRoute({ children, allowedRoles, loginPath = "/admin/login" }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push("/admin/login");
+      router.push(getManagementLoginRedirect(loginPath));
       return;
     }
 
@@ -26,11 +42,11 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
       const routeRoles = allowedRoles || MANAGEMENT_ROLES;
 
       if (!routeRoles.includes(user.role)) {
-        router.push("/admin/login");
+        router.push(loginPath);
         return;
       }
     }
-  }, [isLoading, isAuthenticated, user, router, allowedRoles]);
+  }, [isLoading, isAuthenticated, user, router, allowedRoles, loginPath]);
 
   if (isLoading) {
     return (

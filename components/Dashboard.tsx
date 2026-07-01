@@ -58,7 +58,8 @@ export function Dashboard({ portal }: DashboardProps) {
     if (portal === "patient") {
       router.push("/patient/appointments");
     } else {
-      router.push(`/${portal}/calendar`);
+      const basePath = portal === "admin" && user?.role === "receptionist" ? "/receptionist" : `/${portal}`;
+      router.push(`${basePath}/calendar`);
     }
   };
 
