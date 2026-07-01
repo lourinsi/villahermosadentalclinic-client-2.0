@@ -106,6 +106,7 @@ export default function ReceptionistLoginPage() {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
                   id="username"
+                  data-tour-id="receptionist-login-username"
                   type="text"
                   placeholder="Enter your username or email"
                   value={username}
@@ -125,6 +126,7 @@ export default function ReceptionistLoginPage() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
                   id="password"
+                  data-tour-id="receptionist-login-password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
@@ -146,6 +148,7 @@ export default function ReceptionistLoginPage() {
 
             <Button
               type="submit"
+              data-tour-id="receptionist-login-submit"
               disabled={isLoading || isSubmitting}
               className="w-full h-10 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-medium rounded-lg transition-all duration-200 mt-6"
             >
@@ -159,7 +162,10 @@ export default function ReceptionistLoginPage() {
               )}
             </Button>
 
-            <div className="mt-6 p-4 bg-sky-50 rounded-lg border border-sky-200">
+            <div
+              data-tour-id="receptionist-login-demo-card"
+              className="mt-6 p-4 bg-sky-50 rounded-lg border border-sky-200"
+            >
               <p className="text-xs font-semibold text-sky-900 mb-2">Demo Credentials:</p>
               <p className="text-xs text-sky-800 font-mono">
                 <strong>Email:</strong> hannah@villahermosa<br />
@@ -168,6 +174,7 @@ export default function ReceptionistLoginPage() {
               <Button
                 type="button"
                 variant="outline"
+                data-tour-id="receptionist-demo-fill"
                 onClick={fillDemoCredentials}
                 className="mt-3 h-9 w-full border-sky-200 bg-white text-xs font-bold text-sky-700 hover:bg-sky-50"
               >

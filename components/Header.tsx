@@ -101,10 +101,10 @@ export function Header(_props: HeaderProps) {
                 <Button 
                   variant="outline" 
                   data-tour-id="landing-login"
-                  onClick={() => router.push("/admin/login")}
+                  onClick={() => router.push("/receptionist/login")}
                   className="h-11 rounded-full border-primary px-5 font-semibold text-primary hover:bg-primary/5"
                 >
-                  Admin Login
+                  Login
                 </Button>
               </div>
             )}
@@ -135,9 +135,9 @@ export function Header(_props: HeaderProps) {
                   </>
                 ) : (
                   <>
-                    <DropdownMenuItem onClick={() => router.push("/admin/login")}>
+                    <DropdownMenuItem onClick={() => router.push("/receptionist/login")}>
                       <User className="mr-2 h-4 w-4" />
-                      Admin Login
+                      Login
                     </DropdownMenuItem>
                   </>
                 )}
