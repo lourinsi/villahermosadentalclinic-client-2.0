@@ -53,7 +53,7 @@ import useSharedBookingLogic, {
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
-  isPastAppointmentDate,
+  isPastAppointmentSchedule,
   isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
@@ -431,7 +431,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
   const isPastAppointmentMode = appointmentCreationMode === "past" && !appointmentToEdit;
-  const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentDate(selectedDate ?? appointmentToEdit?.date);
+  const statusRestrictionDate = selectedDate ?? appointmentToEdit?.date;
+  const statusRestrictionTime = selectedTime || appointmentToEdit?.time;
+  const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentSchedule(statusRestrictionDate, statusRestrictionTime);
   const isPublicCachedAppointment = isPublicBookingMode && Boolean(appointmentToEdit?.isPublicCache);
   const getLocalPublicAppointmentLogs = useCallback(() => {
     if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];

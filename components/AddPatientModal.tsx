@@ -2,14 +2,148 @@
 
 import { apiUrl } from "@/lib/api";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { createCachedPublicBookingPatient } from "@/lib/publicBookingCache";
+import {
+  createCachedPublicBookingPatient,
+  getCachedPublicBookingPatients,
+} from "@/lib/publicBookingCache";
+
+type ExistingPatientOption = {
+  id?: string | number;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+};
+
+type SimilarPatientMatch = {
+  patient: ExistingPatientOption;
+  displayName: string;
+  isExact: boolean;
+  score: number;
+};
+
+const normalizeNamePart = (value?: string | null) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getDisplayPatientName = (patient: ExistingPatientOption) =>
+  patient.name ||
+  [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() ||
+  "Existing patient";
+
+const getPatientNameParts = (patient: ExistingPatientOption) => {
+  const firstName = String(patient.firstName || "").trim();
+  const lastName = String(patient.lastName || "").trim();
+
+  if (firstName || lastName) {
+    return { firstName, lastName };
+  }
+
+  const nameParts = getDisplayPatientName(patient).trim().split(/\s+/);
+  return {
+    firstName: nameParts[0] || "",
+    lastName: nameParts.slice(1).join(" "),
+  };
+};
+
+const getEditDistance = (first: string, second: string) => {
+  if (first === second) return 0;
+  if (!first) return second.length;
+  if (!second) return first.length;
+
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  const current = Array(second.length + 1).fill(0);
+
+  for (let i = 1; i <= first.length; i += 1) {
+    current[0] = i;
+
+    for (let j = 1; j <= second.length; j += 1) {
+      const substitutionCost = first[i - 1] === second[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[second.length];
+};
+
+const getNameSimilarity = (first: string, second: string) => {
+  const maxLength = Math.max(first.length, second.length);
+  if (maxLength === 0) return 0;
+  return 1 - getEditDistance(first, second) / maxLength;
+};
+
+const isCloseNamePart = (first: string, second: string) => {
+  if (!first || !second) return false;
+  if (first === second) return true;
+
+  const maxLength = Math.max(first.length, second.length);
+  if (maxLength <= 2) return false;
+
+  const distance = getEditDistance(first, second);
+  if (maxLength <= 4) return distance <= 1;
+
+  return distance <= 2 || getNameSimilarity(first, second) >= 0.78;
+};
+
+const findSimilarPatientMatch = (
+  formData: { firstName: string; lastName: string },
+  patients: ExistingPatientOption[]
+): SimilarPatientMatch | null => {
+  const firstName = normalizeNamePart(formData.firstName);
+  const lastName = normalizeNamePart(formData.lastName);
+  if (!firstName || !lastName) return null;
+
+  const fullName = `${firstName}${lastName}`;
+
+  const matches = patients
+    .map((patient): SimilarPatientMatch | null => {
+      const patientNameParts = getPatientNameParts(patient);
+      const patientFirstName = normalizeNamePart(patientNameParts.firstName);
+      const patientLastName = normalizeNamePart(patientNameParts.lastName);
+      if (!patientFirstName || !patientLastName) return null;
+
+      const patientFullName = `${patientFirstName}${patientLastName}`;
+      const firstSimilarity = getNameSimilarity(firstName, patientFirstName);
+      const lastSimilarity = getNameSimilarity(lastName, patientLastName);
+      const fullSimilarity = getNameSimilarity(fullName, patientFullName);
+      const fullDistance = getEditDistance(fullName, patientFullName);
+      const allowedFullDistance = fullName.length <= 8 ? 1 : fullName.length <= 14 ? 2 : 3;
+      const isExact = firstName === patientFirstName && lastName === patientLastName;
+      const isClose =
+        isExact ||
+        (isCloseNamePart(firstName, patientFirstName) && isCloseNamePart(lastName, patientLastName)) ||
+        fullDistance <= allowedFullDistance ||
+        (firstSimilarity >= 0.78 && lastSimilarity >= 0.78 && fullSimilarity >= 0.84);
+
+      if (!isClose) return null;
+
+      return {
+        patient,
+        displayName: getDisplayPatientName(patient),
+        isExact,
+        score: (firstSimilarity + lastSimilarity + fullSimilarity) / 3,
+      };
+    })
+    .filter((match): match is SimilarPatientMatch => Boolean(match))
+    .sort((a, b) => Number(b.isExact) - Number(a.isExact) || b.score - a.score);
+
+  return matches[0] || null;
+};
 
 export function AddPatientModal() {
   const {
@@ -22,6 +156,7 @@ export function AddPatientModal() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [existingPatients, setExistingPatients] = useState<ExistingPatientOption[]>([]);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -31,6 +166,10 @@ export function AddPatientModal() {
   });
 
   const firstNameRef = useRef<HTMLInputElement | null>(null);
+  const similarPatientMatch = useMemo(
+    () => findSimilarPatientMatch(formData, existingPatients),
+    [existingPatients, formData]
+  );
 
   // Focus on first name when modal opens
   useEffect(() => {
@@ -40,6 +179,42 @@ export function AddPatientModal() {
       }, 50);
     }
   }, [isAddPatientModalOpen, showSummary]);
+
+  useEffect(() => {
+    if (!isAddPatientModalOpen) return;
+
+    let cancelled = false;
+    setExistingPatients([]);
+
+    const loadExistingPatients = async () => {
+      if (addPatientModalMode === "publicBooking") {
+        if (!cancelled) {
+          setExistingPatients(getCachedPublicBookingPatients());
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(apiUrl("/api/patients?limit=1000"), {
+          credentials: "include",
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (!cancelled) {
+          setExistingPatients(response.ok && result?.success && Array.isArray(result.data) ? result.data : []);
+        }
+      } catch (error) {
+        console.warn("Could not load existing patients for duplicate check:", error);
+        if (!cancelled) setExistingPatients([]);
+      }
+    };
+
+    loadExistingPatients();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [addPatientModalMode, isAddPatientModalOpen]);
 
   const validateForm = () => {
     if (!formData.firstName.trim()) {
@@ -68,6 +243,9 @@ export function AddPatientModal() {
   const handleReview = () => {
     if (validateForm()) {
       setShowSummary(true);
+      if (similarPatientMatch) {
+        toast.warning(`This name looks similar to ${similarPatientMatch.displayName}.`);
+      }
     }
   };
 
@@ -237,7 +415,7 @@ export function AddPatientModal() {
 
           {/* Summary Popover Overlay */}
           {showSummary && (
-            <div className="absolute inset-0 bg-white rounded-lg shadow-xl border border-blue-200 p-6 flex flex-col z-50">
+            <div className="absolute inset-0 z-50 flex flex-col overflow-y-auto rounded-lg border border-blue-200 bg-white p-6 shadow-xl">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Confirm Patient Information</h3>
               
               <div className="space-y-3 mb-6 flex-1">
@@ -259,9 +437,27 @@ export function AddPatientModal() {
                 </div>
               </div>
 
-              <p className="text-sm text-muted-foreground mb-6 pb-4 border-b">
-                Additional patient information can be updated later after creation.
-              </p>
+              <div className="mb-6 space-y-3 border-b pb-4">
+                <p className="text-sm text-muted-foreground">
+                  Additional patient information can be updated later after creation.
+                </p>
+
+                {similarPatientMatch && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                    {similarPatientMatch.isExact ? (
+                      <>
+                        This looks like an existing patient: <span className="font-black">{similarPatientMatch.displayName}</span>.
+                        Continue only if this is a different patient.
+                      </>
+                    ) : (
+                      <>
+                        The name seems similar to <span className="font-black">{similarPatientMatch.displayName}</span>.
+                        Are you sure you want to continue?
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end gap-2">
                 <Button 

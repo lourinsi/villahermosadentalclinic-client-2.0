@@ -44,19 +44,11 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
-                onClick={() => router.push("/admin/login")}
+                onClick={() => router.push("/receptionist/login")}
                 size="lg"
                 className="h-12 rounded-full bg-primary px-8 text-base font-bold hover:bg-primary/90"
               >
-                Admin Login
-              </Button>
-              <Button
-                onClick={() => router.push("/receptionist/login")}
-                size="lg"
-                variant="outline"
-                className="h-12 rounded-full px-8 text-base font-bold"
-              >
-                Receptionist Login
+                Login
               </Button>
             </div>
           </div>

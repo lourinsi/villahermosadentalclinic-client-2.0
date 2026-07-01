@@ -87,6 +87,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
     selectedAppointment,
     newAppointmentDate,
     newAppointmentTime,
+    newAppointmentPatientId,
     newAppointmentDoctorName,
     newAppointmentCreationMode
   } = useAppointmentModal();
@@ -284,6 +285,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
             appointmentToEdit={selectedAppointment}
             defaultDate={newAppointmentDate}
             defaultTime={newAppointmentTime}
+            defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
             doctorName={newAppointmentDoctorName}
             appointmentCreationMode={newAppointmentCreationMode}
           />

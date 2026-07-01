@@ -70,20 +70,20 @@ const ADD_PATIENT_MODAL_SELECTORS = [
 
 const TOUR_STEPS: TourStep[] = [
   {
-    id: "admin-credentials",
-    route: "/admin/login",
-    target: '[data-tour-id="admin-login-demo-card"]',
-    title: "Use the demo credentials",
-    body: "Username: admin\nPassword: password\nUse the demo-fill button, then sign in.",
+    id: "receptionist-credentials",
+    route: "/receptionist/login",
+    target: '[data-tour-id="receptionist-login-demo-card"]',
+    title: "Use the receptionist demo credentials",
+    body: "Email: hannah@villahermosa\nPassword: password\nUse the demo-fill button, then sign in.",
     primaryLabel: "Fill credentials",
     placement: "top",
-    action: { type: "clickSelector", selector: '[data-tour-id="admin-demo-fill"]' },
+    action: { type: "clickSelector", selector: '[data-tour-id="receptionist-demo-fill"]' },
   },
   {
-    id: "admin-submit",
-    route: "/admin/login",
-    target: '[data-tour-id="admin-login-submit"]',
-    title: "Sign in as admin",
+    id: "receptionist-submit",
+    route: "/receptionist/login",
+    target: '[data-tour-id="receptionist-login-submit"]',
+    title: "Sign in as receptionist",
     body: "Click Sign In. The helper will automatically continue once the dashboard loads.",
     primaryLabel: "Sign in to continue",
     placement: "top",
@@ -94,7 +94,7 @@ const TOUR_STEPS: TourStep[] = [
     id: "dashboard-nav",
     route: "/admin/dashboard",
     target: '[data-tour-id="admin-sidebar"]',
-    title: "Admin workspace",
+    title: "Receptionist workspace",
     body: "The left navigation is the project map: requests, patients, doctors, calendar, finance, staff, and notifications.",
     primaryLabel: "Next",
     placement: "right",
@@ -104,7 +104,7 @@ const TOUR_STEPS: TourStep[] = [
     route: "/admin/dashboard",
     target: '[data-tour-id="admin-dashboard-stats"]',
     title: "Dashboard overview",
-    body: "These cards summarize patient count, appointments, pending requests, and revenue so the admin can scan clinic activity quickly.",
+    body: "These cards summarize patient count, appointments, pending requests, and revenue so the front desk can scan clinic activity quickly.",
     primaryLabel: "Next",
     placement: "bottom",
   },
@@ -396,7 +396,7 @@ const TOUR_STEPS: TourStep[] = [
     route: "/admin/calendar",
     target: '[data-tour-id="calendar-view-month"]',
     title: "Month view",
-    body: "Month view lets the admin see the full schedule at a glance. You can always switch back to day or week later.",
+    body: "Month view lets the receptionist see the full schedule at a glance. You can always switch back to day or week later.",
     primaryLabel: "Find doctors",
     placement: "bottom",
     action: { type: "route", href: "/admin/doctors" },
@@ -425,7 +425,7 @@ const TOUR_STEPS: TourStep[] = [
     route: "/admin/requests",
     target: '[data-tour-id="requests-page"]',
     title: "Requests and approvals",
-    body: "Requests collect bookings that need admin action. Approve, reject, update payment status, or open the appointment details from here.",
+    body: "Requests collect bookings that need front desk action. Approve, reject, update payment status, or open the appointment details from here.",
     primaryLabel: "Go to finance",
     placement: "bottom",
     action: { type: "route", href: "/admin/finance" },
@@ -783,18 +783,10 @@ export function UserTour() {
     setIsMounted(true);
 
     const storedActive = localStorage.getItem(ACTIVE_KEY) === "true";
-    const storedStep = Number(localStorage.getItem(STEP_KEY) || "0");
-    const completed = localStorage.getItem(COMPLETED_KEY) === "true";
 
     if (storedActive) {
       localStorage.removeItem(ACTIVE_KEY);
       localStorage.removeItem(STEP_KEY);
-    }
-
-    if (!storedActive && !completed && window.location.pathname === "/") {
-      setStepIndex(0);
-      setIsActive(true);
-      persistStep(0);
     }
   }, [persistStep]);
 
@@ -936,7 +928,7 @@ export function UserTour() {
     };
 
     const blockEvent = (event: Event) => {
-      if (event.type === "submit" && step.id === "admin-submit") return;
+      if (event.type === "submit" && step.id === "receptionist-submit") return;
       if (isAllowedEventTarget(event.target)) {
         continueFromDirectClick(event);
         return;
@@ -1267,7 +1259,7 @@ export function UserTour() {
             </div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-500">
-                Admin demo helper
+                Receptionist demo helper
               </p>
               <h2 className="text-base font-black leading-tight text-slate-950">
                 {step.title}
@@ -1339,7 +1331,7 @@ export function UserTour() {
               <div>
                 <h3 className="text-base font-black text-slate-950">Stop the helper?</h3>
                 <p className="mt-1 text-sm leading-6 text-slate-600">
-                  This will end the guided demo. Continue only if you already know your way around the admin workflow.
+                  This will end the guided demo. Continue only if you already know your way around the receptionist workflow.
                 </p>
               </div>
             </div>

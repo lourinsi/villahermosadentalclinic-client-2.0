@@ -6,7 +6,7 @@ import {
 } from "@/lib/appointment-status";
 import { getAppointmentPrice } from "@/lib/appointment-types";
 import {
-  isPastAppointmentDate,
+  isPastAppointmentSchedule,
   normalizePastAppointmentStatus,
 } from "@/components/sharedBookingLogic";
 
@@ -50,7 +50,7 @@ const normalizePublicBookingAppointment = (
 ): PublicBookingAppointment => {
   const status =
     normalizeAppointmentStatus(appointment.status) || CART_APPOINTMENT_STATUS;
-  const shouldRestrictPastStatus = isPastAppointmentDate(appointment.date, now);
+  const shouldRestrictPastStatus = isPastAppointmentSchedule(appointment.date, appointment.time, now);
   const nextStatus = shouldRestrictPastStatus
     ? normalizePastAppointmentStatus(status)
     : status;

@@ -15,7 +15,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, History, Eye } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, History, Eye, Check, X } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -57,7 +57,7 @@ import useSharedBookingLogic, {
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
   isSignificantBookingPaymentStatus,
-  isPastAppointmentDate,
+  isPastAppointmentSchedule,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizePastAppointmentStatus,
@@ -403,6 +403,127 @@ const findNextAvailablePatientSchedule = async ({
 const DEFAULT_BOOKING_TREATMENT = "Routine Cleaning";
 const TOUR_STEP_CHANGE_EVENT = "villahermosa-tour:step-change";
 
+type TreatmentOption = {
+  name: string;
+  short: string;
+  icon: string;
+  color: string;
+};
+
+type ExistingTreatmentSuggestion = {
+  treatment: string;
+  normalizedInput: string;
+  isExact: boolean;
+};
+
+const BOOKING_TREATMENT_OPTIONS: TreatmentOption[] = [
+  { name: DEFAULT_BOOKING_TREATMENT, short: "Cleaning", icon: "✨", color: "bg-blue-500" },
+  { name: "Checkup", short: "Checkup", icon: "🔍", color: "bg-emerald-500" },
+  { name: "Filling", short: "Filling", icon: "🦷", color: "bg-amber-500" },
+  { name: "Root Canal", short: "Root Canal", icon: "🔬", color: "bg-rose-500" },
+  { name: "Extraction", short: "Extraction", icon: "🦷", color: "bg-slate-700" },
+  { name: "Whitening", short: "Whitening", icon: "💎", color: "bg-cyan-400" },
+  { name: "Dentures", short: "Dentures", icon: "🦷", color: "bg-violet-500" },
+  { name: "Crowns", short: "Crowns", icon: "👑", color: "bg-yellow-500" },
+  { name: "Braces", short: "Braces", icon: "😁", color: "bg-fuchsia-500" },
+  { name: "Other", short: "Other", icon: "➕", color: "bg-gray-400" },
+];
+
+const normalizeTreatmentInput = (value: string) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getTreatmentAliases = (treatment: string) => {
+  const normalized = normalizeTreatmentInput(treatment);
+  const aliases = new Set([normalized]);
+
+  if (treatment === DEFAULT_BOOKING_TREATMENT) {
+    aliases.add("cleaning");
+    aliases.add("teethcleaning");
+    aliases.add("dentalcleaning");
+  }
+
+  if (treatment === "Root Canal") aliases.add("rootcanaltherapy");
+  if (treatment === "Dentures") aliases.add("denture");
+  if (treatment === "Crowns") aliases.add("crown");
+  if (treatment === "Braces") aliases.add("brace");
+
+  return Array.from(aliases);
+};
+
+const EXISTING_TREATMENT_ALIASES = BOOKING_TREATMENT_OPTIONS
+  .filter((treatment) => treatment.name !== "Other")
+  .flatMap((treatment) =>
+    getTreatmentAliases(treatment.name).map((alias) => ({
+      alias,
+      treatment: treatment.name,
+    }))
+  );
+
+const getEditDistance = (first: string, second: string) => {
+  if (first === second) return 0;
+  if (!first) return second.length;
+  if (!second) return first.length;
+
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  const current = Array(second.length + 1).fill(0);
+
+  for (let i = 1; i <= first.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= second.length; j += 1) {
+      const substitutionCost = first[i - 1] === second[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[second.length];
+};
+
+const findExistingTreatmentSuggestion = (value: string): ExistingTreatmentSuggestion | null => {
+  const normalizedInput = normalizeTreatmentInput(value);
+  if (normalizedInput.length < 3) return null;
+
+  const exactMatch = EXISTING_TREATMENT_ALIASES.find((option) => option.alias === normalizedInput);
+  if (exactMatch) {
+    return {
+      treatment: exactMatch.treatment,
+      normalizedInput,
+      isExact: true,
+    };
+  }
+
+  if (normalizedInput.length < 4) return null;
+
+  const bestMatch = EXISTING_TREATMENT_ALIASES
+    .map((option) => ({
+      ...option,
+      distance: getEditDistance(normalizedInput, option.alias),
+    }))
+    .sort((a, b) => a.distance - b.distance || a.alias.length - b.alias.length)[0];
+
+  if (!bestMatch) return null;
+
+  const maxDistance = normalizedInput.length >= 7 ? 2 : 1;
+  const distanceRatio = bestMatch.distance / Math.max(normalizedInput.length, bestMatch.alias.length);
+  if (bestMatch.distance <= maxDistance && distanceRatio <= 0.35) {
+    return {
+      treatment: bestMatch.treatment,
+      normalizedInput,
+      isExact: false,
+    };
+  }
+
+  return null;
+};
+
 const getCurrentTourStepId = () => {
   if (typeof window === "undefined") return "";
   return (window as Window & { __villahermosaTourStepId?: string }).__villahermosaTourStepId || "";
@@ -450,6 +571,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [selectedDoctor, setSelectedDoctor] = useState<string>(doctorName || "");
   const [appointmentType, setAppointmentType] = useState<string>("");
   const [customAppointmentTypeName, setCustomAppointmentTypeName] = useState<string>("");
+  const [declinedTreatmentSuggestion, setDeclinedTreatmentSuggestion] = useState<{ normalizedInput: string; treatment: string } | null>(null);
+  const [pendingConfirmAfterTreatmentSuggestion, setPendingConfirmAfterTreatmentSuggestion] = useState(false);
   const [duration, setDuration] = useState<string>("30");
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
@@ -707,7 +830,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
   const isPastAppointmentMode = appointmentCreationMode === "past" && !appointmentToEdit;
-  const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentDate(selectedDate ?? appointmentToEdit?.date);
+  const statusRestrictionDate = selectedDate ?? appointmentToEdit?.date;
+  const statusRestrictionTime = selectedTime || appointmentToEdit?.time;
+  const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentSchedule(statusRestrictionDate, statusRestrictionTime);
   const isPublicCachedAppointment = isPublicBookingMode && Boolean(appointmentToEdit?.isPublicCache);
   const getLocalPublicAppointmentLogs = useCallback(() => {
     if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];
@@ -1475,6 +1600,78 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [appointmentType, user?.role, duration, isEditMode]);
 
+  const isTreatmentSuggestionDeclined = useCallback(
+    (suggestion: ExistingTreatmentSuggestion | null) =>
+      Boolean(
+        suggestion &&
+        declinedTreatmentSuggestion &&
+        declinedTreatmentSuggestion.normalizedInput === suggestion.normalizedInput &&
+        declinedTreatmentSuggestion.treatment === suggestion.treatment
+      ),
+    [declinedTreatmentSuggestion]
+  );
+
+  const detectedExistingTreatment = useMemo(() => {
+    if (appointmentType !== "Other") return null;
+    return findExistingTreatmentSuggestion(customAppointmentTypeName);
+  }, [appointmentType, customAppointmentTypeName]);
+
+  const otherTreatmentSuggestion = detectedExistingTreatment &&
+    !detectedExistingTreatment.isExact &&
+    !isTreatmentSuggestionDeclined(detectedExistingTreatment)
+      ? detectedExistingTreatment
+      : null;
+
+  const handleTreatmentSelect = useCallback((treatmentName: string) => {
+    setAppointmentType(treatmentName);
+    setDeclinedTreatmentSuggestion(null);
+    if (treatmentName !== "Other") {
+      setCustomAppointmentTypeName("");
+    }
+  }, []);
+
+  const handleCustomTreatmentNameChange = useCallback((value: string) => {
+    const normalizedInput = normalizeTreatmentInput(value);
+    setCustomAppointmentTypeName(value);
+    setDeclinedTreatmentSuggestion((current) =>
+      current && current.normalizedInput !== normalizedInput ? null : current
+    );
+  }, []);
+
+  const applyExistingTreatmentSuggestion = useCallback((suggestion: ExistingTreatmentSuggestion) => {
+    setAppointmentType(suggestion.treatment);
+    setCustomAppointmentTypeName("");
+    setDeclinedTreatmentSuggestion(null);
+    setCustomPrice("0");
+  }, []);
+
+  const declineExistingTreatmentSuggestion = useCallback((suggestion: ExistingTreatmentSuggestion) => {
+    setDeclinedTreatmentSuggestion({
+      normalizedInput: suggestion.normalizedInput,
+      treatment: suggestion.treatment,
+    });
+  }, []);
+
+  const resolveOtherTreatmentBeforeContinue = useCallback((nextAction: "treatment-next" | "payment-confirm") => {
+    if (appointmentType !== "Other" || !detectedExistingTreatment) return false;
+    if (!detectedExistingTreatment.isExact && isTreatmentSuggestionDeclined(detectedExistingTreatment)) return false;
+
+    applyExistingTreatmentSuggestion(detectedExistingTreatment);
+
+    if (nextAction === "treatment-next") {
+      setModalStep("payment");
+    } else {
+      setPendingConfirmAfterTreatmentSuggestion(true);
+    }
+
+    return true;
+  }, [
+    appointmentType,
+    detectedExistingTreatment,
+    isTreatmentSuggestionDeclined,
+    applyExistingTreatmentSuggestion,
+  ]);
+
   useEffect(() => {
     if (!open) return;
     // fetch patients based on role - rely on server-side filtering for patient role
@@ -1631,6 +1828,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
       const existingPaymentMethod = String(appointmentToEdit.paymentMethod || "").trim();
       setPaymentMethod(existingPaymentMethod.toLowerCase() === 'pay at clinic' ? '' : existingPaymentMethod);
+      setDeclinedTreatmentSuggestion(null);
+      setPendingConfirmAfterTreatmentSuggestion(false);
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
@@ -1660,6 +1859,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAppointmentStatus(isPastAppointmentMode ? 'completed' : 'scheduled');
       setPaymentStatus('unpaid');
       setPaymentMethod('');
+      setDeclinedTreatmentSuggestion(null);
+      setPendingConfirmAfterTreatmentSuggestion(false);
       // Reset the flag when opening for new appointment
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
@@ -1879,6 +2080,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // First step: validate details and move to payment
   const handleConfirmBooking = async () => {
+    if (modalStep === "treatment" && resolveOtherTreatmentBeforeContinue("treatment-next")) {
+      return;
+    }
+
     // Progress to the next step in the multi-step flow
     setIsBooking(true);
     try {
@@ -1892,6 +2097,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
+    if (resolveOtherTreatmentBeforeContinue("payment-confirm")) {
+      return;
+    }
+
     // Prevent overpayment: do not proceed if entered amount exceeds remaining balance
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
@@ -1903,6 +2112,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     // Use the shared next-step helper: if already at payment, this will open the summary
     await handleNextStep();
   };
+
+  useEffect(() => {
+    if (!pendingConfirmAfterTreatmentSuggestion || appointmentType === "Other") return;
+    setPendingConfirmAfterTreatmentSuggestion(false);
+    handleConfirmPayment();
+  }, [pendingConfirmAfterTreatmentSuggestion, appointmentType, handleConfirmPayment]);
 
   useEffect(() => {
     const handleGuidedNext = async () => {
@@ -2693,8 +2908,8 @@ return (
       <Dialog open={open} onOpenChange={(v) => {
           if (!v) handleClose(); else onOpenChange(true);
         }}>
-        <DialogContent data-tour-id="booking-modal-shell" className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
-          <DialogHeader className="p-6 bg-white border-b sticky top-0 z-20 shadow-sm">
+        <DialogContent data-tour-id="booking-modal-shell" className="flex max-h-[96dvh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] flex-col gap-0 overflow-hidden rounded-[1.5rem] border-none p-0 shadow-2xl sm:max-h-[95vh] sm:w-[min(64rem,calc(100vw-3rem))] sm:max-w-5xl sm:rounded-[2rem]">
+          <DialogHeader className="shrink-0 border-b bg-white p-4 shadow-sm sm:p-6">
             <div className="flex items-center justify-between mb-2">
               {modalStep !== 'patient' ? (
                 <Button
@@ -2710,10 +2925,10 @@ return (
                 <div className="w-9" />
               )}
 
-              <DialogTitle className="text-xl font-black text-gray-900 flex-1 text-center tracking-tight">
+              <DialogTitle className="flex-1 text-center text-lg font-black tracking-tight text-gray-900 sm:text-xl">
                 {title ? title : (
                   (() => {
-                    const isPastAppointment = isPastAppointmentDate(selectedDate);
+                    const isPastAppointment = isPastAppointmentSchedule(selectedDate, selectedTime);
                     
                     if (modalStep === 'payment') {
                       return 'Complete Booking';
@@ -2748,7 +2963,7 @@ return (
 
             {/* STEP INDICATOR */}
             {!(isCancelled && user?.role === 'patient') && (
-              <div className="relative flex items-center justify-between w-full mt-4 mb-6 px-4 sm:px-12">
+              <div className="relative flex items-center justify-between w-full mt-3 mb-4 px-2 sm:mt-4 sm:mb-6 sm:px-12">
                 <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 z-0 rounded-full" />
                 <div
                   className="absolute top-1/2 left-0 h-1 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0 rounded-full"
@@ -2782,7 +2997,7 @@ return (
                           <span className="text-[10px] sm:text-xs font-bold">{step.icon}</span>
                         )}
                       </div>
-                      <span className={`absolute -bottom-6 text-[8px] sm:text-[9px] font-black uppercase tracking-widest whitespace-nowrap ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
+                      <span className={`absolute -bottom-5 text-[7px] sm:-bottom-6 sm:text-[9px] font-black uppercase tracking-widest whitespace-nowrap ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
                         {step.label}
                       </span>
                     </button>
@@ -2792,7 +3007,7 @@ return (
             )}
           </DialogHeader>
 
-          <div className="p-4 sm:p-10 overflow-y-auto max-h-[calc(95vh-180px)] bg-gray-50/20">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-6 sm:p-8 lg:p-10 custom-scrollbar">
             <div className="w-full mx-auto">
               
               {/* STEP 1: PATIENT */}
@@ -2994,49 +3209,78 @@ return (
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div data-tour-id="booking-treatment-step" className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
+                <div data-tour-id="booking-treatment-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 sm:space-y-10">
                   {/* Treatment Selection */}
                   <div className="space-y-6">
-                    <div className="flex items-center gap-5 mb-10">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
-                        <Plus className="h-7 w-7" />
+                    <div className="mb-6 flex items-center gap-4 sm:mb-10 sm:gap-5">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50 sm:h-14 sm:w-14 sm:rounded-[1.25rem]">
+                        <Plus className="h-6 w-6 sm:h-7 sm:w-7" />
                       </div>
-                      <div>
-                        <h3 className="text-2xl font-black text-gray-900 tracking-tight">Select Treatment</h3>
+                      <div className="min-w-0">
+                        <h3 className="text-xl font-black tracking-tight text-gray-900 sm:text-2xl">Select Treatment</h3>
                         <p className="text-sm font-bold text-gray-400">What service do you need today?</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      {[
-                        { name: "Routine Cleaning", short: "Cleaning", icon: "✨", color: "bg-blue-500" },
-                        { name: "Checkup", short: "Checkup", icon: "🔍", color: "bg-emerald-500" },
-                        { name: "Filling", short: "Filling", icon: "🦷", color: "bg-amber-500" },
-                        { name: "Root Canal", short: "Root Canal", icon: "🔬", color: "bg-rose-500" },
-                        { name: "Extraction", short: "Extraction", icon: "🦷", color: "bg-slate-700" },
-                        { name: "Whitening", short: "Whitening", icon: "💎", color: "bg-cyan-400" },
-                        { name: "Other", short: "Other", icon: "➕", color: "bg-gray-400" }
-                      ].map((t) => (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+                      {BOOKING_TREATMENT_OPTIONS.map((t) => (
                         <button
                           key={t.name}
                           data-tour-id={t.name === "Routine Cleaning" ? "booking-routine-cleaning" : undefined}
                           type="button"
-                          onClick={() => setAppointmentType(t.name)}
-                          className={`p-4 rounded-[2rem] border-2 transition-all flex flex-col items-center justify-center gap-3 shadow-sm ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
+                          onClick={() => handleTreatmentSelect(t.name)}
+                          className={`flex min-h-[6.25rem] flex-col items-center justify-center gap-2 rounded-2xl border-2 p-3 shadow-sm transition-all sm:min-h-[8rem] sm:gap-3 sm:rounded-[2rem] sm:p-4 ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-[1.02] sm:scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
                         >
-                          <div className={`w-12 h-12 rounded-full ${t.color} flex items-center justify-center text-white text-xl shadow-lg shadow-gray-100`}>{t.icon}</div>
-                          <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter text-center">{t.short}</span>
+                          <div className={`flex h-10 w-10 items-center justify-center rounded-full ${t.color} text-lg text-white shadow-lg shadow-gray-100 sm:h-12 sm:w-12 sm:text-xl`}>{t.icon}</div>
+                          <span className="text-center text-[9px] font-black uppercase tracking-tighter text-gray-900 sm:text-[10px]">{t.short}</span>
                         </button>
                       ))}
                     </div>
                     {appointmentType === "Other" && (
-                      <Input placeholder="Type custom treatment..." value={customAppointmentTypeName} onChange={(e) => setCustomAppointmentTypeName(e.target.value)} className="h-14 rounded-2xl border-gray-100 bg-white font-bold px-6 shadow-inner" />
+                      <div className="space-y-3">
+                        <Input
+                          placeholder="Type custom treatment..."
+                          value={customAppointmentTypeName}
+                          onChange={(e) => handleCustomTreatmentNameChange(e.target.value)}
+                          className="h-14 rounded-2xl border-gray-100 bg-white px-6 font-bold shadow-inner"
+                        />
+                        {otherTreatmentSuggestion && (
+                          <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-black text-gray-900">
+                                Do you mean {otherTreatmentSuggestion.treatment}?
+                              </p>
+                              <p className="mt-0.5 text-xs font-semibold text-blue-700/70">
+                                Continuing will use this treatment unless you choose No.
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => applyExistingTreatmentSuggestion(otherTreatmentSuggestion)}
+                                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-black uppercase tracking-wider text-white shadow-sm transition-colors hover:bg-blue-700"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Yes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => declineExistingTreatmentSuggestion(otherTreatmentSuggestion)}
+                                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-blue-100 bg-white px-3 text-xs font-black uppercase tracking-wider text-gray-600 shadow-sm transition-colors hover:bg-gray-50"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                No
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
                   {/* Financials & Duration */}
-                  <div className="grid grid-cols-1 gap-4 pt-2 lg:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 pt-1 lg:grid-cols-2">
                     <div className="order-2 grid grid-cols-1 gap-4">
-                      <div className="flex min-h-[11rem] flex-col justify-between rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                      <div className="flex min-h-[8.5rem] flex-col justify-between rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                             <Clock className="h-5 w-5" />
@@ -3061,7 +3305,7 @@ return (
                         </div>
                       </div>
 
-                      <div className="flex min-h-[11rem] flex-col justify-between rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                      <div className="flex min-h-[8.5rem] flex-col justify-between rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
                           <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
                               <Award className="h-5 w-5" />
@@ -3087,7 +3331,7 @@ return (
                       onClick={(e) => {
                         if (isPriceEditable && e.target === e.currentTarget) setIsPriceEditable(false);
                       }}
-                      className="relative flex min-h-[11rem] cursor-default flex-col justify-between overflow-hidden rounded-[2rem] bg-blue-600 p-5 text-white shadow-2xl shadow-blue-200/50 group"
+                      className="group relative flex min-h-[9.5rem] cursor-default flex-col justify-between overflow-hidden rounded-2xl bg-blue-600 p-4 text-white shadow-2xl shadow-blue-200/50 sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5"
                     >
                       <div className="absolute top-0 right-0 h-28 w-28 rounded-full bg-white/5 -mr-14 -mt-14 transition-transform group-hover:scale-110" />
                       <CreditCard className="absolute top-5 right-5 h-9 w-9 text-white/10" />
@@ -3095,7 +3339,7 @@ return (
                       <div className="relative z-10">
                         <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest mb-1">Estimated Cost</p>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-xl font-black">Treatment Fee</h4>
+                          <h4 className="text-lg font-black sm:text-xl">Treatment Fee</h4>
                           {/* ONLY SHOW EDIT PENCIL TO ADMINS/DOCTORS */}
                           {canManagePricing && (
                             <button 
@@ -3122,7 +3366,7 @@ return (
                         )}
                         
                         <div className="flex items-center justify-end w-full">
-                          <span className="text-4xl font-black mr-2 opacity-40">₱</span>
+                          <span className="mr-2 text-3xl font-black opacity-40 sm:text-4xl">₱</span>
                           {/* AIRTIGHT LOCK: MUST BE EDITABLE *AND* USER MUST BE ADMIN/DOCTOR */}
                           {isPriceEditable && canManagePricing ? (
                             <input 
@@ -3130,12 +3374,12 @@ return (
                               value={customPrice === "0" ? finalPrice : customPrice}
                               onChange={(e) => setCustomPrice(e.target.value)}
                               onBlur={() => setIsPriceEditable(false)}
-                              className="text-4xl font-black bg-transparent border-b-4 border-white/50 p-0 w-[140px] text-right outline-none ring-0 focus:border-white text-white appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none placeholder-blue-300 transition-all"
+                              className="w-[120px] appearance-none border-b-4 border-white/50 bg-transparent p-0 text-right text-3xl font-black text-white outline-none ring-0 transition-all placeholder-blue-300 focus:border-white sm:w-[140px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                               placeholder={String(finalPrice)}
                               autoFocus
                             />
                           ) : (
-                            <span className="text-4xl font-black tracking-tighter">
+                            <span className="text-3xl font-black tracking-tighter sm:text-4xl">
                               {Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
                             </span>
                           )}
@@ -3143,7 +3387,7 @@ return (
                       </div>
                     </div>
 
-                      <div className="flex min-h-[11rem] flex-col rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                      <div className="flex min-h-[9.5rem] flex-col rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
                         <Label htmlFor="improved-booking-treatment-notes" className="text-[11px] font-black uppercase tracking-widest text-gray-500">
                           Treatment Notes
                         </Label>
@@ -3269,7 +3513,7 @@ return (
             </div>
           </div>
 
-           <DialogFooter className="flex flex-col gap-3 border-t bg-gray-50/50 p-4 sm:p-6 sm:flex-row sm:items-center sm:justify-between sticky bottom-0 z-20 backdrop-blur-sm">
+           <DialogFooter className="shrink-0 flex-col gap-3 border-t bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
             {isCancelled && user?.role === 'patient' ? (
               <Button
                 onClick={handleClose}

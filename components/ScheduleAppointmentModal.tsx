@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { formatDateToYYYYMMDD } from "../lib/utils";
-import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES, OTHER_APPOINTMENT_TYPE_INDEX } from "../lib/appointment-types";
 import { Appointment } from "@/hooks/useAppointments";
 import { DoctorCalendar } from "./DoctorCalendar";
 import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
@@ -160,7 +160,7 @@ export function ScheduleAppointmentModal() {
     if (!formData.date) errors.date = "Choose a date.";
     if (!formData.time) errors.time = "Choose a time.";
     if (formData.type === -1) errors.type = "Choose an appointment type.";
-    if (formData.type === APPOINTMENT_TYPES.length - 1 && !formData.customType.trim()) {
+    if (formData.type === OTHER_APPOINTMENT_TYPE_INDEX && !formData.customType.trim()) {
       errors.customType = "Enter the custom appointment type.";
     }
     if (!formData.doctor) errors.doctor = "Choose a doctor.";
@@ -483,7 +483,7 @@ export function ScheduleAppointmentModal() {
             {fieldErrors.type ? <p className="text-xs font-medium text-red-600">{fieldErrors.type}</p> : null}
           </div>
 
-          {formData.type === APPOINTMENT_TYPES.length - 1 && (
+          {formData.type === OTHER_APPOINTMENT_TYPE_INDEX && (
             <div className="space-y-2">
               <Label>Please Specify Type</Label>
               <Input

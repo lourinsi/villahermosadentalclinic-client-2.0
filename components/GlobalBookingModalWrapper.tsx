@@ -17,6 +17,7 @@ export function GlobalBookingModalWrapper() {
     closeCreateModal,
     newAppointmentDate,
     newAppointmentTime,
+    newAppointmentPatientId,
     newAppointmentDoctorName,
     newAppointmentCreationMode,
   } = useAppointmentModal();
@@ -38,6 +39,7 @@ export function GlobalBookingModalWrapper() {
       onOpenChange={handleOpenChange}
       defaultDate={newAppointmentDate}
       defaultTime={newAppointmentTime}
+      defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
       doctorName={newAppointmentDoctorName}
       appointmentCreationMode={isCreateModalOpen ? newAppointmentCreationMode : undefined}
     />
