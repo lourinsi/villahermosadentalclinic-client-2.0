@@ -16,6 +16,7 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
+import { PatientProfileDraftRedirect } from "./PatientProfileDraftRedirect";
 
 export interface AdminLayoutTheme {
   sidebar: string;
@@ -317,6 +318,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => (
   <AdminLayoutShell portalTitle="Admin" theme={adminLayoutTheme}>
+    <PatientProfileDraftRedirect />
     {children}
   </AdminLayoutShell>
 );

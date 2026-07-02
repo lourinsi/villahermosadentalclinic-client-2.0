@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { PatientProfile, PatientDetailsRef, Patient } from "@/components/PatientProfile";
@@ -20,6 +20,8 @@ const normalizePatientName = (patient: Patient) =>
 export default function ReceptionistPatientProfilePage() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
+  const patientsBasePath = pathname.startsWith("/admin/patients") ? "/admin/patients" : "/receptionist/patients";
   const patientName = decodeURIComponent(params.patientname as string);
   const detailsRef = useRef<PatientDetailsRef | null>(null);
   const { refreshPatients, newAppointmentCreationMode } = useAppointmentModal();
@@ -68,12 +70,12 @@ export default function ReceptionistPatientProfilePage() {
   }, [hasUnsavedChanges, openUnsavedExitDialog, router]);
 
   const continuePendingNavigation = React.useCallback(() => {
-    const href = pendingNavigationHref || "/receptionist/patients";
+    const href = pendingNavigationHref || patientsBasePath;
     allowNavigationRef.current = true;
     setIsUnsavedExitDialogOpen(false);
     setPendingNavigationHref(null);
     router.push(href);
-  }, [pendingNavigationHref, router]);
+  }, [patientsBasePath, pendingNavigationHref, router]);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -134,15 +136,15 @@ export default function ReceptionistPatientProfilePage() {
       window.history.pushState(
         { patientProfileUnsavedGuard: true },
         "",
-        profileHrefRef.current || `/receptionist/patients/${encodeURIComponent(patientName)}`
+        profileHrefRef.current || `${patientsBasePath}/${encodeURIComponent(patientName)}`
       );
       browserBackGuardArmedRef.current = true;
-      openUnsavedExitDialog("/receptionist/patients");
+      openUnsavedExitDialog(patientsBasePath);
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [hasUnsavedChanges, openUnsavedExitDialog, patientName]);
+  }, [hasUnsavedChanges, openUnsavedExitDialog, patientName, patientsBasePath]);
 
   useEffect(() => {
     let mounted = true;
@@ -199,7 +201,7 @@ export default function ReceptionistPatientProfilePage() {
         toast.success("Patient deleted successfully");
         setIsDeleteDialogOpen(false);
         refreshPatients();
-        router.push("/receptionist/patients");
+        router.push(patientsBasePath);
         return;
       }
 
@@ -248,7 +250,7 @@ export default function ReceptionistPatientProfilePage() {
           <h1 className="text-2xl font-bold text-slate-900">Patient not found</h1>
           <p className="mt-1 text-sm text-slate-500">No patient matched "{patientName}".</p>
         </div>
-        <Button variant="brand" onClick={() => router.push("/receptionist/patients")}>
+        <Button variant="brand" onClick={() => router.push(patientsBasePath)}>
           Back to Patients
         </Button>
       </div>
@@ -263,7 +265,7 @@ export default function ReceptionistPatientProfilePage() {
         onDeletePatient={() => setIsDeleteDialogOpen(true)}
         isModified={isModified}
         setIsModified={setIsModified}
-        onBackToPatients={() => requestNavigation("/receptionist/patients")}
+        onBackToPatients={() => requestNavigation(patientsBasePath)}
         openBookingAppointmentId={bookingModalOpen ? selectedAppointmentToEdit?.id : null}
         onOpenBookingModal={(appointment: Appointment) => {
           setSelectedAppointmentToEdit(appointment);

@@ -68,6 +68,7 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import {
+  DEFAULT_APPOINTMENT_STATUS_OPTIONS,
   getAppointmentStatusOptionWithColors,
   getPaymentStatusOptionWithColors,
   normalizePaymentStatus,
@@ -234,7 +235,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const canSeeDeletedAppointments = effectiveRole === "admin";
-  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => {
+  const appointmentStatusOptionsWithDeleted = (() => {
+    const statuses = APPOINTMENT_STATUSES || [];
+    const hasDeletedStatus = statuses.some((status: any) => canonicalStatus(status.value) === "deleted");
+    const deletedStatusOption = DEFAULT_APPOINTMENT_STATUS_OPTIONS.find((status) => status.value === "deleted");
+
+    if (!canSeeDeletedAppointments || hasDeletedStatus || !deletedStatusOption) {
+      return statuses;
+    }
+
+    return [...statuses, deletedStatusOption];
+  })();
+  const staffVisibleStatusOptions = appointmentStatusOptionsWithDeleted.filter((status: any) => {
     const normalizedStatus = canonicalStatus(status.value);
     if (isPatientCartStatus(status.value)) return false;
     if (normalizedStatus === "deleted" && !canSeeDeletedAppointments) return false;

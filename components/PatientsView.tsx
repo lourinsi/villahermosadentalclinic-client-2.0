@@ -3,7 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -63,6 +63,7 @@ const isTourDemoPatient = (patient: Patient) =>
 
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const router = useRouter();
+  const pathname = usePathname();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -227,7 +228,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const openPatientProfile = (patient: Patient) => {
     const displayName = (patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`).trim();
     const routeSegment = encodeURIComponent(displayName || String(patient.id || ""));
-    router.push(`/receptionist/patients/${routeSegment}`);
+    const profileBasePath = pathname.startsWith("/admin") ? "/admin/patients" : "/receptionist/patients";
+    router.push(`${profileBasePath}/${routeSegment}`);
   };
 
   const handleConfirmDeletePatient = async () => {

@@ -661,7 +661,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, selectedDate, selectedPatient, appointmentToEdit?.id, isPublicBookingMode, publicBlockingAppointments]);
 
   // Read-only for patient viewing their own booked/reserved appointment: only notes editable
-  const { isCancelled, canCancelAppointment } = getBookingCancellationConfig({
+  const { isCancelled, isDeleted, canCancelAppointment } = getBookingCancellationConfig({
     appointmentToEdit,
     appointmentStatus,
   });
@@ -675,9 +675,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const canDeleteCancelledAppointment = Boolean(
     appointmentToEdit &&
     isCancelled &&
+    !isDeleted &&
     !isPatientLevelBookingMode &&
     !isPublicCachedAppointment
   );
+  const canHardDeleteDeletedAppointment = Boolean(
+    appointmentToEdit &&
+    isDeleted &&
+    effectiveRole === "admin" &&
+    !isPublicCachedAppointment
+  );
+  const canDeleteAppointment = canDeleteCancelledAppointment || canHardDeleteDeletedAppointment;
+  const destructiveAppointmentActionLabel = canHardDeleteDeletedAppointment
+    ? "Hard Delete Appointment"
+    : canDeleteCancelledAppointment
+      ? "Delete Appointment"
+      : "Cancel Appointment";
   const getLocalPublicAppointmentLogs = useCallback(() => {
     if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];
 
@@ -2720,6 +2733,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
+      if (canHardDeleteDeletedAppointment) {
+        await deleteAppointment(appointmentToEdit.id, { hardDelete: true });
+        try {
+          window.dispatchEvent(new CustomEvent('appointments:updated', {
+            detail: { appointmentId: appointmentToEdit.id, hardDeleted: true },
+          }));
+        } catch {}
+        if (onDeleted) onDeleted({ ...appointmentToEdit, hardDeleted: true });
+        toast?.success?.('Appointment permanently deleted');
+        onOpenChange(false);
+        return;
+      }
+
       if (canDeleteCancelledAppointment) {
         await deleteAppointment(appointmentToEdit.id);
         const deletedAppointment = {
@@ -3537,7 +3563,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </Button>
             ) : (
               <>
-                {(canCancelAppointment || canDeleteCancelledAppointment) && (
+                {(canCancelAppointment || canDeleteAppointment) && (
                   <Button
                     type="button"
                     variant="destructive"
@@ -3546,7 +3572,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     className="h-12 w-full rounded-2xl bg-red-500 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-600 hover:shadow-red-200 sm:w-auto sm:mr-auto transition-all"
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {isBooking ? "Processing..." : canDeleteCancelledAppointment ? "Delete Appointment" : "Cancel Appointment"}
+                    {isBooking ? "Processing..." : destructiveAppointmentActionLabel}
                   </Button>
                 )}
                 <Button
@@ -3578,13 +3604,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         mode="cancel"
         appointment={appointmentToEdit}
         isProcessing={isBooking}
-        title={canDeleteCancelledAppointment ? "Delete Appointment?" : undefined}
+        title={canHardDeleteDeletedAppointment ? "Hard Delete Appointment?" : canDeleteCancelledAppointment ? "Delete Appointment?" : undefined}
         description={
-          canDeleteCancelledAppointment
-            ? "You will be deleting this appointment permanently from receptionist views. Only an admin can return it back. Are you sure?"
+          canHardDeleteDeletedAppointment
+            ? "This will permanently delete this appointment and all connected appointment logs, payments, payment logs, finance records, and notifications. This action cannot be undone."
+            : canDeleteCancelledAppointment
+              ? "This will move the appointment to Deleted and hide it from receptionist views. Admins can still view it later."
             : undefined
         }
-        confirmLabel={canDeleteCancelledAppointment ? "Yes, Delete" : undefined}
+        confirmLabel={canHardDeleteDeletedAppointment ? "Yes, Hard Delete" : canDeleteCancelledAppointment ? "Yes, Delete" : undefined}
         onConfirm={handleCancel}
       />
 
