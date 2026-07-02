@@ -234,16 +234,18 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
                 {isReceptionistView ? "Receptionist" : "Admin"}
               </Button>
             )}
-            <Button
-              onClick={toggleMode}
-              variant="outline"
-              size="sm"
-              data-tour-id="admin-mode-toggle"
-              className="text-xs"
-              title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
-            >
-              {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
-            </Button>
+            {!isReceptionistView && (
+              <Button
+                onClick={toggleMode}
+                variant="outline"
+                size="sm"
+                data-tour-id="admin-mode-toggle"
+                className="text-xs"
+                title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+              >
+                {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+              </Button>
+            )}
           </div>
           <div data-tour-id="admin-notifications">
             <NotificationsOpened

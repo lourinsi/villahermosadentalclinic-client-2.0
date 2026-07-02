@@ -1190,7 +1190,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   );
 
   const hasConsentSignature = hasConsentSignatureInk || Boolean(consentForm.patientSignatureImage);
-  const canSaveConsentForm =
+  const isConsentFormComplete =
     allConsentAcknowledgementsAccepted &&
     Boolean(consentForm.patientSignatureName.trim()) &&
     Boolean(consentForm.signedDate) &&
@@ -1288,22 +1288,22 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const saveConsentForm = async () => {
     if (!patient.id || !consentFormHasChanges) return true;
 
-    if (!canSaveConsentForm) {
-      toast.error("Complete every consent acknowledgement, patient signature, and date before saving.");
-      return false;
-    }
-
     setIsSavingConsent(true);
     try {
       const signatureImage = getConsentCanvasSignatureImage();
+      const isComplete =
+        allConsentAcknowledgementsAccepted &&
+        Boolean(consentForm.patientSignatureName.trim()) &&
+        Boolean(consentForm.signedDate) &&
+        Boolean(signatureImage);
       const nextConsentForm: ConsentFormState = {
         ...consentForm,
-        accepted: true,
+        accepted: isComplete,
         patientSignatureName: consentForm.patientSignatureName.trim(),
         guardianName: consentForm.guardianName.trim(),
         dentistSignatureName: consentForm.dentistSignatureName.trim(),
         patientSignatureImage: signatureImage,
-        signedAt: new Date().toISOString(),
+        signedAt: isComplete ? new Date().toISOString() : "",
       };
 
       const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
@@ -3377,12 +3377,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                   <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm font-medium text-slate-500">
-                      {canSaveConsentForm ? "Ready to save consent." : "Complete all acknowledgements, patient signature, and date to save."}
+                      {isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}
                     </p>
                     <Button
                       type="button"
                       onClick={saveConsentForm}
-                      disabled={isSavingConsent || !consentFormHasChanges || !canSaveConsentForm}
+                      disabled={isSavingConsent || !consentFormHasChanges}
                       className="gap-2"
                     >
                       {isSavingConsent ? (
