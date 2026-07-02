@@ -80,7 +80,7 @@ export default function PatientUnsavedChangesDialog({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !loading && onOpenChange(nextOpen)}>
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] w-[min(920px,calc(100vw-2rem))] max-w-none overflow-x-hidden overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-0 shadow-2xl"
+        className="max-h-[calc(100dvh-2rem)] !w-[calc(100vw-2rem)] !max-w-[920px] overflow-x-hidden overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-0 shadow-2xl sm:!w-[calc(100vw-2rem)] sm:!max-w-[920px] lg:!w-[920px]"
         showCloseButton={false}
       >
         <button
