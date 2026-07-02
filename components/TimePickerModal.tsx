@@ -5,7 +5,7 @@ import { apiUrl } from "@/lib/api";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
-import { formatDateToYYYYMMDD, cn } from "@/lib/utils";
+import { formatDateToYYYYMMDD, formatWordyDate, cn } from "@/lib/utils";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import AppointmentHistoryView from "./AppointmentHistoryView";
@@ -283,7 +283,7 @@ export function TimePickerModal({
             </button>
             
             <p className="text-sm font-semibold text-gray-700 flex-1 text-center">
-              {viewDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatWordyDate(viewDate)}
             </p>
             
             <button

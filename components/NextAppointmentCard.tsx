@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Clock, Calendar } from "lucide-react";
@@ -9,7 +9,8 @@ import PatientAvatar from "./PatientAvatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
-import { parseBackendDateToLocal } from "@/lib/utils";
+import { formatTimeTo12h } from "@/lib/time-slots";
+import { formatWordyDate } from "@/lib/utils";
 import { apiUrl } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/api";
 import { findDoctorForValue, formatDoctorDisplayName } from "@/lib/doctor-identity";
@@ -18,6 +19,7 @@ import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 interface NextAppointmentCardProps {
   appointment: Appointment | null;
   role: "doctor" | "admin" | "patient";
+  sameDayAppointments?: Appointment[];
   sameTimeAppointments?: Appointment[];
   onViewDetails: (appointment: Appointment) => void;
   onViewAll?: () => void;
@@ -27,6 +29,7 @@ interface NextAppointmentCardProps {
 export function NextAppointmentCard({
   appointment,
   role,
+  sameDayAppointments = [],
   sameTimeAppointments = [],
   onViewDetails,
   onViewAll,
@@ -34,11 +37,27 @@ export function NextAppointmentCard({
 }: NextAppointmentCardProps) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isFading, setIsFading] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   
   // Ensure hooks order remains consistent across renders by calling useDoctors unconditionally.
   const { doctors } = useDoctors(undefined, { enabled: role === "patient" });
-  const displayAppointments = appointment ? [appointment, ...sameTimeAppointments] : [];
+  const displayAppointments = useMemo(() => {
+    if (!appointment) return [];
+
+    const seen = new Set<string>();
+    return [appointment, ...sameDayAppointments, ...sameTimeAppointments]
+      .filter((item) => {
+        const key = String(item.id || `${item.date}-${item.time}-${item.patientId}`);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
+  }, [appointment, sameDayAppointments, sameTimeAppointments]);
+  const displayAppointmentKey = displayAppointments
+    .map((item) => `${item.id}-${item.date}-${item.time}`)
+    .join("|");
   const displayedPatientId = String(displayAppointments[currentIndex]?.patientId || appointment?.patientId || "").trim();
   const displayedAppointmentId = displayAppointments[currentIndex]?.id || appointment?.id || "";
   const doctorsRoute =
@@ -46,16 +65,32 @@ export function NextAppointmentCard({
     role === "admin" ? "/admin/doctors" :
     "/doctors";
 
-  // Rotate through same-time appointments every 5 seconds
   useEffect(() => {
-    if (displayAppointments.length <= 1) return;
+    setCurrentIndex(0);
+    setIsFading(false);
+  }, [displayAppointmentKey]);
 
+  // Rotate through queued appointments every 5 seconds
+  useEffect(() => {
+    if (displayAppointments.length <= 1) {
+      setIsFading(false);
+      return;
+    }
+
+    let fadeTimeout: ReturnType<typeof setTimeout> | undefined;
     const interval = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % displayAppointments.length);
+      setIsFading(true);
+      fadeTimeout = setTimeout(() => {
+        setCurrentIndex((prev) => (prev + 1) % displayAppointments.length);
+        setIsFading(false);
+      }, 250);
     }, 5000);
 
-    return () => clearInterval(interval);
-  }, [displayAppointments.length]);
+    return () => {
+      clearInterval(interval);
+      if (fadeTimeout) clearTimeout(fadeTimeout);
+    };
+  }, [displayAppointmentKey, displayAppointments.length]);
 
   // Fetch patient record to get latest profile/name data.
   useEffect(() => {
@@ -219,7 +254,12 @@ export function NextAppointmentCard({
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
         
-        <div className="relative z-10 flex flex-col h-full p-8">
+        <div
+          className={`relative z-10 flex flex-col h-full p-8 transition-opacity duration-300 ${
+            isFading ? "opacity-0" : "opacity-100"
+          }`}
+          aria-live={hasMultiple ? "polite" : undefined}
+        >
           <div className="flex items-start justify-between mb-6">
             <div className="space-y-1">
               <div className="flex items-center space-x-2 text-emerald-600 bg-emerald-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
@@ -248,15 +288,12 @@ export function NextAppointmentCard({
               <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
                 <Calendar className="h-4 w-4 text-emerald-600" />
                 <span className="font-bold text-sm text-gray-700">
-                  {parseBackendDateToLocal(currentAppointment.date).toLocaleDateString(
-                    "en-US",
-                    { month: "short", day: "numeric" }
-                  )}
+                  {formatWordyDate(currentAppointment.date, { fallback: currentAppointment.date || "No date" })}
                 </span>
               </div>
               <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
                 <Clock className="h-4 w-4 text-emerald-600" />
-                <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+                <span className="font-bold text-sm text-gray-700">{formatTimeTo12h(currentAppointment.time)}</span>
               </div>
             </div>
 
@@ -317,7 +354,12 @@ export function NextAppointmentCard({
       {/* Decorative elements */}
       <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
       
-      <div className="relative z-10 flex flex-col h-full p-8">
+      <div
+        className={`relative z-10 flex flex-col h-full p-8 transition-opacity duration-300 ${
+          isFading ? "opacity-0" : "opacity-100"
+        }`}
+        aria-live={hasMultiple ? "polite" : undefined}
+      >
         <div className="flex items-start justify-between mb-6">
           <div className="space-y-1">
             <div className="flex items-center space-x-2 text-violet-600 bg-violet-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
@@ -346,15 +388,12 @@ export function NextAppointmentCard({
             <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
               <Calendar className="h-4 w-4 text-violet-600" />
               <span className="font-bold text-sm text-gray-700">
-                {parseBackendDateToLocal(currentAppointment.date).toLocaleDateString(
-                  "en-US",
-                  { month: "short", day: "numeric" }
-                )}
+                {formatWordyDate(currentAppointment.date, { fallback: currentAppointment.date || "No date" })}
               </span>
             </div>
             <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
               <Clock className="h-4 w-4 text-violet-600" />
-              <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+              <span className="font-bold text-sm text-gray-700">{formatTimeTo12h(currentAppointment.time)}</span>
             </div>
           </div>
 

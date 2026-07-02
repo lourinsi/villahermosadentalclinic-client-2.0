@@ -1,6 +1,8 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
 import React, { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,8 +24,11 @@ import {
 } from "lucide-react";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { getAuthHeaders } from "@/lib/auth-headers";
+import { useAuth } from "@/hooks/useAuth";
 
 export function SettingsView() {
+  const { user } = useAuth();
   const [clinicName, setClinicName] = useState("Villahermosa Dental Clinic");
   const [email, setEmail] = useState("info@villahermosadental.com");
   const [phone, setPhone] = useState("+1 (555) 123-4567");
@@ -38,6 +43,10 @@ export function SettingsView() {
   // Profile image upload state
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -66,9 +75,50 @@ export function SettingsView() {
     setProfileFile(null);
   };
 
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const response = await fetch(apiUrl("/api/auth/change-password"), {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to change password");
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password changed successfully");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to change password");
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   return (
-    <div data-tour-id="settings-page" className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div data-tour-id="settings-page" className="space-y-6 p-3 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
           <p className="text-muted-foreground">Manage your clinic settings and preferences</p>
@@ -80,7 +130,7 @@ export function SettingsView() {
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
           <TabsTrigger value="general">
             <Settings className="h-4 w-4 mr-2" />
             General
@@ -109,7 +159,7 @@ export function SettingsView() {
               <CardTitle>Clinic Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="clinic-name">Clinic Name</Label>
                   <Input 
@@ -154,9 +204,9 @@ export function SettingsView() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 gap-4">
                 {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
-                  <div key={day} className="flex items-center justify-between">
-                    <span className="w-24">{day}</span>
-                    <div className="flex items-center space-x-2">
+                  <div key={day} className="flex flex-col gap-2 rounded-lg border border-gray-100 p-3 sm:flex-row sm:items-center sm:justify-between sm:border-0 sm:p-0">
+                    <span className="w-full font-medium sm:w-24">{day}</span>
+                    <div className="flex flex-wrap items-center gap-2">
                       <Select defaultValue={TIME_SLOTS.indexOf("09:00").toString()}>
                         <SelectTrigger className="w-32">
                           <SelectValue />
@@ -193,7 +243,7 @@ export function SettingsView() {
               <CardTitle>Administrator Profile</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center space-x-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div>
                   <label htmlFor="profile-image-input" className="cursor-pointer block">
                     {profileImage ? (
@@ -222,7 +272,7 @@ export function SettingsView() {
                   <div className="text-sm text-muted-foreground">Add or change your profile picture</div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="first-name">First Name</Label>
                   <Input id="first-name" defaultValue="Dr. John" />
@@ -300,19 +350,42 @@ export function SettingsView() {
               <CardTitle>Password & Security</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
+                Signed in as {user?.role === "receptionist" ? "Receptionist" : "Admin"}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="current-password">Current Password</Label>
-                <Input id="current-password" type="password" />
+                <Input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
-                <Input id="new-password" type="password" />
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm Password</Label>
-                <Input id="confirm-password" type="password" />
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
               </div>
-              <Button variant="outline">Change Password</Button>
+              <Button variant="outline" onClick={handleChangePassword} disabled={isChangingPassword}>
+                {isChangingPassword ? "Changing..." : "Change Password"}
+              </Button>
             </CardContent>
           </Card>
 
@@ -341,7 +414,7 @@ export function SettingsView() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Theme</Label>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <Button variant="outline" className="h-20 flex-col">
                     <div className="w-4 h-4 bg-white border rounded mb-2"></div>
                     Light

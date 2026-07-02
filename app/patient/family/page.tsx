@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentStatusBadgeClassName } from "@/lib/status-colors";
+import { formatWordyDate } from "@/lib/utils";
 
 const FamilyPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -508,7 +509,7 @@ const FamilyPage = () => {
                         <Clock className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="font-bold text-gray-900">{new Date(apt.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        <p className="font-bold text-gray-900">{formatWordyDate(apt.date, { fallback: apt.date || "No date" })}</p>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           <span className="font-medium text-blue-600">{formatTimeTo12h(apt.time)}</span>
                           <span>•</span>

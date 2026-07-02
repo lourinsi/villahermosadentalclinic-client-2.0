@@ -2,7 +2,8 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -13,7 +14,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "./ui/alert-dialog";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -29,7 +29,7 @@ import {
   Trash2
 } from "lucide-react";
 import PatientAvatar from "./PatientAvatar";
-import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
+import { Patient } from "./PatientProfile";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
 import { useAuth } from "@/hooks/useAuth";
@@ -62,6 +62,7 @@ const isTourDemoPatient = (patient: Patient) =>
   String(patient.id || "").toUpperCase().includes("ENT_TEST");
 
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
+  const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -74,15 +75,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [isPatientDeleteDialogOpen, setIsPatientDeleteDialogOpen] = useState(false);
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
-  const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [messagePatient, setMessagePatient] = useState<Patient | null>(null);
   const [messageContent, setMessageContent] = useState("");
 
-  const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const patientDetailsRef = useRef<PatientDetailsRef | null>(null);
   const itemsPerPage = 10;
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
@@ -228,6 +224,12 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     openAddPatientModal();
   };
 
+  const openPatientProfile = (patient: Patient) => {
+    const displayName = (patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`).trim();
+    const routeSegment = encodeURIComponent(displayName || String(patient.id || ""));
+    router.push(`/receptionist/patients/${routeSegment}`);
+  };
+
   const handleConfirmDeletePatient = async () => {
     if (!patientToDelete?.id) {
       toast.error("Missing patient id");
@@ -257,31 +259,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     } finally {
       setIsDeleting(false);
     }
-  };
-
-  const handleSaveAndClose = async () => {
-    setIsSaving(true);
-    if (patientDetailsRef.current) {
-      const success = await patientDetailsRef.current.save();
-      if (success) {
-        setIsPatientDetailsModalOpen(false);
-        setSelectedPatient(null);
-        setIsPatientDetailsModified(false);
-      }
-    }
-    setIsSaving(false);
-    setIsConfirmUnsavedChangesOpen(false);
-  };
-
-  const handleDiscardAndClose = () => {
-    setIsPatientDetailsModified(false);
-    setIsPatientDetailsModalOpen(false);
-    setSelectedPatient(null);
-    setIsConfirmUnsavedChangesOpen(false);
-  };
-
-  const handleCancelClose = () => {
-    setIsConfirmUnsavedChangesOpen(false);
   };
 
   const handleSendMessage = async () => {
@@ -449,9 +426,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                           <div className="min-w-0">
                             <span className="block font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer text-sm truncate"
                               onClick={() => {
-                                setSelectedPatient(patient);
-                                setIsPatientDetailsModified(false);
-                                setIsPatientDetailsModalOpen(true);
+                                openPatientProfile(patient);
                               }}
                             >
                               {patient.name}
@@ -531,13 +506,11 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                               data-tour-id={isTourDemoPatient(patient) ? "patients-demo-view-details" : undefined}
                               className="gap-2"
                               onClick={() => {
-                                setSelectedPatient(patient);
-                                setIsPatientDetailsModified(false);
-                                setIsPatientDetailsModalOpen(true);
+                                openPatientProfile(patient);
                               }}
                             >
                               <Eye className="h-4 w-4 text-slate-400" />
-                              View Details
+                              Patient Profile
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="gap-2"
@@ -617,37 +590,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     </div>
   </div>
 
-  <PatientDetailsModal
-    open={isPatientDetailsModalOpen}
-    onOpenChange={(open) => {
-      if (!open && isPatientDetailsModified) {
-        setIsConfirmUnsavedChangesOpen(true);
-      } else {
-        setIsPatientDetailsModalOpen(open);
-        if (!open) {
-          setSelectedPatient(null);
-          setIsPatientDetailsModified(false);
-        }
-      }
-    }}
-    patient={selectedPatient}
-    detailsRef={patientDetailsRef}
-    onDeletePatient={(p: Patient) => {
-      setPatientToDelete(p);
-      setIsPatientDeleteDialogOpen(true);
-    }}
-    isModified={isPatientDetailsModified}
-    setIsModified={setIsPatientDetailsModified}
-    doctorFilter={doctorFilter}
-    openBookingAppointmentId={bookingModalOpen ? selectedAppointmentToEdit?.id : null}
-    onOpenBookingModal={(appointment: Appointment) => {
-      setSelectedAppointmentToEdit(appointment);
-      setBookingModalOpen(true);
-    }}
-  />
-
-      
-
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -668,53 +610,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
-        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="py-4 space-y-4">
-            <p className="text-sm text-muted-foreground">
-              You have unsaved changes. Do you want to save them before closing?
-            </p>
-
-            {/* Summary of changes */}
-            {Object.keys(patientDetailsRef.current?.changedFields || {}).length > 0 && (
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-900 mb-3">Summary of Changes:</h4>
-                <div className="space-y-2">
-                  {Object.entries(patientDetailsRef.current?.changedFields || {}).map(([field, { old, new: newVal }]) => (
-                    <div key={field} className="text-sm text-gray-700 flex items-start gap-3">
-                      <span className="font-medium min-w-fit">{field}:</span>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="line-through text-red-600">
-                          {String(old) || '(empty)'}
-                        </span>
-                        <span className="text-gray-400">→</span>
-                        <span className="font-medium text-green-600">
-                          {String(newVal) || '(empty)'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <AlertDialogFooter>
-            <Button variant="outline" onClick={handleDiscardAndClose}>
-              Discard & Close
-            </Button>
-            <Button variant="secondary" onClick={handleCancelClose}>
-              Cancel
-            </Button>
-            <Button variant="brand" onClick={handleSaveAndClose} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save & Close"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <Dialog open={isMessageModalOpen} onOpenChange={setIsMessageModalOpen}>
         <DialogContent className="sm:max-w-md">

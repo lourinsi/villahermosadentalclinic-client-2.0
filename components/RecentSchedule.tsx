@@ -6,6 +6,8 @@ import { Calendar } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
+import { formatTimeTo12h } from "@/lib/time-slots";
+import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 interface RecentScheduleProps {
   portal: "admin" | "doctor" | "patient";
@@ -28,12 +30,14 @@ export function RecentSchedule({
   onAppointmentClick,
   onViewAll
 }: RecentScheduleProps) {
-  const sortedAppointments = [...appointments].sort((a, b) => {
-    if (a.date !== b.date) {
-      return a.date.localeCompare(b.date);
-    }
-    return a.time.localeCompare(b.time);
-  });
+  const sortedAppointments = appointments
+    .filter((appointment) => normalizeAppointmentStatus(appointment.status) !== "cancelled")
+    .sort((a, b) => {
+      if (a.date !== b.date) {
+        return a.date.localeCompare(b.date);
+      }
+      return a.time.localeCompare(b.time);
+    });
 
   return (
     <div className="w-full h-full flex flex-col">
@@ -84,6 +88,8 @@ export function RecentSchedule({
               const dateObj = new Date(appointment.date);
               const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
               const day = dateObj.getDate();
+              const appointmentTimeLabel = formatTimeTo12h(appointment.time);
+              const [timeText, meridiemText = ""] = appointmentTimeLabel.split(" ");
               
               return (
                 <div
@@ -95,8 +101,8 @@ export function RecentSchedule({
                     <div className="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
                       {viewMode === "day" ? (
                         <>
-                          <span className="text-xs font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
-                          <span className="text-[8px] font-black uppercase">{appointment.time.split(' ')[1]}</span>
+                          <span className="text-xs font-bold">{timeText}</span>
+                          <span className="text-[8px] font-black uppercase">{meridiemText}</span>
                         </>
                       ) : (
                         <>
@@ -112,7 +118,7 @@ export function RecentSchedule({
                       <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5 flex items-center gap-2">
                         {viewMode !== "day" && (
                           <>
-                            <span>{appointment.time}</span>
+                            <span>{appointmentTimeLabel}</span>
                             <span className="h-1 w-1 rounded-full bg-gray-200"></span>
                           </>
                         )}

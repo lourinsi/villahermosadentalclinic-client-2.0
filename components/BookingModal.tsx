@@ -13,10 +13,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
 import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus } from "lucide-react";
-import { formatDateToYYYYMMDD } from "@/lib/utils";
+import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
@@ -28,15 +29,14 @@ import useSharedBookingLogic, {
   findNextAvailableRepeatSlot,
   formatBookingDateKey,
   formatBookingDoctorName as formatDoctorName,
-  formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
   getBookingAppointmentStatusConfig,
   getBookingAutoPreselectConfig,
   getBookingActor,
   getBookingCancellationConfig,
   getBookingConflictWarnings,
-  getBookingHistoryPaymentStatusChange,
-  getBookingHistoryNotes,
+  getBookingDoctorSelectValue,
+  getBookingDoctorValue,
   getBookingCreateDate,
   getBookingCreateTime,
   getBookingDefaultDate,
@@ -45,6 +45,10 @@ import useSharedBookingLogic, {
   getBookingDefaultTime,
   getBookingEditDate,
   getBookingEditTime,
+  getDefaultBookingPaymentDate,
+  normalizeBookingPaymentDate,
+  isFutureBookingPaymentDate,
+  formatBookingPaymentDateLabel,
   getBookingTreatmentNotesValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
@@ -53,16 +57,19 @@ import useSharedBookingLogic, {
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
+  isUnassignedBookingDoctor,
   isPastAppointmentSchedule,
-  isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizePastAppointmentStatus,
   parseLocalDateOnly,
-  shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
+  UNASSIGNED_DOCTOR_LABEL,
+  UNASSIGNED_DOCTOR_VALUE,
 } from './sharedBookingLogic';
+import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
@@ -85,133 +92,14 @@ interface BookingModalProps {
   appointmentCreationMode?: BookingCreationMode;
 }
 
-type BookingHistoryBadge = {
-  label: string;
-  tone: "appointment" | "payment" | "amount";
-};
-
-const getBookingHistoryAmount = (log: any) => Number(log?.amount || 0);
-
-const isBookingInitialHistoryLog = (log: any) =>
-  !log?.previousState?.id || log?.previousState?.status === "none";
-
-const getBookingHistoryBadges = (log: any): BookingHistoryBadge[] => {
-  const badges: BookingHistoryBadge[] = [];
-  const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
-  const appointmentStatus = log?.newState?.status || log?.previousState?.status || (isBookingInitialHistoryLog(log) ? "new" : "");
-
-  if (appointmentStatus) {
-    badges.push({
-      label: formatBookingHistoryStatusLabel(appointmentStatus),
-      tone: "appointment",
-    });
-  }
-
-  const paymentStatus = paymentStatusChange.nextStatus || log?.paymentStatus;
-  if (isSignificantBookingPaymentStatus(paymentStatus)) {
-    badges.push({
-      label: formatBookingHistoryStatusLabel(paymentStatus),
-      tone: "payment",
-    });
-  }
-
-  const amount = getBookingHistoryAmount(log);
-  if (amount > 0) {
-    badges.push({
-      label: `PHP ${amount.toLocaleString()}`,
-      tone: "amount",
-    });
-  }
-
-  return badges;
-};
-
-const getBookingHistoryBadgeClass = (tone: BookingHistoryBadge["tone"]) => {
-  if (tone === "payment") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-  if (tone === "amount") return "bg-green-50 text-green-700 border-green-200";
-  return "bg-gray-100 text-gray-600 border-gray-300";
-};
-
-const getBookingHistoryBriefDetail = (log: any, userRole?: string) => {
-  const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
-  const amount = getBookingHistoryAmount(log);
-  const scheduleChanged = Boolean(
-    (log?.newState?.date && log.newState.date !== log?.previousState?.date) ||
-    (log?.newState?.time && log.newState.time !== log?.previousState?.time)
-  );
-  const doctorChanged = Boolean(
-    log?.newState?.doctor && normalizeDoctorName(log.newState.doctor) !== normalizeDoctorName(log?.previousState?.doctor)
-  );
-  const statusChanged = Boolean(log?.newState?.status && log.newState.status !== log?.previousState?.status);
-
-  if (log?.logType === "payment") {
-    if (amount > 0) return "Payment recorded";
-    if (paymentStatusChange.changed) return "Payment status updated";
-    return "Payment updated";
-  }
-
-  if (isBookingInitialHistoryLog(log)) {
-    if (amount > 0) return "Payment recorded";
-    if (userRole === "patient") return "Appointment record created";
-    return `Appointment created by ${log?.changedByName || log?.changedBy || "Staff"}`;
-  }
-
-  const details: string[] = [];
-  if (scheduleChanged) details.push("Schedule changed");
-  if (doctorChanged) details.push("Doctor changed");
-  const treatmentChanged = Boolean(
-    (log?.newState?.type && log.previousState && String(log.newState.type) !== String(log.previousState.type)) ||
-    (log?.newState?.customType && log.previousState && String(log.newState.customType) !== String(log.previousState.customType))
-  );
-  if (treatmentChanged) details.push("Treatment changed");
-
-  // patient change detection
-  const prev = log?.previousState;
-  const next = log?.newState;
-  const isPatientChange = (() => {
-    if (!prev || !next) return false;
-    const resolvePatient = (s: any) => {
-      if (!s) return "";
-      if (typeof s.patient === "string") return s.patient;
-      if (s.patient?.id) return String(s.patient.id);
-      if (s.patient?.name) return String(s.patient.name);
-      if (s.patientId) return String(s.patientId);
-      if (s.patientName) return String(s.patientName || s.patient_name);
-      const first = s.patientFirstName || s.patient?.firstName;
-      const last = s.patientLastName || s.patient?.lastName;
-      if (first || last) return [first, last].filter(Boolean).join(" ");
-      return "";
-    };
-
-    const pPrev = String(resolvePatient(prev) || "").trim();
-    const pNext = String(resolvePatient(next) || "").trim();
-    return Boolean(pPrev && pNext && pPrev !== pNext);
-  })();
-  if (isPatientChange) details.push("Patient Changed");
-
-  // price change detection
-  const prevPrice = prev ? Number(prev.price ?? prev.amount ?? 0) : null;
-  const nextPrice = next ? Number(next.price ?? next.amount ?? 0) : null;
-  const priceChanged = prevPrice !== null && nextPrice !== null && Number(prevPrice) !== Number(nextPrice);
-  if (priceChanged) details.push("Price changed");
-
-  if (statusChanged) details.push("Appointment status updated");
-  if (paymentStatusChange.changed) details.push("Payment status updated");
-  if (amount > 0) details.push("Payment recorded");
-
-  if (details.length > 0) return details.slice(0, 5).join(" - ");
-  if (userRole === "patient") return "Appointment details updated";
-  if (userRole === "patient") return "Appointment details updated";
-  return `Appointment updated by ${log?.changedByName || log?.changedBy || "Staff"}`;
-};
-
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
-  const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
+  const { addAppointment, updateAppointment, deleteAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
+  const { options: serviceOptions } = useAppointmentTypeOptions(open);
 
   const [patients, setPatients] = useState<any[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
@@ -235,7 +123,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
-  const [overpayPulse, setOverpayPulse] = useState(false);
+  const [paymentDate, setPaymentDate] = useState<string>(getDefaultBookingPaymentDate());
+  const [isOverpaymentDialogOpen, setIsOverpaymentDialogOpen] = useState(false);
+  const [overpaymentAdjustedPrice, setOverpaymentAdjustedPrice] = useState("");
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
@@ -255,6 +145,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
+  const servicePriceByName = useMemo(() => {
+    const prices: Record<string, number> = { ...APPOINTMENT_PRICES };
+    serviceOptions.forEach((service) => {
+      prices[service.label] = Number(service.price) || 0;
+    });
+    return prices;
+  }, [serviceOptions]);
+  const serviceDurationByName = useMemo(() => {
+    const durations: Record<string, number> = { ...appointmentTypeDurations };
+    serviceOptions.forEach((service) => {
+      durations[service.label] = Number(service.duration) || 30;
+    });
+    return durations;
+  }, [serviceOptions]);
 
   // If a default patient id is provided (e.g., from PatientsView schedule button), preselect it
   useEffect(() => {
@@ -435,6 +339,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const statusRestrictionTime = selectedTime || appointmentToEdit?.time;
   const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentSchedule(statusRestrictionDate, statusRestrictionTime);
   const isPublicCachedAppointment = isPublicBookingMode && Boolean(appointmentToEdit?.isPublicCache);
+  const canDeleteCancelledAppointment = Boolean(
+    appointmentToEdit &&
+    isCancelled &&
+    !isPatientLevelBookingMode &&
+    !isPublicCachedAppointment
+  );
   const getLocalPublicAppointmentLogs = useCallback(() => {
     if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];
 
@@ -463,6 +373,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         id: `local_public_payment_${appointmentToEdit.id}`,
         appointmentId: appointmentToEdit.id,
         amount,
+        paymentDate: appointmentToEdit.paymentDate,
         paymentMethod: appointmentToEdit.paymentMethod || "payment",
         paymentStatus: appointmentToEdit.paymentStatus || "unpaid",
         changedBy: "public",
@@ -474,12 +385,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     ];
   }, [appointmentToEdit, isPublicCachedAppointment]);
   const canEditAppointmentStatus = canManageStatuses && !isPatientReadonly;
+  const visibleAppointmentStatuses = useMemo(
+    () => (appointmentStatuses || []).filter((status) =>
+      effectiveRole === "admin" || String(status.value || "").toLowerCase().trim() !== "deleted"
+    ),
+    [appointmentStatuses, effectiveRole]
+  );
   const { appointmentStatusOptions } = getBookingAppointmentStatusConfig<AppointmentStatusOption>({
     appointmentStatus,
     existingStatus: appointmentToEdit?.status,
     isPastStatusRestricted,
     canManageStatuses,
-    statusOptions: appointmentStatuses,
+    statusOptions: visibleAppointmentStatuses,
   });
   const getAppointmentStatusOption = (statusValue: string) =>
     appointmentStatusOptions.find((status) => status.value === statusValue);
@@ -583,7 +500,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Check if a time + duration combination overlaps with existing appointments for selected doctor
   const checkDurationConflict = useCallback((time: string, durationMins: number): boolean => {
-    if (!time || !selectedDate || !selectedDoctor) return false;
+    const selectedDoctorForConflict = getBookingDoctorValue(selectedDoctor);
+    if (!time || !selectedDate || !selectedDoctorForConflict) return false;
 
     const [hours, minutes] = time.split(':').map(Number);
     const slotStartDate = new Date(selectedDate);
@@ -592,7 +510,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
     // Normalize doctor name for more robust matching (remove "Dr. " prefix and case-insensitive)
     const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-    const targetDoctor = normalizeName(selectedDoctor);
+    const targetDoctor = normalizeName(selectedDoctorForConflict);
 
     // Filter daily appointments for the selected doctor - exclude cart items as they can be overridden
     const doctorAppts = dailyAppointments.filter(apt => 
@@ -625,7 +543,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Get conflict info for a specific duration
   const getDurationConflictInfo = useCallback((durationMins: number): { hasConflict: boolean; conflictTime?: string } => {
-    if (!selectedTime || !selectedDate || !selectedDoctor) return { hasConflict: false };
+    const selectedDoctorForConflict = getBookingDoctorValue(selectedDoctor);
+    if (!selectedTime || !selectedDate || !selectedDoctorForConflict) return { hasConflict: false };
     
     const hasConflict = checkDurationConflict(selectedTime, durationMins);
     if (!hasConflict) return { hasConflict: false };
@@ -637,7 +556,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
     const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-    const targetDoctor = normalizeName(selectedDoctor);
+    const targetDoctor = normalizeName(selectedDoctorForConflict);
     const doctorAppts = dailyAppointments.filter(apt => 
       normalizeName(apt.doctor) === targetDoctor && 
       !isCartAppointmentStatus(apt.status)
@@ -675,7 +594,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Update conflict status when duration changes
   useEffect(() => {
-    if (!selectedTime || !selectedDoctor) {
+    const selectedDoctorForConflict = getBookingDoctorValue(selectedDoctor);
+    if (!selectedTime || !selectedDoctorForConflict) {
       setDurationConflict("");
       return;
     }
@@ -694,7 +614,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const unavailableDurations = ALLOWED_BOOKING_DURATIONS.filter(dur => !isDurationAvailable(dur));
     
     console.log('[BookingModal] ⏱️ DURATION AVAILABILITY AT TIME:', {
-      doctor: selectedDoctor,
+      doctor: selectedDoctorForConflict,
       date: selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
       selectedTime: selectedTime,
       currentDuration: `${durationMins} mins`,
@@ -703,7 +623,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       
       // DEBUG: Show all doctor appointments being checked
       debugDoctorAppts: dailyAppointments
-        .filter(apt => (apt.doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim() === (selectedDoctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim())
+        .filter(apt => (apt.doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim() === selectedDoctorForConflict.replace(/^Dr\.\s+/i, "").toLowerCase().trim())
         .map(apt => ({ time: apt.time, duration: apt.duration, status: apt.status, patient: apt.patientName })),
       
       // Show which appointments are blocking each unavailable duration
@@ -714,7 +634,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const slotEnd = new Date(slotStart.getTime() + dur * 60000);
         
         const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-        const targetDoctor = normalizeName(selectedDoctor);
+        const targetDoctor = normalizeName(selectedDoctorForConflict);
     const doctorAppts = dailyAppointments.filter(apt => 
       normalizeName(apt.doctor) === targetDoctor && 
       !isCartAppointmentStatus(apt.status)
@@ -895,9 +815,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
     // Always set default duration when appointment type changes
-    const defaultDur = normalizeBookingDuration(appointmentTypeDurations[appointmentType]);
+    const defaultDur = normalizeBookingDuration(serviceDurationByName[appointmentType]);
     setDuration(String(defaultDur));
-  }, [appointmentType]);
+  }, [appointmentType, serviceDurationByName]);
 
   useEffect(() => {
     setSelectedDate(getBookingDefaultDate(defaultDate));
@@ -982,7 +902,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       selectedPatient,
       defaultPatientId,
       patientId,
-      appointmentTypeDurations,
+      appointmentTypeDurations: serviceDurationByName,
     });
 
     if (autoPreselect.type === "skip") return;
@@ -1013,7 +933,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setSelectedTime(nextSlot.time);
       console.log('[BookingModal] Auto-preselected slot:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode]);
+  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode, serviceDurationByName]);
 
   const runAutoPreselectRef = useRef(runAutoPreselect);
 
@@ -1070,13 +990,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
-  const basePrice = appointmentType === "Other" ? Number(customPrice) : (APPOINTMENT_PRICES[appointmentType] || 0);
+  const basePrice = appointmentType === "Other" ? Number(customPrice) : (servicePriceByName[appointmentType] || 0);
   const finalPrice = Number(customPrice) > 0 ? Number(customPrice) : basePrice;
 
   // Log appointment type changes with price
   useEffect(() => {
     if (appointmentType) {
-      const basePriceLog = APPOINTMENT_PRICES[appointmentType] || 0;
+      const basePriceLog = servicePriceByName[appointmentType] || 0;
       console.log(`[BookingModal] Appointment Type Changed:`, {
         event: 'appointmentTypeChanged',
         type: appointmentType,
@@ -1090,7 +1010,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         setCustomPrice("0");
       }
     }
-  }, [appointmentType, user?.role, duration, isEditMode]);
+  }, [appointmentType, user?.role, duration, isEditMode, servicePriceByName]);
 
   useEffect(() => {
     if (!open) return;
@@ -1247,7 +1167,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         setSelectedDoctor(appointmentToEdit.doctor);
       }
       // For editing, initialize payment amount to empty so user enters NEW payment amount
-      setAmountToPay('');
+      setAmountToPay('0');
+      setPaymentDate(getDefaultBookingPaymentDate());
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
       setPaymentMethod(appointmentToEdit.paymentMethod || '');
@@ -1272,7 +1193,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setTreatmentNotes('');
       setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
       setSelectedTime(getBookingCreateTime(defaultTime));
-      setAmountToPay('');
+      setAmountToPay('0');
+      setPaymentDate(getDefaultBookingPaymentDate());
       setAppointmentStatus(isPastAppointmentMode ? 'tbd' : 'scheduled');
       setPaymentStatus('unpaid');
       setPaymentMethod('');
@@ -1285,6 +1207,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(selectedDoctor || appointmentToEdit?.doctor || doctorName);
+  const selectedDoctorForSchedule = getBookingDoctorValue(selectedDoctor);
+  const selectedDoctorForBooking = isUnassignedBookingDoctor(selectedDoctor)
+    ? ""
+    : getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || doctorName);
+  const selectedDoctorSelectValue = selectedDoctor ? getBookingDoctorSelectValue(selectedDoctor) : undefined;
   
   // Calculate remaining balance for display in payment step
   const previouslyPaidAmount = appointmentToEdit?.totalPaid !== undefined 
@@ -1295,7 +1222,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
-  const isOverpay = paymentMethod !== "Pay at Clinic" && paymentAmountNow > remainingBalance;
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -1362,15 +1288,60 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  const validatePaymentDateForAmount = (amount: number) => {
+    if (amount <= 0) return true;
+
+    const normalizedDate = normalizeBookingPaymentDate(paymentDate);
+    if (!normalizedDate) {
+      toast.error("Please choose the date the payment was made.");
+      return false;
+    }
+
+    if (isFutureBookingPaymentDate(normalizedDate)) {
+      toast.error("Payment date cannot be in the future.");
+      return false;
+    }
+
+    if (normalizedDate !== paymentDate) setPaymentDate(normalizedDate);
+    return true;
+  };
+
+  const beginOverpaymentConfirmation = (amount: number) => {
+    const nextTotalPaid = Math.max(0, previouslyPaidAmount + amount);
+    setOverpaymentAdjustedPrice(String(nextTotalPaid));
+    setIsOverpaymentDialogOpen(true);
+  };
+
+  const continueAfterOverpaymentConfirmation = (shouldAdjustPrice: boolean) => {
+    const amountRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amount = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountRaw) || 0);
+
+    if (!validatePaymentDateForAmount(amount)) return;
+
+    if (shouldAdjustPrice) {
+      const parsedAdjustedPrice = Number(overpaymentAdjustedPrice);
+      const adjustedNetPrice = Number.isFinite(parsedAdjustedPrice) && parsedAdjustedPrice >= 0
+        ? parsedAdjustedPrice
+        : Math.max(0, previouslyPaidAmount + amount);
+      setCustomPrice(String(adjustedNetPrice + (Number(discount) || 0)));
+    }
+
+    setIsOverpaymentDialogOpen(false);
+    window.setTimeout(() => {
+      handleNextStep();
+    }, 0);
+  };
+
   // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
-    // Prevent overpayment: do not proceed if entered amount exceeds remaining balance
     const amountRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amount = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountRaw) || 0);
     if (amount > remainingBalance) {
-      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+      beginOverpaymentConfirmation(amount);
       return;
     }
+
+    if (!validatePaymentDateForAmount(amount)) return;
 
     handleNextStep();
   };
@@ -1445,28 +1416,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const getFollowUpLogNotes = (followUpTargetDate: Date) => {
-    return `Follow-up appointment created for ${followUpTargetDate.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })}.`;
+    return `Follow-up appointment created for ${formatWordyDate(followUpTargetDate)}.`;
   };
 
   const buildRepeatAppointmentNotes = (baseNotes: string, sourceDate: Date, nextDate: Date) => {
-    const repeatDateLabel = nextDate.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-    });
+    const repeatDateLabel = formatWordyDate(nextDate);
     const repeatNote = `Repeats on ${repeatDateLabel}`;
     const trimmed = String(baseNotes || "").trim();
     return trimmed ? `${trimmed}\n${repeatNote}` : repeatNote;
   };
 
   const buildFollowUpAppointmentNotes = (baseNotes: string, sourceDate: Date, sourceDateForLabel: Date) => {
-    const sourceDateLabel = sourceDateForLabel.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-    });
+    const sourceDateLabel = formatWordyDate(sourceDateForLabel);
     const followUpNote = `Created as a repeating schedule from ${sourceDateLabel}`;
     const trimmed = String(baseNotes || "").trim();
     return trimmed ? `${trimmed}\n${followUpNote}` : followUpNote;
@@ -1584,9 +1545,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       }
       const amountPaid = parseFloat(amountPaidRaw) || 0;
 
-      // Final validation: prevent overpayment
-      if (amountPaid > remainingBalance) {
-        toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+      const paymentDatePayload = amountPaid > 0 ? normalizeBookingPaymentDate(paymentDate) : "";
+      if (!validatePaymentDateForAmount(amountPaid) || (amountPaid > 0 && !paymentDatePayload)) {
         setIsBooking(false);
         return;
       }
@@ -1596,6 +1556,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         amountPaidRaw,
         amountPaid,
         paymentMethod,
+        paymentDate: paymentDatePayload || undefined,
         finalPrice,
         parsing: {
           trimmed: amountToPay.trim(),
@@ -1631,7 +1592,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || appointmentToEdit.patientName || selectedPatient,
               publicPatient: selectedPatientRecord || appointmentToEdit.publicPatient,
-              doctor: selectedDoctor || appointmentToEdit.doctor || doctorName || '',
+              doctor: selectedDoctorForBooking,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -1645,6 +1606,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentStatus: updatePaymentStatus as any,
               paymentMethod,
               totalPaid: newTotalPaid,
+              paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
               updatedAt: new Date().toISOString(),
               isPublicCache: true,
@@ -1652,7 +1614,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           : await updateAppointment(appointmentToEdit.id, {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctor || appointmentToEdit.doctor || doctorName || '',
+              doctor: selectedDoctorForBooking,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -1664,7 +1626,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
+              paymentMethod,
               totalPaid: newTotalPaid,
+              paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
             } as any);
 
@@ -1700,7 +1664,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         if (repeatTargetDate) {
           const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
             startDate: repeatTargetDate,
-            doctorToCheck: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+            doctorToCheck: selectedDoctorForBooking,
             durationToCheck: bookingDuration,
             patientToCheck: selectedPatient,
             timeToCheck: selectedTime,
@@ -1711,14 +1675,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           if (resolvedRepeatSlot) {
             const followUpDate = resolvedRepeatSlot.date;
             if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
-              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
+              toast.success(`Follow-up appointment moved to ${formatWordyDate(followUpDate)} because the originally requested follow-up date was unavailable.`);
             }
 
             const followUpStatus = isCartAppointmentStatus(updateAppointmentStatus) ? updateAppointmentStatus : "scheduled";
             await saveFollowUpAppointment({
               followUpDate,
               followUpStatus,
-              targetDoctor: selectedDoctor || appointmentToEdit.doctor || doctorName || "",
+              targetDoctor: selectedDoctorForBooking,
               targetPatientRecord: selectedPatientRecord,
               bookingDuration,
               treatmentNotesUpdate,
@@ -1764,7 +1728,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              doctor: selectedDoctor || "",
+              doctor: selectedDoctorForBooking,
               notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               price: finalPrice,
@@ -1773,6 +1737,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               paymentStatus: paymentStatus as any,
               paymentMethod,
               totalPaid: amountPaid,
+              paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
             } as any);
           } else {
@@ -1793,7 +1758,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctor || "",
+                doctor: selectedDoctorForBooking,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
@@ -1801,6 +1766,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentStatus: paymentStatus,
                 totalPaid: amountPaid,
                 paymentMethod,
+                paymentDate: paymentDatePayload || undefined,
                 price: finalPrice,
                 discount: Number(discount) || 0,
               };
@@ -1835,7 +1801,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   duration: bookingDuration,
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                  doctor: selectedDoctor || '',
+                  doctor: selectedDoctorForBooking,
                   notes: originalAppointmentNotes,
                   ...treatmentNotesUpdate,
                   price: finalPrice,
@@ -1844,6 +1810,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   paymentStatus: paymentStatus as any,
                   paymentMethod,
                   totalPaid: amountPaid,
+                  paymentDate: paymentDatePayload || undefined,
                   balance: newBalance,
                 } as any);
               }
@@ -1857,7 +1824,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctor || '',
+                doctor: selectedDoctorForBooking,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 price: finalPrice,
@@ -1866,6 +1833,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 paymentStatus: paymentStatus as any,
                 paymentMethod,
                 totalPaid: amountPaid,
+                paymentDate: paymentDatePayload || undefined,
                 balance: newBalance,
               } as any);
             }
@@ -1874,7 +1842,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newApt = await addAppointment({
             patientId: selectedPatient,
             patientName: selectedPatientRecord?.name || selectedPatient,
-            doctor: selectedDoctor || '',
+            doctor: selectedDoctorForBooking,
             date: dateStr,
             time: selectedTime,
             type: getAppointmentTypeIndex(appointmentType),
@@ -1886,7 +1854,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
+            paymentMethod,
             totalPaid: amountPaid,
+            paymentDate: paymentDatePayload || undefined,
             balance: newBalance,
           } as any);
         }
@@ -1894,7 +1864,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         if (repeatTargetDate) {
           const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
             startDate: repeatTargetDate,
-            doctorToCheck: selectedDoctor || "",
+            doctorToCheck: selectedDoctorForBooking,
             durationToCheck: bookingDuration,
             patientToCheck: selectedPatient,
             timeToCheck: selectedTime,
@@ -1905,14 +1875,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           if (resolvedRepeatSlot) {
             const followUpDate = resolvedRepeatSlot.date;
             if (followUpDate.getTime() !== repeatTargetDate.getTime()) {
-              toast.success(`Follow-up appointment moved to ${followUpDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} because the originally requested follow-up date was unavailable.`);
+              toast.success(`Follow-up appointment moved to ${formatWordyDate(followUpDate)} because the originally requested follow-up date was unavailable.`);
             }
 
             const followUpStatus = isCartAppointmentStatus(autoStatus) ? autoStatus as any : "scheduled";
             await saveFollowUpAppointment({
               followUpDate,
               followUpStatus,
-              targetDoctor: selectedDoctor || "",
+              targetDoctor: selectedDoctorForBooking,
               targetPatientRecord: selectedPatientRecord,
               bookingDuration,
               treatmentNotesUpdate,
@@ -1934,7 +1904,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             // Only cancel cart appointments
             if (!isCartAppointmentStatus(apt.status)) return false;
             // For the same doctor - use selectedDoctor (the actually selected doctor), not the prop
-            const currentDocNormalized = (selectedDoctor || '').replace(/^Dr\.\s+/i, "").toLowerCase();
+            const currentDocNormalized = selectedDoctorForBooking.replace(/^Dr\.\s+/i, "").toLowerCase();
+            if (!currentDocNormalized) return false;
             const aptDocNormalized = apt.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
             if (aptDocNormalized !== currentDocNormalized) return false;
             // On the same date
@@ -1991,7 +1962,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       }
 
       setModalStep('details');
-      setAmountToPay('');
+      setAmountToPay('0');
+      setPaymentDate(getDefaultBookingPaymentDate());
     } catch (err) {
       console.error('Booking payment error:', err);
     } finally {
@@ -2004,6 +1976,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
+      if (canDeleteCancelledAppointment) {
+        await deleteAppointment(appointmentToEdit.id);
+        const deletedAppointment = {
+          ...appointmentToEdit,
+          status: "deleted",
+          deletedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        try {
+          window.dispatchEvent(new CustomEvent('appointments:updated', {
+            detail: { appointment: deletedAppointment, appointmentId: appointmentToEdit.id, newStatus: 'deleted' },
+          }));
+        } catch {}
+        if (onBooked) onBooked(deletedAppointment);
+        toast?.success?.('Appointment marked as deleted');
+        onOpenChange(false);
+        return;
+      }
+
       // Update status to cancelled instead of deleting
       const updated = isPublicCachedAppointment
         ? cachePublicBookingAppointment({
@@ -2030,7 +2021,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const handleClose = () => {
     setModalStep("details");
     setIsRescheduling(false);
-    setAmountToPay("");
+    setAmountToPay("0");
+    setPaymentDate(getDefaultBookingPaymentDate());
     setCustomAppointmentTypeName("");
     setCustomPrice("0");
     onOpenChange(false);
@@ -2065,7 +2057,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
+        <DialogContent className="max-h-[90dvh] max-w-4xl">
           <DialogHeader>
             <div className="flex items-center justify-between mb-4">
               {/* Calendar icon on step 1, Back button on step 2 */}
@@ -2204,13 +2196,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Routine Cleaning">Routine Cleaning</SelectItem>
-                          <SelectItem value="Checkup">Checkup</SelectItem>
-                          <SelectItem value="Filling">Filling</SelectItem>
-                          <SelectItem value="Root Canal">Root Canal</SelectItem>
-                          <SelectItem value="Extraction">Extraction</SelectItem>
-                          <SelectItem value="Whitening">Whitening</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
+                          {serviceOptions
+                            .filter((service) => service.isActive !== false)
+                            .map((service) => (
+                              <SelectItem key={service.id} value={service.label}>
+                                <span className="mr-2">{service.icon || "🦷"}</span>
+                                {service.label}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2325,7 +2318,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
                           disabled={isPatientReadonly || !selectedDoctor}
                         >
-                          {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {formatWordyDate(selectedDate)}
                         </button>
                       </div>
 
@@ -2355,13 +2348,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             {displayDoctor}
                           </span>
                         ) : (
-                          <Select value={selectedDoctor} onValueChange={(newDoctor) => {
+                          <Select value={selectedDoctorSelectValue} onValueChange={(newDoctor) => {
                             setSelectedDoctor(newDoctor);
                           }}>
                             <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
                               <SelectValue placeholder="Select doctor" />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value={UNASSIGNED_DOCTOR_VALUE}>
+                                {UNASSIGNED_DOCTOR_LABEL}
+                              </SelectItem>
                               {visibleDoctors.map((doc: any) => (
                                 <SelectItem key={doc.id} value={doc.name}>
                                   {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
@@ -2459,159 +2455,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   disabled={isPatientReadonly && isCancelled}
                 />
 
-                {/* Appointment History Logs */}
-                {isEditMode && (appointmentLogs.length > 0 || paymentLogs.length > 0) && (
-                  <div className="space-y-3 pt-4 border-t border-gray-100">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-bold text-blue-800 flex items-center gap-2">
-                        <Award className="h-4 w-4" />
-                        Appointment History
-                      </Label>
-                      <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase tracking-wider">Logs</span>
-                    </div>
-                    <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
-                      {(() => {
-                        // Merge and deduplicate: if an appointment log exists for the same time as a payment log,
-                        // we prefer the appointment log because it can show BOTH status and payment.
-                        const allCombinedLogs = [
-                          ...appointmentLogs.map(l => ({ ...l, logType: 'appointment' as const })),
-                          ...paymentLogs.map(l => ({ ...l, logType: 'payment' as const, changedAt: l.changedAt }))
-                        ];
-
-                        // Simple deduplication logic: if two logs happen within 2 seconds of each other 
-                        // and one is appointment while other is payment, we'll favor the appointment one
-                        // but only if we can merge the amount into it.
-                        const sorted = allCombinedLogs.sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime());
-                        
-                        const filteredLogs: typeof sorted = [];
-                        for (let i = 0; i < sorted.length; i++) {
-                          const current = sorted[i];
-                          const prev = filteredLogs[filteredLogs.length - 1];
-                          
-                          if (prev && 
-                              Math.abs(new Date(current.changedAt).getTime() - new Date(prev.changedAt).getTime()) < 3000 &&
-                              ((current.logType === 'payment' && prev.logType === 'appointment') || 
-                               (current.logType === 'appointment' && prev.logType === 'payment'))) {
-                            
-                            // MERGE LOGIC: ensure the combined log has the higher amount
-                            const currentAmount = (current as any).amount || 0;
-                            const prevAmount = (prev as any).amount || 0;
-                            const maxAmount = Math.max(currentAmount, prevAmount);
-
-                            if (prev.logType === 'appointment') {
-                              (prev as any).amount = maxAmount;
-                              // Ensure current also has maxAmount in case logic continues
-                              (current as any).amount = maxAmount;
-                              // If current was a payment log, it might have extra info
-                              if (current.logType === 'payment') {
-                                (prev as any).paymentMethod = (current as any).paymentMethod;
-                                (prev as any).newBalance = (current as any).newBalance;
-                                (prev as any).paymentStatus = (current as any).paymentStatus || (prev as any).paymentStatus;
-                              }
-                              continue;
-                            } else if (current.logType === 'appointment') {
-                              (current as any).amount = maxAmount;
-                              // Ensure prev also has maxAmount in case logic continues
-                              (prev as any).amount = maxAmount;
-                              // Replace the previous payment log with this richer appointment log
-                              filteredLogs[filteredLogs.length - 1] = current;
-                              continue;
-                            }
-                          }
-                          filteredLogs.push(current);
-                        }
-
-                        return filteredLogs.filter(shouldShowBookingHistoryLog).map((log, index) => {
-                          const paidAmount = getBookingHistoryAmount(log);
-                          const isInitialCreation = isBookingInitialHistoryLog(log);
-                          const badges = getBookingHistoryBadges(log);
-                          const historyNotes = getBookingHistoryNotes(log);
-
-                          return (
-                            <div key={log.id} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] space-y-1.5 shadow-sm">
-                              <div className="flex justify-between items-start gap-2 text-gray-500 font-medium">
-                                <span className="flex items-center gap-1.5 opacity-80">
-                                  <Clock className="h-3 w-3" />
-                                  <span className="flex flex-col">
-                                    <span>{new Date(log.changedAt).toLocaleString('en-PH', { 
-                                      month: 'numeric', 
-                                      day: 'numeric', 
-                                      year: 'numeric', 
-                                      hour: '2-digit', 
-                                      minute: '2-digit',
-                                      second: '2-digit'
-                                    })}</span>
-                                    {(log as any).changedByName && (
-                                      <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">
-                                        by {(log as any).changedByName}
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                                <div className="flex flex-wrap items-center justify-end gap-1.5">
-                                  {badges.map((badge) => (
-                                    <span
-                                      key={`${badge.tone}-${badge.label}`}
-                                      className={`px-2 py-0.5 rounded-md uppercase font-black text-[9px] tracking-tight border ${getBookingHistoryBadgeClass(badge.tone)}`}
-                                    >
-                                      {badge.label}
-                                    </span>
-                                  ))}
-                                  <button 
-                                    onClick={() => {
-                                      // Get historical snapshot
-                                      const historicalData = (log.logType === 'appointment' && log.newState && Object.keys(log.newState).length > 3)
-                                        ? { ...appointmentToEdit, ...log.newState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: (log as any).changedByName }
-                                        : { ...appointmentToEdit, ...log.previousState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus || log.previousState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: (log as any).changedByName };
-                                      
-                                      setSnapshotToView(historicalData);
-                                      setSnapshotIsHistorical(index !== 0);
-                                      setIsSnapshotModalOpen(true);
-                                    }}
-                                    className="p-1 hover:bg-white rounded-md border border-transparent hover:border-gray-200 transition-colors text-gray-400 hover:text-blue-600"
-                                    title="View snapshot"
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="text-gray-800 leading-relaxed font-medium">
-                                {log.logType === 'payment' ? (
-                                  <div className="space-y-0.5">
-                                    <p>{getBookingHistoryBriefDetail(log, effectiveRole)}</p>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-0.5">
-                                    <p className="mb-1 text-[10px] text-gray-600">
-                                      {getBookingHistoryBriefDetail(log, effectiveRole)}
-                                    </p>
-                                  </div>
-                                )}
-                                {historyNotes && (
-                                  <p className="mt-1 truncate text-[10px] font-semibold text-gray-500" title={historyNotes}>
-                                    Notes: {historyNotes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
+                {isEditMode && (
+                  <div className="pt-4 border-t border-gray-100">
+                    <BookingAppointmentHistory
+                      appointmentLogs={appointmentLogs}
+                      paymentLogs={paymentLogs}
+                      appointmentToEdit={appointmentToEdit}
+                      triggerVariant="section"
+                      userRole={effectiveRole}
+                      onViewSnapshot={(snapshot, isHistorical) => {
+                        setSnapshotToView(snapshot);
+                        setSnapshotIsHistorical(isHistorical);
+                        setIsSnapshotModalOpen(true);
+                      }}
+                    />
                   </div>
                 )}
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
                 {/* destructive cancel for all users when editing an appointment */}
-                {canCancelAppointment && (
+                {(canCancelAppointment || canDeleteCancelledAppointment) && (
                   <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
                     {isBooking ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     ) : (
                       <CalendarIcon className="h-4 w-4 mr-2" />
                     )}
-                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
+                    {isBooking ? 'Processing...' : canDeleteCancelledAppointment ? 'Delete Appointment' : 'Cancel Appointment'}
                   </Button>
                 )}
                 
@@ -2646,7 +2517,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Date:</span>
-                    <span className="font-medium">{selectedDate.toLocaleDateString()}</span>
+                    <span className="font-medium">{formatWordyDate(selectedDate)}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Time:</span>
@@ -2705,24 +2576,55 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="paymentAmount" className="text-sm font-semibold">Amount to Pay Now</Label>
-                  <Input
-                    id="paymentAmount"
-                    type="number"
-                    placeholder={`Enter amount (e.g. ${remainingBalance})`}
-                    value={amountToPay}
-                    onChange={(e: any) => setAmountToPay(e.target.value)}
-                    max={remainingBalance}
-                    className="font-bold text-lg h-12"
-                    disabled={paymentMethod === "Pay at Clinic"}
-                  />
-                  <p className="text-[10px] text-gray-500">{paymentMethod === "Pay at Clinic" ? "Amount will be paid at the clinic" : `Leave blank or enter 0 to skip payment. Remaining balance: ₱${remainingBalance.toLocaleString()}`}</p>
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1.35fr)_minmax(220px,0.8fr)]">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="paymentAmount" className="text-sm font-semibold">Amount to Pay Now</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setAmountToPay(String(remainingBalance))}
+                        disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
+                        className="h-8 rounded-full px-3 text-xs font-bold"
+                      >
+                        Pay Full
+                      </Button>
+                    </div>
+                    <Input
+                      id="paymentAmount"
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={amountToPay}
+                      onChange={(e: any) => setAmountToPay(e.target.value)}
+                      className="font-bold text-lg h-12"
+                      disabled={paymentMethod === "Pay at Clinic"}
+                    />
+                    <p className="text-[10px] text-gray-500">{paymentMethod === "Pay at Clinic" ? "Amount will be paid at the clinic" : `Remaining balance: ₱${remainingBalance.toLocaleString()}`}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="bookingPaymentDate" className="text-sm font-semibold">Payment Date</Label>
+                    <Input
+                      id="bookingPaymentDate"
+                      type="date"
+                      value={paymentDate}
+                      max={getDefaultBookingPaymentDate()}
+                      onChange={(e: any) => setPaymentDate(e.target.value)}
+                      disabled={paymentMethod === "Pay at Clinic"}
+                      className="h-12 font-semibold"
+                    />
+                    <p className="text-[10px] text-gray-500">
+                      {paymentMethod === "Pay at Clinic"
+                        ? "Recorded once payment is made."
+                        : formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
                   <h3 className="font-semibold text-sm">Select Payment Method</h3>
-                  <div className={`grid gap-2 ${isStaffBookingMode ? "grid-cols-4" : "grid-cols-3"}`}>
+                  <div className={`grid grid-cols-2 gap-2 ${isStaffBookingMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
                     <Button
                       variant="outline"
                       className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${paymentMethod === "GCash" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-200"}`}
@@ -2811,27 +2713,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
-                {canCancelAppointment && (
+                {(canCancelAppointment || canDeleteCancelledAppointment) && (
                   <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
                     <CalendarIcon className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
+                    {isBooking ? 'Processing...' : canDeleteCancelledAppointment ? 'Delete Appointment' : 'Cancel Appointment'}
                   </Button>
                 )}
                 
                 <Button
-                  className={`bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100 ${isOverpay ? 'opacity-80 cursor-pointer' : ''} ${overpayPulse ? 'ring-2 ring-red-400 animate-pulse' : ''}`}
+                  className="bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100"
                   onClick={() => {
                     if (isBooking) return;
-                    if (isOverpay) {
-                      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
-                      setOverpayPulse(true);
-                      setTimeout(() => setOverpayPulse(false), 700);
-                      return;
-                    }
-
                     handleConfirmPayment();
                   }}
-                  aria-disabled={isOverpay}
                   disabled={isBooking}
                 >
                   {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Booking'}
@@ -2849,6 +2743,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         mode="cancel"
         appointment={appointmentToEdit}
         isProcessing={isBooking}
+        title={canDeleteCancelledAppointment ? "Delete Appointment?" : undefined}
+        description={
+          canDeleteCancelledAppointment
+            ? "You will be deleting this appointment permanently from receptionist views. Only an admin can return it back. Are you sure?"
+            : undefined
+        }
+        confirmLabel={canDeleteCancelledAppointment ? "Yes, Delete" : undefined}
         onConfirm={async () => {
           setIsDeleteDialogOpen(false);
           await handleCancel();
@@ -2886,6 +2787,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         discountedPrice={discountedPrice}
         previouslyPaidAmount={previouslyPaidAmount}
         paymentAmountNow={paymentAmountNow}
+        paymentDate={paymentDate}
         repeatOption={repeatOption}
         customRepeatDate={customRepeatDate}
         onRepeatOptionChange={setRepeatOption}
@@ -2921,6 +2823,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         userRole={effectiveRole}
       />
 
+      <OverpaymentConfirmDialog
+        open={isOverpaymentDialogOpen}
+        onOpenChange={setIsOverpaymentDialogOpen}
+        currentTotalDue={discountedPrice}
+        previousPaidAmount={previouslyPaidAmount}
+        paymentAmount={paymentAmountNow}
+        adjustedPrice={overpaymentAdjustedPrice}
+        onAdjustedPriceChange={setOverpaymentAdjustedPrice}
+        onKeepPrice={() => continueAfterOverpaymentConfirmation(false)}
+        onAdjustPrice={() => continueAfterOverpaymentConfirmation(true)}
+      />
+
       {/* Historical Snapshot View-only Modal */}
       <AppointmentHistoryView
         open={isSnapshotModalOpen}
@@ -2944,7 +2858,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onOpenChange={setIsDatePickerOpen}
         selectedDate={selectedDate}
         onDateSelect={setSelectedDate}
-        doctorName={selectedDoctor}
+        doctorName={selectedDoctorForSchedule}
         patientId={selectedPatient}
         selectedTime={selectedTime}
         duration={duration}
@@ -2959,7 +2873,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onOpenChange={setIsTimePickerOpen}
         selectedDate={selectedDate}
         selectedTime={selectedTime}
-        doctorName={selectedDoctor}
+        doctorName={selectedDoctorForSchedule}
         duration={duration}
         onTimeSelect={setSelectedTime}
         onDateChange={setSelectedDate}

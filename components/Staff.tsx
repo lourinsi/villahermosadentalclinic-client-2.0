@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import type { Appointment } from "../hooks/useAppointments";
 import type { Attendance, Staff, StaffFinancialRecord, StaffFinancialRecordForm } from "@/lib/staff-types";
+import { formatWordyDate } from "@/lib/utils";
 import AddStaffModalWrapper from "./AddStaffModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
@@ -1161,7 +1162,7 @@ export function StaffView() {
                             </Badge>
                           </TableCell>
                           <TableCell className="font-medium">{formatCurrency(record.amount)}</TableCell>
-                          <TableCell>{record.date}</TableCell>
+                          <TableCell>{formatWordyDate(record.date, { fallback: record.date || "-" })}</TableCell>
                           <TableCell>{record.repaymentSchedule}</TableCell>
                           <TableCell className="max-w-xs truncate">{record.notes}</TableCell>
                           <TableCell>

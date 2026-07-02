@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
-import { parseBackendDateToLocal, formatDateToYYYYMMDD, calculateAgeFromDOB } from "../lib/utils";
+import { parseBackendDateToLocal, formatDateToYYYYMMDD, calculateAgeFromDOB, formatWordyDate } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 
 // NOTE: Dental chart state - stores which sections of which teeth are colored
@@ -247,7 +247,7 @@ export function DentalChart({ records, onSaveRecords, patientDateOfBirth }: Dent
     const updatedRecords = [...localRecords, newRecord];
     onSaveRecords(updatedRecords);
     setCurrentIndex(updatedRecords.length - 1);
-    toast.info("New dental chart record created for " + newChartDate.toLocaleDateString());
+    toast.info("New dental chart record created for " + formatWordyDate(newChartDate));
   };
   const handleDeleteChart = () => {
     if (localRecords.length === 1 && records.length === 0) {
@@ -587,14 +587,14 @@ export function DentalChart({ records, onSaveRecords, patientDateOfBirth }: Dent
                         className="h-8 min-w-[150px] justify-center gap-2 px-4 text-sm font-medium text-gray-600 hover:bg-violet-50 hover:text-violet-700"
                       >
                         <CalendarDays className="h-4 w-4 text-gray-400" />
-                        {selectedChartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {formatWordyDate(selectedChartDate)}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="z-[60] w-[318px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-100" align="center" side="top" sideOffset={10}>
                       <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3">
                         <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">Chart Date</div>
                         <div className="mt-0.5 text-sm font-bold text-slate-900">
-                          {selectedChartDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                          {formatWordyDate(selectedChartDate)}
                         </div>
                       </div>
                       <div className="p-4">

@@ -18,7 +18,6 @@ import {
   RotateCcw
 } from "lucide-react";
 import { Notification, NotificationType } from "../lib/notification-types";
-import { format } from "date-fns";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import PatientAvatar from "./PatientAvatar";
@@ -26,6 +25,7 @@ import PatientAvatar from "./PatientAvatar";
 // in the notification metadata (notificationImage) or doctorProfile. See
 // server-side change suggestions below.
 import { formatPaymentStatusLabel } from "@/lib/status-colors";
+import { formatWordyDate } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -267,7 +267,10 @@ export function NotificationItem({
             )}
           </div>
           <span className={`${isCompact ? 'text-[10px]' : 'text-xs'} ${!notification.isRead ? 'text-violet-600 font-medium' : 'text-gray-500'}`}>
-            {format(new Date(isLog ? notification.createdAt : (notification.updatedAt || notification.createdAt)), "yyyy-MM-dd HH:mm")}
+            {formatWordyDate(isLog ? notification.createdAt : (notification.updatedAt || notification.createdAt), {
+              includeTime: true,
+              fallback: "No date",
+            })}
           </span>
         </div>
 

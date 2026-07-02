@@ -19,6 +19,29 @@ export const APPOINTMENT_TYPES = [
 
 export const OTHER_APPOINTMENT_TYPE_INDEX = 6;
 
+export interface AppointmentTypeOption {
+  id: number;
+  value: string;
+  label: string;
+  icon?: string;
+  price?: number;
+  duration?: number;
+  isActive?: boolean;
+}
+
+export const APPOINTMENT_TYPE_ICONS: Record<string, string> = {
+  "Routine Cleaning": "✨",
+  "Checkup": "🔍",
+  "Filling": "🦷",
+  "Root Canal": "🔬",
+  "Extraction": "🦷",
+  "Whitening": "💎",
+  "Other": "➕",
+  "Dentures": "🦷",
+  "Crowns": "👑",
+  "Braces": "😁",
+};
+
 export const APPOINTMENT_PRICES: Record<string, number> = {
   "Routine Cleaning": 1500,
   "Checkup": 500,
@@ -44,6 +67,16 @@ export const APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
   "Crowns": 90,
   "Braces": 90,
 };
+
+export const APPOINTMENT_TYPE_OPTIONS: AppointmentTypeOption[] = APPOINTMENT_TYPES.map((name, id) => ({
+  id,
+  value: name,
+  label: name,
+  icon: APPOINTMENT_TYPE_ICONS[name] || "🦷",
+  price: APPOINTMENT_PRICES[name] || 0,
+  duration: APPOINTMENT_TYPE_DURATIONS[name] || 30,
+  isActive: true,
+}));
 
 export const getAppointmentTypeName = (typeIndex: number, customType?: string): string => {
   if (typeIndex === OTHER_APPOINTMENT_TYPE_INDEX) {

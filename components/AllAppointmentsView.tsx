@@ -14,6 +14,8 @@ import {
   getStatusDotColorClass,
 } from "@/lib/status-colors";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
+import { formatWordyDate } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -252,7 +254,9 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   onClick={() => onOpenAppointment?.(appointment)}
                 >
                   <TableCell className="font-semibold text-gray-900">{appointment.patientName}</TableCell>
-                  <TableCell className="text-gray-600 font-medium">{`${appointment.date} @ ${appointment.time}`}</TableCell>
+                  <TableCell className="text-gray-600 font-medium">
+                    {appointment.date} @ {formatTimeTo12h(appointment.time)}
+                  </TableCell>
                   <TableCell>{getAppointmentTypeName(appointment.type, appointment.customType)}</TableCell>
                   <TableCell className="text-gray-600">Dr. {appointment.doctor}</TableCell>
                   <TableCell>
@@ -269,7 +273,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   {(onPay || onDelete) && (
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && (
+                        {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && appointment.status !== "deleted" && (
                           <Button 
                             size="sm" 
                             className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 shadow-sm active:scale-95 transition-all"
@@ -336,7 +340,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
                   <div className="flex items-center gap-2 text-gray-600">
                     <CalendarIcon className="h-4 w-4 text-gray-400" />
-                    <span>{appointment.date}</span>
+                    <span>{formatWordyDate(appointment.date, { fallback: appointment.date || "No date" })}</span>
                   </div>
                   <div className="flex items-center gap-2 text-gray-600 justify-end">
                     <CreditCard className="h-4 w-4 text-gray-400" />

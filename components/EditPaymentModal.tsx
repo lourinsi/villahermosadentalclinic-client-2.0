@@ -6,6 +6,7 @@ import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
@@ -26,6 +27,29 @@ import { toast } from "sonner";
 import { DollarSign, Edit } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { formatWordyDate } from "@/lib/utils";
+
+const getPaymentLookupCandidates = (paymentId?: string | null, paymentData?: any) => {
+  const rawValues = [
+    paymentId,
+    paymentData?.id,
+    paymentData?.paymentId,
+    paymentData?.paymentRecordId,
+    paymentData?.transactionId,
+  ];
+  const candidates = new Set<string>();
+
+  rawValues.forEach((value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+
+    candidates.add(raw);
+    if (raw.startsWith("payment-log-")) candidates.add(raw.replace(/^payment-log-/, ""));
+    if (raw.startsWith("appointment-log-")) candidates.add(raw.replace(/^appointment-log-/, ""));
+  });
+
+  return Array.from(candidates);
+};
 
 export function EditPaymentModal() {
   const {
@@ -46,51 +70,111 @@ export function EditPaymentModal() {
   const [selectedAppointment, setSelectedAppointment] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
+  const [fetchedPaymentData, setFetchedPaymentData] = useState<any | null>(null);
+  const [isFetchingPayment, setIsFetchingPayment] = useState(false);
+  const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(null);
+
+  const effectivePaymentData = fetchedPaymentData || paymentData;
 
   useEffect(() => {
-    if (isPaymentModalOpen && paymentData) {
-      console.log("Payment Data received:", paymentData);
+    if (!isPaymentModalOpen || !paymentId) {
+      setFetchedPaymentData(null);
+      setIsFetchingPayment(false);
+      setResolvedPaymentId(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchPayment = async () => {
+      setIsFetchingPayment(true);
+      try {
+        const candidates = getPaymentLookupCandidates(paymentId, paymentData);
+        let lastError = "Failed to fetch payment";
+
+        for (const candidate of candidates) {
+          const res = await fetch(apiUrl(`/api/payments/${encodeURIComponent(candidate)}`), {
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
+            credentials: "include",
+          });
+          const json = await res.json().catch(() => ({}));
+
+          if (!res.ok || !json?.success) {
+            lastError = json?.message || lastError;
+            continue;
+          }
+
+          const nextPaymentData = json.data?.payment || json.data;
+          if (!cancelled) {
+            setFetchedPaymentData(nextPaymentData || null);
+            setResolvedPaymentId(nextPaymentData?.id ? String(nextPaymentData.id) : candidate);
+          }
+          return;
+        }
+
+        throw new Error(lastError);
+      } catch (err) {
+        console.error("Error fetching payment", err);
+        if (!cancelled) {
+          setFetchedPaymentData(null);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch payment");
+        }
+      } finally {
+        if (!cancelled) setIsFetchingPayment(false);
+      }
+    };
+
+    fetchPayment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaymentModalOpen, paymentId, paymentData]);
+
+  useEffect(() => {
+    if (isPaymentModalOpen && effectivePaymentData) {
+      console.log("Payment Data received:", effectivePaymentData);
       
       // Set payment method with hardcoded fallback options
-      const method = paymentData.method || null;
+      const method = effectivePaymentData.method || null;
       setPaymentMethod(method);
       
       // Set amount - handle both 'amount' and 'value' fields
-      const amt = paymentData.amount != null ? paymentData.amount : (paymentData.value != null ? paymentData.value : "");
+      const amt = effectivePaymentData.amount != null ? effectivePaymentData.amount : (effectivePaymentData.value != null ? effectivePaymentData.value : "");
       setAmount(amt ? String(amt) : "");
       
       // Format and set payment date - ensure it's in YYYY-MM-DD format
       let formattedDate = "";
-      if (paymentData.date) {
-        if (typeof paymentData.date === "string") {
-          if (paymentData.date.includes("T")) {
+      if (effectivePaymentData.date) {
+        if (typeof effectivePaymentData.date === "string") {
+          if (effectivePaymentData.date.includes("T")) {
             // ISO format - extract just the date part
-            formattedDate = paymentData.date.split("T")[0];
+            formattedDate = effectivePaymentData.date.split("T")[0];
           } else {
-            formattedDate = paymentData.date;
+            formattedDate = effectivePaymentData.date;
           }
         }
       }
       setPaymentDate(formattedDate);
       
       // Set other fields
-      setTransactionId(paymentData.transactionId || "");
-      setNotes(paymentData.notes || "");
-      setSelectedAppointment(paymentData.appointmentId || null);
+      setTransactionId(effectivePaymentData.transactionId || "");
+      setNotes(effectivePaymentData.notes || "");
+      setSelectedAppointment(effectivePaymentData.appointmentId || null);
       
       console.log("Form state set:", {
         method,
         amount: amt,
         date: formattedDate,
-        transactionId: paymentData.transactionId,
-        appointmentId: paymentData.appointmentId
+        transactionId: effectivePaymentData.transactionId,
+        appointmentId: effectivePaymentData.appointmentId
       });
     }
-  }, [isPaymentModalOpen, paymentData]);
+  }, [isPaymentModalOpen, effectivePaymentData]);
 
   useEffect(() => {
-    if (isPaymentModalOpen && (patientId || paymentData?.patientId)) {
-      const targetPatientId = patientId || paymentData?.patientId;
+    if (isPaymentModalOpen && (patientId || effectivePaymentData?.patientId)) {
+      const targetPatientId = patientId || effectivePaymentData?.patientId;
 
       if (contextAppointments && contextAppointments.length > 0) {
         setAppointments(contextAppointments);
@@ -113,7 +197,7 @@ export function EditPaymentModal() {
         fetchAppointments();
       }
     }
-  }, [isPaymentModalOpen, patientId, paymentData, contextAppointments]);
+  }, [isPaymentModalOpen, patientId, effectivePaymentData, contextAppointments]);
 
   useEffect(() => {
     if (isPaymentModalOpen) {
@@ -141,7 +225,8 @@ export function EditPaymentModal() {
 
   const handleSubmit = async () => {
     const amt = parseFloat(amount) || 0;
-    if (!paymentId) {
+    const paymentRecordId = resolvedPaymentId || effectivePaymentData?.id || paymentId;
+    if (!paymentRecordId) {
       toast.error("Payment ID is missing");
       return;
     }
@@ -168,7 +253,7 @@ export function EditPaymentModal() {
         appointmentId: selectedAppointment,
       };
 
-      const res = await fetch(apiUrl(`/api/payments/${paymentId}`), {
+      const res = await fetch(apiUrl(`/api/payments/${encodeURIComponent(paymentRecordId)}`), {
         method: "PUT",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
@@ -181,6 +266,10 @@ export function EditPaymentModal() {
         return;
       }
       toast.success("Payment updated successfully");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("payments:updated"));
+        window.dispatchEvent(new CustomEvent("appointments:updated"));
+      }
       refreshPatients();
       closePaymentModal();
     } catch (err) {
@@ -189,8 +278,8 @@ export function EditPaymentModal() {
     }
   };
 
-  // Only show if we have payment data (edit mode)
-  if (!paymentData) {
+  // Only show in edit mode.
+  if (!paymentId && !effectivePaymentData) {
     return null;
   }
 
@@ -199,10 +288,19 @@ export function EditPaymentModal() {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit Payment</DialogTitle>
+          <DialogDescription>
+            Update the payment amount, method, date, transaction ID, and notes.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          {isFetchingPayment && !effectivePaymentData ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              Loading payment record...
+            </div>
+          ) : null}
+
           {/* Combined Summary Box */}
-          {paymentData && selectedAppointment && appointments.length > 0 && (
+          {effectivePaymentData && selectedAppointment && appointments.length > 0 && (
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
               <div className="text-sm font-semibold text-blue-900 mb-3">Appointment & Payment Summary</div>
               <div className="grid grid-cols-2 gap-4">
@@ -212,12 +310,14 @@ export function EditPaymentModal() {
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>
-                  <div className="text-sm font-semibold text-gray-900">{appointments.find((a: Appointment) => a.id === selectedAppointment)?.date}</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {formatWordyDate(appointments.find((a: Appointment) => a.id === selectedAppointment)?.date, { fallback: "No date" })}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Current Amount</div>
                   <div className="text-sm font-semibold text-gray-900">
-                    ${paymentData?.amount ? parseFloat(String(paymentData.amount)).toFixed(2) : "0.00"}
+                    ${effectivePaymentData?.amount ? parseFloat(String(effectivePaymentData.amount)).toFixed(2) : "0.00"}
                   </div>
                 </div>
                 <div>
@@ -305,7 +405,7 @@ export function EditPaymentModal() {
             <Button
               onClick={handleSubmit}
               className="bg-primary hover:bg-primary/90"
-              disabled={!paymentMethod || !amount || parseFloat(amount) <= 0}
+              disabled={isFetchingPayment || !paymentMethod || !amount || parseFloat(amount) <= 0}
             >
               <Edit className="h-4 w-4 mr-2" />
               Update Payment

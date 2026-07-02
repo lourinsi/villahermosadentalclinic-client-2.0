@@ -1,4 +1,5 @@
 import { apiUrl } from "@/lib/api";
+import { formatWordyDate } from "@/lib/utils";
 import React, { useEffect, useRef } from "react";
 import {
   CART_APPOINTMENT_STATUS,
@@ -196,6 +197,8 @@ const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
 
 export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
+export const UNASSIGNED_DOCTOR_VALUE = "__assign_later__";
+export const UNASSIGNED_DOCTOR_LABEL = "To assign later";
 
 const ALLOWED_BOOKING_DURATION_SET = new Set<number>(ALLOWED_BOOKING_DURATIONS);
 
@@ -212,7 +215,7 @@ export function normalizeBookingDuration(
   return isAllowedBookingDuration(duration) ? (duration as BookingDuration) : fallback;
 }
 
-type AppointmentTypeDurations = Record<string, BookingDuration>;
+type AppointmentTypeDurations = Record<string, number>;
 
 export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
   "Routine Cleaning": 30,
@@ -275,14 +278,34 @@ export function getBookingAppointmentTypeIndex(typeName: string): number {
   return typeMap[typeName] ?? 6;
 }
 
+export function isUnassignedBookingDoctor(value?: unknown) {
+  const normalized = String(value || "")
+    .replace(/^Dr\.\s+/i, "")
+    .toLowerCase()
+    .trim();
+
+  return /^(?:__assign_later__|n\/a|na|none|null|undefined|unassigned|no doctor assigned|to assign later|assign later)$/.test(normalized);
+}
+
+export function getBookingDoctorValue(value?: unknown) {
+  if (isUnassignedBookingDoctor(value)) return "";
+  return String(value || "").trim();
+}
+
+export function getBookingDoctorSelectValue(value?: unknown) {
+  return getBookingDoctorValue(value) || UNASSIGNED_DOCTOR_VALUE;
+}
+
 export function formatBookingDoctorName(name?: string): string {
+  if (isUnassignedBookingDoctor(name)) return UNASSIGNED_DOCTOR_LABEL;
   if (!name || name === "—" || name === "â€”") return "—";
   const cleanName = name.replace(/^Dr\.\s+/i, "").trim();
-  if (/^(none|null|undefined|unassigned|no doctor assigned)$/i.test(cleanName)) return "No doctor assigned";
+  if (/^(none|null|undefined|unassigned|no doctor assigned)$/i.test(cleanName)) return UNASSIGNED_DOCTOR_LABEL;
   return `Dr. ${cleanName}`;
 }
 
 export function normalizeBookingDoctorName(name?: string) {
+  if (isUnassignedBookingDoctor(name)) return "";
   const cleanName = (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
   return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(cleanName) ? "" : cleanName;
 }
@@ -330,7 +353,92 @@ export function isSignificantBookingPaymentStatus(value?: unknown) {
   return /^(paid|fully-paid|half-paid|partial|partially-paid)$/.test(normalized);
 }
 
+const toBookingHistoryNumber = (value: unknown): number | null => {
+  if (value === undefined || value === null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+export function formatBookingHistoryMoney(value: unknown) {
+  const numeric = Math.abs(toBookingHistoryNumber(value) ?? 0);
+  return `PHP ${numeric.toLocaleString()}`;
+}
+
+export function getBookingPaymentAdjustment(log: any) {
+  const source =
+    log?.paymentAdjustment ||
+    log?.paymentAdjustmentDetails ||
+    log?.newState?.paymentAdjustment ||
+    log?.newState?._paymentAdjustment ||
+    log?.appointmentSnapshot?.paymentAdjustment ||
+    log?.transaction?.paymentAdjustment ||
+    {};
+  const normalizedChangeType = String(log?.changeType || log?.newState?.changeType || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[-\s]+/g, "_");
+  const previousAmount = toBookingHistoryNumber(
+    source.previousAmount ??
+    source.oldAmount ??
+    source.fromAmount ??
+    log?.previousPaymentAmount
+  );
+  const newAmount = toBookingHistoryNumber(
+    source.newAmount ??
+    source.updatedAmount ??
+    source.toAmount ??
+    log?.newPaymentAmount
+  );
+  const delta = toBookingHistoryNumber(
+    source.delta ??
+    source.amountDiff ??
+    log?.amount
+  ) ?? 0;
+  const isAdjustment =
+    normalizedChangeType === "payment_adjustment" ||
+    Boolean(source.isAdjustment) ||
+    Boolean(previousAmount !== null && newAmount !== null && previousAmount !== newAmount && normalizedChangeType.includes("payment"));
+
+  return {
+    isAdjustment,
+    previousAmount,
+    newAmount,
+    delta,
+  };
+}
+
+export function formatBookingPaymentAdjustmentAmountLabel(log: any) {
+  const adjustment = getBookingPaymentAdjustment(log);
+  if (!adjustment.isAdjustment) return "";
+
+  if (adjustment.previousAmount !== null && adjustment.newAmount !== null) {
+    return `${formatBookingHistoryMoney(adjustment.previousAmount)} -> ${formatBookingHistoryMoney(adjustment.newAmount)}`;
+  }
+
+  if (adjustment.delta > 0) return `+${formatBookingHistoryMoney(adjustment.delta)}`;
+  if (adjustment.delta < 0) return `-${formatBookingHistoryMoney(adjustment.delta)}`;
+  return "No amount change";
+}
+
+export function formatBookingPaymentAdjustmentDetail(log: any) {
+  const adjustment = getBookingPaymentAdjustment(log);
+  if (!adjustment.isAdjustment) return "";
+
+  const amountLabel = formatBookingPaymentAdjustmentAmountLabel(log);
+  const delta = adjustment.delta;
+  const deltaLabel = delta !== 0 ? `${delta > 0 ? "+" : "-"}${formatBookingHistoryMoney(delta)}` : "";
+
+  if (adjustment.previousAmount !== null && adjustment.newAmount !== null) {
+    return `Payment adjusted from ${formatBookingHistoryMoney(adjustment.previousAmount)} to ${formatBookingHistoryMoney(adjustment.newAmount)}${deltaLabel ? ` (${deltaLabel})` : ""}.`;
+  }
+
+  if (delta > 0) return `Payment adjusted upward by ${formatBookingHistoryMoney(delta)}.`;
+  if (delta < 0) return `Payment adjusted downward by ${formatBookingHistoryMoney(delta)}.`;
+  return amountLabel ? `Payment adjusted: ${amountLabel}.` : "Payment adjusted.";
+}
+
 export function shouldShowBookingHistoryLog(log: any) {
+  if (getBookingPaymentAdjustment(log).isAdjustment) return true;
   if (log?.logType !== "payment") return true;
 
   const { nextStatus } = getBookingHistoryPaymentStatusChange(log);
@@ -510,6 +618,29 @@ export function formatBookingDateKey(dateInput?: Date | string | null) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+export function getDefaultBookingPaymentDate(now: Date = new Date()) {
+  return formatBookingDateKey(now);
+}
+
+export function normalizeBookingPaymentDate(dateInput?: Date | string | null) {
+  return formatBookingDateKey(dateInput);
+}
+
+export function isFutureBookingPaymentDate(dateInput?: Date | string | null, now: Date = new Date()) {
+  const paymentDate = parseLocalDateOnly(dateInput);
+  if (!paymentDate) return false;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return paymentDate.getTime() > today.getTime();
+}
+
+export function formatBookingPaymentDateLabel(dateInput?: Date | string | null) {
+  const paymentDate = parseLocalDateOnly(dateInput);
+  if (!paymentDate) return "";
+
+  return formatWordyDate(paymentDate);
+}
+
 export function bookingTimeToMinutes(time: string) {
   const [hours, minutes] = String(time || "").split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
@@ -547,13 +678,13 @@ export function useBookingPaymentPrefill({
       return;
     }
 
-    if (modalStep !== "payment" || remainingBalance <= 0 || paymentAmountPrefilledRef.current) return;
+    if (modalStep !== "payment" || paymentAmountPrefilledRef.current) return;
     if (amountToPay.trim() !== "") {
       paymentAmountPrefilledRef.current = true;
       return;
     }
 
-    setAmountToPay(String(remainingBalance));
+    setAmountToPay("0");
     paymentAmountPrefilledRef.current = true;
   }, [open, modalStep, amountToPay, remainingBalance, setAmountToPay]);
 }
@@ -927,10 +1058,10 @@ export function getBookingCancellationConfig({
   appointmentToEdit?: any;
   appointmentStatus?: string | null;
 }) {
-  const currentStatus = String(
-    appointmentStatus || appointmentToEdit?.status || ""
-  ).toLowerCase();
-  const isCancelled = currentStatus === "cancelled";
+  const selectedStatus = normalizeAppointmentStatus(appointmentStatus || "");
+  const existingStatus = normalizeAppointmentStatus(appointmentToEdit?.status || "");
+  const currentStatus = selectedStatus || existingStatus;
+  const isCancelled = currentStatus === "cancelled" || existingStatus === "cancelled";
 
   return {
     isCancelled,

@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -29,21 +29,23 @@ export interface AdminLayoutTheme {
 }
 
 export const adminLayoutTheme: AdminLayoutTheme = {
-  sidebar: "w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col",
-  title: "p-4 text-2xl font-bold border-b border-blue-800",
+  sidebar: "w-full bg-blue-900 text-white flex-shrink-0 flex flex-col md:h-full md:w-64",
+  title: "border-b border-blue-800 px-4 py-3 text-lg font-bold md:p-4 md:text-2xl",
   navActive: "bg-blue-950 text-white",
   navInactive: "text-blue-100 hover:bg-blue-800 hover:text-white",
-  footer: "p-4 border-t border-blue-800 space-y-3",
-  userBox: "flex items-center space-x-2 px-3 py-2 bg-blue-800 rounded-lg",
+  footer: "flex items-center gap-2 border-t border-blue-800 p-2 md:block md:space-y-3 md:p-4",
+  userBox: "hidden min-w-0 items-center space-x-2 rounded-lg bg-blue-800 px-3 py-2 sm:flex",
   userIcon: "w-4 h-4 text-blue-200",
-  logoutButton: "w-full justify-start text-blue-900 hover:bg-blue-50 bg-white",
+  logoutButton: "w-auto shrink-0 justify-start bg-white text-blue-900 hover:bg-blue-50 md:w-full",
 };
 
 const navItems = [
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/requests", label: "Requests", icon: ClipboardList },
   { path: "/patients", label: "Patients", icon: Users },
-  { path: "/doctors", label: "Find Doctors", icon: Stethoscope },
+  { path: "/doctors", label: "Find Doctors", icon: Stethoscope, hideForReceptionist: true },
+  { path: "/services", label: "Services", icon: ListChecks },
+  { path: "/questionnaire", label: "Questionnaire", icon: ClipboardList },
   { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/finance", label: "Finance", icon: DollarSign },
   { path: "/staff", label: "Staff", icon: Shield },
@@ -108,6 +110,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
+  const visibleNavItems = navItems.filter((item) => !item.hideForReceptionist || !isReceptionistView);
   const {
     approvalDialogAppointment,
     approvalDialogMode,
@@ -167,29 +170,29 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   }, [pathname, router, user?.role]);
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex min-h-dvh flex-col bg-gray-100 md:h-screen md:flex-row">
       <aside data-tour-id="admin-sidebar" className={theme.sidebar}>
         <div className={theme.title}>{portalTitle}</div>
-        <nav className="flex-1 py-4">
-          <ul className="space-y-1">
-            {navItems.map((item) => {
+        <nav className="flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4">
+          <ul className="flex gap-1 px-2 md:block md:space-y-1 md:px-0">
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const itemHref = `${managementBasePath}${item.path}`;
               const isActive = pathname === itemHref;
               return (
-                <li key={itemHref}>
+                <li key={itemHref} className="shrink-0">
                   <Link
                     href={itemHref}
                     prefetch={false}
                     data-tour-id={getNavTourId(item.label)}
-                    className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
+                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-2 md:gap-3 md:px-4 md:py-3 md:text-base ${
                       isActive
                         ? theme.navActive
                         : theme.navInactive
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
-                    <span>{item.label}</span>
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="whitespace-nowrap">{item.label}</span>
                   </Link>
                 </li>
               );
@@ -211,9 +214,9 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           </Button>
         </div>
       </aside>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
-          <div className="flex items-center gap-3">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 md:h-16 md:px-6">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-3">
             {canSwitchAdminView && (
               <Button
                 onClick={toggleViewMode}
@@ -231,16 +234,18 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
                 {isReceptionistView ? "Receptionist" : "Admin"}
               </Button>
             )}
-            <Button
-              onClick={toggleMode}
-              variant="outline"
-              size="sm"
-              data-tour-id="admin-mode-toggle"
-              className="text-xs"
-              title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
-            >
-              {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
-            </Button>
+            {!isReceptionistView && (
+              <Button
+                onClick={toggleMode}
+                variant="outline"
+                size="sm"
+                data-tour-id="admin-mode-toggle"
+                className="text-xs"
+                title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+              >
+                {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+              </Button>
+            )}
           </div>
           <div data-tour-id="admin-notifications">
             <NotificationsOpened
@@ -264,7 +269,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
             />
           </div>
         </header>
-        <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <main className="flex-1 overflow-auto bg-gray-50 p-3 sm:p-4 md:p-6">{children}</main>
         <AppointmentHistoryView
           open={isAppointmentHistoryOpen}
           onOpenChange={(open) => {

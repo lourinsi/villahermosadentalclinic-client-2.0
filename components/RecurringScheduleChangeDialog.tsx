@@ -3,6 +3,7 @@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { AlertCircle, Calendar as CalendarIcon, Clock, Loader2 } from "lucide-react";
+import { formatWordyDate } from "@/lib/utils";
 // RecurringAppointmentDeletionItem type removed with recurrence deprecation
 
 interface RecurringScheduleChangeDialogProps {
@@ -54,12 +55,7 @@ export function RecurringScheduleChangeDialog({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-gray-900">
-                      {new Date(item.date).toLocaleDateString("en-US", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      {formatWordyDate(item.date, { fallback: item.date || "No date" })}
                     </p>
                     <div className="flex items-center gap-2 text-xs text-gray-500 font-medium mt-1">
                       <Clock className="h-3.5 w-3.5" />

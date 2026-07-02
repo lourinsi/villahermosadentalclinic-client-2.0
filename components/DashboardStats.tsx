@@ -8,8 +8,10 @@ interface DashboardStatsProps {
   portal: "admin" | "doctor" | "patient";
   appointments: Appointment[];
   monthlyAppointments: Appointment[];
-  totalPatients: number;
   pendingAppointmentsCount: number;
+  periodLabel?: string;
+  periodRevenue?: number;
+  periodExpenses?: number;
   user: any;
 }
 
@@ -17,25 +19,27 @@ export function DashboardStats({
   portal,
   appointments,
   monthlyAppointments,
-  totalPatients,
   pendingAppointmentsCount,
+  periodLabel = "Monthly",
+  periodRevenue = 0,
+  periodExpenses = 0,
   user
 }: DashboardStatsProps) {
   const getStats = () => {
     if (portal === "admin") {
       return [
         {
-          title: "Total Patients",
-          value: totalPatients.toString(),
-          change: "+12%",
-          icon: Users,
-          color: "text-blue-600",
-          bgColor: "bg-blue-50"
+          title: `${periodLabel} Expenses`,
+          value: `\u20b1${periodExpenses.toLocaleString()}`,
+          change: "Paid expenses",
+          icon: DollarSign,
+          color: "text-red-600",
+          bgColor: "bg-red-50"
         },
         {
-          title: "This Month's Appointments",
+          title: `${periodLabel} Appointments`,
           value: monthlyAppointments.length.toString(),
-          change: "+2",
+          change: "Scheduled",
           icon: Calendar,
           color: "text-green-600",
           bgColor: "bg-green-50"
@@ -49,9 +53,9 @@ export function DashboardStats({
           bgColor: "bg-amber-50"
         },
         {
-          title: "Monthly Revenue",
-          value: "₱48,250",
-          change: "+8.2%",
+          title: `${periodLabel} Revenue`,
+          value: `\u20b1${periodRevenue.toLocaleString()}`,
+          change: "Recorded payments",
           icon: DollarSign,
           color: "text-purple-600",
           bgColor: "bg-purple-50"
@@ -165,7 +169,9 @@ export function DashboardStats({
               }`}>
                 {stat.change}
               </span>
-              <span className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">vs last month</span>
+              <span className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">
+                {portal === "admin" ? "current view" : "vs last month"}
+              </span>
             </div>
           </CardContent>
         </Card>

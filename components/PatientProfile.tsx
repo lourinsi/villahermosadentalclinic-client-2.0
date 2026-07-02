@@ -11,7 +11,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Checkbox } from "./ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
@@ -50,7 +50,11 @@ import {
   ChevronRight,
   ChevronUp,
   UserPlus,
-  Search
+  Search,
+  ClipboardList,
+  Loader2,
+  Save,
+  ArrowLeft
 } from "lucide-react";
 
 import {
@@ -68,7 +72,8 @@ import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { formatTimeTo12h } from "@/lib/time-slots";
+import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import {
@@ -80,6 +85,12 @@ import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import {
   buildPatientAppointmentSummary,
 } from "@/lib/patient-aggregates";
+import {
+  clearPatientProfileDraft,
+  readPatientProfileDraft,
+  writePatientProfileDraft,
+} from "@/lib/patient-profile-draft";
+import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 
 export interface Patient {
   id?: string;
@@ -117,6 +128,122 @@ export interface Patient {
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
+
+type QuestionnaireQuestion = {
+  id: string;
+  text: string;
+  isActive?: boolean;
+};
+
+const CONSENT_VERSION = "focused-informed-consent-v1";
+
+const CONSENT_ACKNOWLEDGEMENTS = [
+  {
+    id: "treatment",
+    title: "Treatment to be done",
+    description:
+      "Consent is given for explained dental care, including diagnostic images, cleaning, periodontal treatment, restorations, crowns, bridges, extractions, root canal therapy, dentures, local anesthesia, and surgical care when needed.",
+  },
+  {
+    id: "medications",
+    title: "Drugs and medications",
+    description:
+      "The patient understands that antibiotics, pain relievers, anesthetics, and other medicines may cause side effects or allergic reactions that may require urgent care.",
+  },
+  {
+    id: "treatmentPlanChanges",
+    title: "Changes in treatment plan",
+    description:
+      "The patient authorizes clinically necessary changes, additions, or postponements if conditions discovered during treatment require them.",
+  },
+  {
+    id: "noGuarantee",
+    title: "No guaranteed result",
+    description:
+      "The patient understands that dentistry is not an exact science and that treatment results cannot be guaranteed in every situation.",
+  },
+  {
+    id: "authorization",
+    title: "Authorization to proceed",
+    description:
+      "The patient authorizes the clinic dentist and dental auxiliaries to perform the explained dental restorations and treatments.",
+  },
+  {
+    id: "financialResponsibility",
+    title: "Financial responsibility",
+    description:
+      "The patient accepts responsibility for dental fees and agreed charges related to care, including collection or legal costs if an account becomes unpaid.",
+  },
+] as const;
+
+type ConsentAcknowledgementId = (typeof CONSENT_ACKNOWLEDGEMENTS)[number]["id"];
+type ConsentAcknowledgements = Record<ConsentAcknowledgementId, boolean>;
+
+type ConsentFormState = {
+  accepted: boolean;
+  acknowledgements: ConsentAcknowledgements;
+  patientSignatureName: string;
+  guardianName: string;
+  dentistSignatureName: string;
+  signedDate: string;
+  patientSignatureImage: string;
+  signedAt: string;
+};
+
+const todayDateInputValue = () => new Date().toISOString().slice(0, 10);
+
+const createConsentAcknowledgements = (
+  values?: Partial<Record<string, boolean>>,
+  defaultValue = false
+): ConsentAcknowledgements =>
+  CONSENT_ACKNOWLEDGEMENTS.reduce((acknowledgements, item) => {
+    acknowledgements[item.id] = values?.[item.id] ?? defaultValue;
+    return acknowledgements;
+  }, {} as ConsentAcknowledgements);
+
+const createConsentFormState = (data?: Record<string, any>): ConsentFormState => {
+  const source = data && typeof data === "object" ? data : {};
+  const rawAcknowledgements =
+    source.acknowledgements && typeof source.acknowledgements === "object"
+      ? source.acknowledgements
+      : source.consentAcknowledgements && typeof source.consentAcknowledgements === "object"
+        ? source.consentAcknowledgements
+        : undefined;
+  const defaultAcknowledged = !rawAcknowledgements && (source.accepted === true || source.consentAccepted === true);
+
+  return {
+    accepted: Boolean(source.accepted ?? source.consentAccepted),
+    acknowledgements: createConsentAcknowledgements(rawAcknowledgements, defaultAcknowledged),
+    patientSignatureName: String(source.patientSignatureName ?? source.consentPatientSignatureName ?? ""),
+    guardianName: String(source.guardianName ?? source.consentGuardianSignatureName ?? ""),
+    dentistSignatureName: String(source.dentistSignatureName ?? source.consentDentistSignatureName ?? ""),
+    signedDate: String(source.signedDate ?? source.consentSignedDate ?? todayDateInputValue()),
+    patientSignatureImage: String(source.patientSignatureImage ?? source.consentPatientSignatureImage ?? ""),
+    signedAt: String(source.signedAt ?? source.consentSignedAt ?? ""),
+  };
+};
+
+const serializeConsentForm = (consentForm: ConsentFormState) => ({
+  consentAccepted: consentForm.accepted,
+  consentVersion: CONSENT_VERSION,
+  consentAcknowledgements: consentForm.acknowledgements,
+  consentPatientSignatureName: consentForm.patientSignatureName.trim(),
+  consentGuardianSignatureName: consentForm.guardianName.trim(),
+  consentDentistSignatureName: consentForm.dentistSignatureName.trim(),
+  consentPatientSignatureImage: consentForm.patientSignatureImage,
+  consentSignedDate: consentForm.signedDate,
+  consentSignedAt: consentForm.signedAt,
+});
+
+const consentFormComparable = (consentForm: ConsentFormState) => ({
+  accepted: consentForm.accepted,
+  acknowledgements: consentForm.acknowledgements,
+  patientSignatureName: consentForm.patientSignatureName.trim(),
+  guardianName: consentForm.guardianName.trim(),
+  dentistSignatureName: consentForm.dentistSignatureName.trim(),
+  signedDate: consentForm.signedDate,
+  patientSignatureImage: consentForm.patientSignatureImage,
+});
 
 const resolveImageSource = (source?: string) => {
   if (!source) return undefined;
@@ -163,12 +290,11 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
 
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
+  discardDraft: () => void;
   changedFields: Record<string, { old: any; new: any }>;
 };
 
-interface PatientDetailsModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface PatientProfileProps {
   patient: Patient | null;
   detailsRef: React.Ref<PatientDetailsRef>;
   onDeletePatient: (p: Patient) => void;
@@ -177,11 +303,10 @@ interface PatientDetailsModalProps {
   doctorFilter?: string;
   openBookingAppointmentId?: string | null;
   onOpenBookingModal?: (appointment: Appointment) => void;
+  onBackToPatients?: () => void;
 }
 
-export function PatientDetailsModal({
-  open,
-  onOpenChange,
+export function PatientProfile({
   patient,
   detailsRef,
   onDeletePatient,
@@ -190,17 +315,11 @@ export function PatientDetailsModal({
   doctorFilter,
   openBookingAppointmentId,
   onOpenBookingModal,
-}: PatientDetailsModalProps) {
+  onBackToPatients,
+}: PatientProfileProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
   const [serverPatient, setServerPatient] = useState<Patient | null>(null);
   const patientDisplayName = patient?.name || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient";
-  const patientInitials = patientDisplayName
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "P";
 
   const { refreshTrigger } = useAppointmentModal();
   const [modalDataRefreshKey, setModalDataRefreshKey] = useState(0);
@@ -244,14 +363,14 @@ export function PatientDetailsModal({
     }
   };
 
-  // When the modal opens, fetch the authoritative patient record so the
+  // Fetch the authoritative patient record so the
   // displayed status reflects server-side computation (which considers
   // appointment paymentStatus values). Fall back to the provided `patient`
   // prop if the fetch fails.
   useEffect(() => {
     let mounted = true;
     const loadPatient = async () => {
-      if (!open || !patient?.id) {
+      if (!patient?.id) {
         setServerPatient(null);
         return;
       }
@@ -273,10 +392,10 @@ export function PatientDetailsModal({
 
     loadPatient();
     return () => { mounted = false; };
-  }, [open, patient?.id, refreshTrigger]);
+  }, [patient?.id, refreshTrigger]);
 
   useEffect(() => {
-    if (!open) {
+    if (!patient?.id) {
       setModalOverdueAppointmentCount(null);
       setModalPatientAppointments([]);
       setModalPatientAppointmentsLoaded(false);
@@ -286,14 +405,12 @@ export function PatientDetailsModal({
 
     setModalOverdueAppointmentCount(serverPatient?.overdueAppointmentCount ?? patient?.overdueAppointmentCount ?? null);
   }, [
-    open,
+    patient?.id,
     patient?.overdueAppointmentCount,
     serverPatient?.overdueAppointmentCount,
   ]);
 
   useEffect(() => {
-    if (!open) return;
-
     const handleDataRefresh = () => setModalDataRefreshKey((key) => key + 1);
     window.addEventListener("appointments:updated", handleDataRefresh);
     window.addEventListener("payments:updated", handleDataRefresh);
@@ -302,13 +419,13 @@ export function PatientDetailsModal({
       window.removeEventListener("appointments:updated", handleDataRefresh);
       window.removeEventListener("payments:updated", handleDataRefresh);
     };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
 
     const loadPatientAppointmentsForSummary = async () => {
-      if (!open || !patient?.id) {
+      if (!patient?.id) {
         setModalPatientAppointments([]);
         setModalPatientAppointmentsLoaded(false);
         setModalPatientAppointmentsPatientId("");
@@ -346,7 +463,7 @@ export function PatientDetailsModal({
     return () => {
       mounted = false;
     };
-  }, [open, patient?.id, refreshTrigger, modalDataRefreshKey]);
+  }, [patient?.id, refreshTrigger, modalDataRefreshKey]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
@@ -384,27 +501,26 @@ export function PatientDetailsModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-tour-id="patient-details-modal"
+    <div
+      data-tour-id="patient-profile-page"
         title={`Patient Details - ${patientDisplayName}`}
-        className="flex h-[min(96vh,1080px)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden rounded-2xl border-none bg-[#fdfdff] p-0 shadow-2xl ring-1 ring-slate-200 duration-200 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)] 2xl:max-w-[1800px]"
+      className="flex min-h-screen flex-col gap-0 bg-slate-50"
       >
-        <DialogHeader className="shrink-0 border-b border-slate-200 bg-white px-5 py-5 pr-12 text-left sm:px-7 lg:px-8 lg:py-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 items-center gap-4 sm:gap-6">
+        <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 text-left shadow-sm sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               <div className="relative group">
-                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20" sizeClass="h-16 w-16 sm:h-20 sm:w-20 rounded-md" />
-                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
+                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-14 w-14 shrink-0 rounded-lg border border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-16 sm:w-16" sizeClass="h-14 w-14 sm:h-16 sm:w-16 rounded-lg" />
+                <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-white shadow-sm sm:h-5 sm:w-5 ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
-              <div className="min-w-0 space-y-1.5">
+              <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-3">
-                  <DialogTitle className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                  <h1 className="text-2xl font-extrabold leading-tight text-slate-900">
                     {patientDisplayName}
-                  </DialogTitle>
+                  </h1>
                   {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
                     <span className="flex min-w-0 max-w-full items-center gap-2 transition-colors hover:text-violet-600">
                       <Mail className="h-4 w-4 text-slate-400" />
@@ -422,10 +538,23 @@ export function PatientDetailsModal({
             </div>
             <div className="flex flex-wrap items-center gap-3 lg:justify-end">
               {isModified ? (
-                <div className="mr-2 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-100/50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber-700 shadow-sm animate-pulse">
+                <div className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 shadow-sm">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  Unsaved Changes
+                  Unsaved changes
                 </div>
+              ) : null}
+              {onBackToPatients ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onBackToPatients}
+                  disabled={isHeaderSaving}
+                  className="h-10 border-slate-200 px-5 font-bold text-slate-700 shadow-sm transition-all hover:bg-slate-50 active:scale-95"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to Patients
+                </Button>
               ) : null}
               <Button
                 type="button"
@@ -433,7 +562,7 @@ export function PatientDetailsModal({
                 size="sm"
                 onClick={() => patient && onDeletePatient(patient)}
                 disabled={!patient || isHeaderSaving}
-                className="h-11 border-red-100 px-5 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm transition-all active:scale-95"
+                className="h-10 border-red-100 px-5 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm transition-all active:scale-95"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
@@ -444,7 +573,7 @@ export function PatientDetailsModal({
                 size="sm"
                 onClick={handleSave}
                 disabled={!patient || !isModified || isHeaderSaving}
-                className="h-11 px-7 shadow-lg shadow-violet-100 transition-all active:scale-95 disabled:shadow-none font-bold"
+                className="h-10 px-7 shadow-lg shadow-violet-100 transition-all active:scale-95 disabled:shadow-none font-bold"
               >
                 {isHeaderSaving ? (
                   <Clock className="mr-2 h-4 w-4 animate-spin" />
@@ -455,34 +584,54 @@ export function PatientDetailsModal({
               </Button>
             </div>
           </div>
-        </DialogHeader>
+        </header>
 
         {patient ? (
-          <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex flex-1 flex-col">
             {/* Quick Summary Bar - High Visibility Redesign */}
-            <div data-tour-id="patient-details-summary" className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-7 lg:px-8">
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
-                  <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
+            <div data-tour-id="patient-details-summary" className="border-b border-slate-100 bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+              <div className="mx-auto grid w-full max-w-[1920px] gap-4 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                    <CheckCircle className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
+                    <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
-                  <span className={`truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                    PHP {Number(displayedBalance || 0).toLocaleString()}
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                    <CreditCard className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
+                    <span className={`block truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
+                      PHP {Number(displayedBalance || 0).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
-                  <span className="truncate text-base font-extrabold leading-tight text-slate-700">
-                    { (serverPatient?.createdAt || patient.createdAt) ? new Date((serverPatient?.createdAt || patient.createdAt) as string).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A' }
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                    <Calendar className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
+                    <span className="block truncate text-base font-extrabold leading-tight text-slate-700">
+                      {formatPatientLogDate((serverPatient?.createdAt || patient.createdAt) as string | undefined)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Record Reference</span>
-                  <span className="truncate font-mono text-[11px] font-bold uppercase tracking-tight text-slate-400">
-                    {patient.id}
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                    <FileText className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Record Reference</span>
+                    <span className="block truncate font-mono text-[11px] font-bold uppercase tracking-tight text-slate-500">
+                      {patient.id}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -500,8 +649,7 @@ export function PatientDetailsModal({
             />
           </div>
         ) : null}
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
 // Local history appointment shape (type can be string for display)
@@ -527,6 +675,7 @@ type PaymentLogRow = {
   changedBy?: string;
   changedByName?: string;
   changedAt?: string | Date;
+  createdAt?: string | Date;
   previousBalance?: number;
   newBalance?: number;
 };
@@ -548,12 +697,42 @@ const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").star
 const isStoredPaymentLogRow = (txn: RecentTransaction) =>
   String((txn as any).source || "") === "payment-log" || String(txn.id || "").startsWith("payment-log-");
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
+const getEditablePaymentId = (txn: RecentTransaction) => {
+  const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
+  if (explicitPaymentId) return String(explicitPaymentId).trim();
+
+  if (isStoredPaymentLogRow(txn)) {
+    const paymentLogId = String(txn.transactionId || txn.id || "").replace(/^payment-log-/, "").trim();
+    return paymentLogId.startsWith("pay_log_") ? paymentLogId : "";
+  }
+
+  if (String((txn as any).source || "") === "payment" && txn.id && !isReadOnlyPaymentRow(txn)) {
+    return String(txn.id).trim();
+  }
+
+  return "";
+};
+
+const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
+  if (isLegacyPaymentRow(txn)) {
+    return "This is a legacy recorded total from the appointment, not an individual payment record.";
+  }
+
+  if (isStoredPaymentLogRow(txn)) {
+    return "Could not connect this payment log to an editable payment record.";
+  }
+
+  return "Could not find the payment record to edit.";
+};
 
 const toDateOnly = (value?: string | Date) => {
   if (!value) return "";
   if (value instanceof Date) return value.toISOString().split("T")[0];
   return String(value).split("T")[0].split(" ")[0];
 };
+
+const formatPatientLogDate = (value?: string | Date | null, fallback = "N/A") =>
+  formatWordyDate(value, { fallback: value ? String(value) : fallback });
 
 const getPaymentTransactionKey = (txn: RecentTransaction) =>
   String(txn.id || txn.transactionId || `${txn.appointmentId || "none"}-${txn.date || "no-date"}-${txn.method || "method"}-${txn.amount || 0}`);
@@ -572,7 +751,7 @@ const parsePaymentTimestamp = (value?: string | Date) => {
 const getPaymentEventTimestamps = (txn: RecentTransaction) => {
   const row = txn as PaymentRow;
 
-  return [row.createdAt, row.updatedAt, txn.date]
+  return [txn.date, row.createdAt, row.updatedAt]
     .map(parsePaymentTimestamp)
     .filter((timestamp, index, timestamps) => timestamp > 0 && timestamps.indexOf(timestamp) === index);
 };
@@ -580,7 +759,7 @@ const getPaymentEventTimestamps = (txn: RecentTransaction) => {
 const getPaymentEventDateKey = (txn: RecentTransaction) => {
   const row = txn as PaymentRow;
 
-  return toDateOnly(row.createdAt) || toDateOnly(row.updatedAt) || toDateOnly(txn.date);
+  return toDateOnly(txn.date) || toDateOnly(row.createdAt) || toDateOnly(row.updatedAt);
 };
 
 const hasClosePaymentTimestamp = (a: RecentTransaction, b: RecentTransaction) =>
@@ -837,7 +1016,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const [activeTab, setActiveTab] = useState("info");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
-  const shouldLoadFinancialLog = activeTab === "payments";
+  const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const { doctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
@@ -874,6 +1053,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [parentPatient, setParentPatient] = useState<Patient | null>(null);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
+  const [questionnaireQuestions, setQuestionnaireQuestions] = useState<QuestionnaireQuestion[]>([]);
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, boolean>>({});
+  const [savedQuestionnaireAnswers, setSavedQuestionnaireAnswers] = useState<Record<string, boolean>>({});
+  const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
+  const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
+  const [isSavingQuestionnaire, setIsSavingQuestionnaire] = useState(false);
+  const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
+  const [consentForm, setConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
+  const [savedConsentForm, setSavedConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
+  const [consentCanvasRef, setConsentCanvasRef] = useState<HTMLCanvasElement | null>(null);
+  const [hasConsentSignatureInk, setHasConsentSignatureInk] = useState(false);
+  const [isConsentSignatureDirty, setIsConsentSignatureDirty] = useState(false);
+  const [isSavingConsent, setIsSavingConsent] = useState(false);
+  const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
+  const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
+  const [isRecoveryDialogOpen, setIsRecoveryDialogOpen] = useState(false);
+  const [isRecoverySaving, setIsRecoverySaving] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
@@ -881,19 +1077,274 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
   const patientPhotoInputId = React.useId();
   const patientDisplayName = [formData.firstName, formData.lastName].filter(Boolean).join(" ") || patient.name || "Patient";
+  const currentPatientId = patient.id ? String(patient.id) : "";
   const rawPatientIdForBooking = patient.id || loadedPatient.id;
   const patientIdForBooking = rawPatientIdForBooking ? String(rawPatientIdForBooking) : undefined;
-  const patientInitials = patientDisplayName
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "P";
-
   useEffect(() => {
     setActiveTab("info");
   }, [patient.id]);
+
+  const normalizeQuestionnaireAnswers = React.useCallback((data: any): Record<string, boolean> => {
+    const rawAnswers = data?.questionnaireAnswers || data?.customQuestionAnswers || {};
+
+    if (Array.isArray(rawAnswers)) {
+      return rawAnswers.reduce<Record<string, boolean>>((answers, id) => {
+        if (id) answers[String(id)] = true;
+        return answers;
+      }, {});
+    }
+
+    if (rawAnswers && typeof rawAnswers === "object") {
+      return Object.entries(rawAnswers).reduce<Record<string, boolean>>((answers, [id, checked]) => {
+        answers[id] = Boolean(checked);
+        return answers;
+      }, {});
+    }
+
+    return {};
+  }, []);
+
+  const loadQuestionnaireTab = React.useCallback(async () => {
+    if (!patient.id) return;
+
+    setIsLoadingQuestionnaire(true);
+    try {
+      const [questionsResponse, patientQuestionnaireResponse] = await Promise.all([
+        fetch(apiUrl("/api/questionnaire-questions"), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }),
+        fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }),
+      ]);
+
+      const questionsPayload = await questionsResponse.json().catch(() => ({}));
+      if (!questionsResponse.ok || !questionsPayload?.success || !Array.isArray(questionsPayload.data)) {
+        throw new Error(questionsPayload?.message || "Failed to load questionnaire questions");
+      }
+
+      const patientQuestionnairePayload = await patientQuestionnaireResponse.json().catch(() => ({}));
+      const questionnaireData = patientQuestionnairePayload?.data && typeof patientQuestionnairePayload.data === "object"
+        ? patientQuestionnairePayload.data
+        : {};
+      const answers = normalizeQuestionnaireAnswers(questionnaireData);
+      const nextConsentForm = createConsentFormState(questionnaireData);
+
+      setQuestionnaireQuestions(questionsPayload.data.filter((question: QuestionnaireQuestion) => question.isActive !== false));
+      setPatientQuestionnaireData(questionnaireData);
+      setQuestionnaireAnswers(answers);
+      setSavedQuestionnaireAnswers(answers);
+      setConsentForm(nextConsentForm);
+      setSavedConsentForm(nextConsentForm);
+      setHasConsentSignatureInk(Boolean(nextConsentForm.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
+      setQuestionnaireLoadedPatientId(String(patient.id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
+    } finally {
+      setIsLoadingQuestionnaire(false);
+    }
+  }, [normalizeQuestionnaireAnswers, patient.id]);
+
+  useEffect(() => {
+    if (activeTab === "questionnaire" || activeTab === "consent") {
+      if (activeTab === "questionnaire" && hasRestoredQuestionnaireDraft && questionnaireQuestions.length > 0) return;
+      if (questionnaireLoadedPatientId === String(patient.id || "")) return;
+      loadQuestionnaireTab();
+    }
+  }, [activeTab, hasRestoredQuestionnaireDraft, loadQuestionnaireTab, patient.id, questionnaireLoadedPatientId, questionnaireQuestions.length]);
+
+  useEffect(() => {
+    if (!consentCanvasRef) return;
+
+    const context = consentCanvasRef.getContext("2d");
+    if (!context) return;
+
+    context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+    if (!consentForm.patientSignatureImage) return;
+
+    const image = new Image();
+    image.onload = () => {
+      context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+      context.drawImage(image, 0, 0, consentCanvasRef.width, consentCanvasRef.height);
+    };
+    image.src = consentForm.patientSignatureImage;
+  }, [consentCanvasRef, consentForm.patientSignatureImage]);
+
+  const questionnaireHasChanges = React.useMemo(
+    () => JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers),
+    [questionnaireAnswers, savedQuestionnaireAnswers]
+  );
+
+  const consentFormHasChanges = React.useMemo(
+    () =>
+      JSON.stringify(consentFormComparable(consentForm)) !== JSON.stringify(consentFormComparable(savedConsentForm)),
+    [consentForm, savedConsentForm]
+  );
+
+  const allConsentAcknowledgementsAccepted = React.useMemo(
+    () => CONSENT_ACKNOWLEDGEMENTS.every((item) => consentForm.acknowledgements[item.id]),
+    [consentForm.acknowledgements]
+  );
+
+  const hasConsentSignature = hasConsentSignatureInk || Boolean(consentForm.patientSignatureImage);
+  const isConsentFormComplete =
+    allConsentAcknowledgementsAccepted &&
+    Boolean(consentForm.patientSignatureName.trim()) &&
+    Boolean(consentForm.signedDate) &&
+    hasConsentSignature;
+
+  const handleQuestionnaireAnswerChange = (questionId: string, checked: boolean) => {
+    setQuestionnaireAnswers((current) => ({
+      ...current,
+      [questionId]: checked,
+    }));
+    setIsModified(true);
+  };
+
+  const updateConsentField = <K extends keyof ConsentFormState>(field: K, value: ConsentFormState[K]) => {
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      [field]: value,
+    }));
+    setIsModified(true);
+  };
+
+  const updateConsentAcknowledgement = (id: ConsentAcknowledgementId, checked: boolean) => {
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      acknowledgements: {
+        ...current.acknowledgements,
+        [id]: checked,
+      },
+    }));
+    setIsModified(true);
+  };
+
+  const getConsentCanvasSignatureImage = () => {
+    if (!consentCanvasRef) return consentForm.patientSignatureImage;
+
+    const context = consentCanvasRef.getContext("2d");
+    if (!context) return consentForm.patientSignatureImage;
+
+    const imageData = context.getImageData(0, 0, consentCanvasRef.width, consentCanvasRef.height).data;
+    const hasInk = imageData.some((value, index) => index % 4 === 3 && value > 0);
+    return hasInk ? consentCanvasRef.toDataURL("image/png") : "";
+  };
+
+  const persistConsentSignatureFromCanvas = () => {
+    const signatureImage = getConsentCanvasSignatureImage();
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      patientSignatureImage: signatureImage,
+    }));
+    setHasConsentSignatureInk(Boolean(signatureImage));
+    setIsConsentSignatureDirty(true);
+    setIsModified(true);
+  };
+
+  const saveQuestionnaireAnswers = async () => {
+    if (!patient.id || !questionnaireHasChanges) return true;
+
+    setIsSavingQuestionnaire(true);
+    try {
+      const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+        method: "PUT",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          ...patientQuestionnaireData,
+          questionnaireAnswers,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to save questionnaire answers");
+      }
+
+      const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
+        ...patientQuestionnaireData,
+        questionnaireAnswers,
+      };
+      const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      setPatientQuestionnaireData(nextData);
+      setQuestionnaireAnswers(nextAnswers);
+      setSavedQuestionnaireAnswers(nextAnswers);
+      setHasRestoredQuestionnaireDraft(false);
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save questionnaire answers");
+      return false;
+    } finally {
+      setIsSavingQuestionnaire(false);
+    }
+  };
+
+  const saveConsentForm = async () => {
+    if (!patient.id || !consentFormHasChanges) return true;
+
+    setIsSavingConsent(true);
+    try {
+      const signatureImage = getConsentCanvasSignatureImage();
+      const isComplete =
+        allConsentAcknowledgementsAccepted &&
+        Boolean(consentForm.patientSignatureName.trim()) &&
+        Boolean(consentForm.signedDate) &&
+        Boolean(signatureImage);
+      const nextConsentForm: ConsentFormState = {
+        ...consentForm,
+        accepted: isComplete,
+        patientSignatureName: consentForm.patientSignatureName.trim(),
+        guardianName: consentForm.guardianName.trim(),
+        dentistSignatureName: consentForm.dentistSignatureName.trim(),
+        patientSignatureImage: signatureImage,
+        signedAt: isComplete ? new Date().toISOString() : "",
+      };
+
+      const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+        method: "PUT",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          ...patientQuestionnaireData,
+          questionnaireAnswers,
+          ...serializeConsentForm(nextConsentForm),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to save consent form");
+      }
+
+      const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
+        ...patientQuestionnaireData,
+        questionnaireAnswers,
+        ...serializeConsentForm(nextConsentForm),
+      };
+      const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      const savedConsent = createConsentFormState(nextData);
+      setPatientQuestionnaireData(nextData);
+      setQuestionnaireAnswers(nextAnswers);
+      setSavedQuestionnaireAnswers(nextAnswers);
+      setConsentForm(savedConsent);
+      setSavedConsentForm(savedConsent);
+      setHasConsentSignatureInk(Boolean(savedConsent.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
+      setHasRestoredQuestionnaireDraft(false);
+      toast.success("Consent form saved");
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save consent form");
+      return false;
+    } finally {
+      setIsSavingConsent(false);
+    }
+  };
 
   const handlePatientPhotoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -938,7 +1389,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     const appointmentType = getHistoryAppointmentType(apt);
     const appointmentDate = String(apt.date || "");
-    const paymentDate = toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate) || toDateOnly(apt.createdAt);
+    const paymentDate = toDateOnly((apt as any).paymentDate) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate);
 
     return {
       id: `legacy-${apt.id}`,
@@ -947,6 +1398,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       appointmentDate,
       doctor: apt.doctor || "",
       date: paymentDate,
+      paymentDate,
       description: `Recorded payment total for ${appointmentType}`,
       amount: totalPaid,
       type: "payment",
@@ -967,11 +1419,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
         const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
+        const paymentDate = toDateOnly(payment.date) || toDateOnly(payment.createdAt);
 
         return {
           ...payment,
           id: payment.id || payment.transactionId || `payment-${payment.appointmentId || "unknown"}-${payment.date}`,
-          date: toDateOnly(payment.date) || toDateOnly(payment.createdAt),
+          date: paymentDate,
+          paymentDate,
           description: payment.description || `Payment for ${appointmentType}`,
           amount: Number(payment.amount || 0),
           type: payment.type || "payment",
@@ -993,10 +1447,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       txns.forEach((rawTxn: any) => {
         const appointmentType = rawTxn.appointmentType || getHistoryAppointmentType(apt);
         const appointmentDate = rawTxn.appointmentDate || String(apt.date || "");
+        const paymentDate = toDateOnly(rawTxn.paymentDate) || toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt);
         const txn: RecentTransaction = {
           ...rawTxn,
           id: rawTxn.id || rawTxn.transactionId || `apt-${apt.id}-txn-${rawTxn.date || ''}-${rawTxn.method || ''}-${rawTxn.amount || 0}`,
-          date: toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.updatedAt) || toDateOnly(apt.createdAt),
+          date: paymentDate,
+          paymentDate,
           description: rawTxn.description || rawTxn.notes || `Payment for ${appointmentType}`,
           amount: Number(rawTxn.amount || 0),
           type: rawTxn.type || "payment",
@@ -1026,6 +1482,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentDate = appointment ? String(appointment.date || "") : "";
         const changedAt = log.changedAt || new Date().toISOString();
         const matchingAppointmentLog = findMatchingAppointmentPaymentLog(log, appointmentLogs);
+        const actualPaymentDate = toDateOnly(
+          (matchingAppointmentLog?.newState as any)?.paymentDate ||
+          (matchingAppointmentLog as any)?.paymentDate
+        );
+        const recordedPaymentDate = actualPaymentDate;
+        const paymentCreatedDate = toDateOnly(log.createdAt) || toDateOnly(changedAt);
+        const paymentDisplayDate = recordedPaymentDate || paymentCreatedDate || toDateOnly(appointmentDate);
         const appointmentSnapshotBase = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
           ? {
               ...(matchingAppointmentLog.newState || {}),
@@ -1040,6 +1503,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               changedByName: matchingAppointmentLog.changedByName || log.changedByName,
               amount: Number(log.amount || 0),
               paymentAmount: Number(log.amount || 0),
+              paymentDate: paymentDisplayDate,
               paymentMethod: log.paymentMethod,
               paymentStatus: log.paymentStatus,
               previousBalance: log.previousBalance,
@@ -1064,7 +1528,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentType,
           appointmentDate,
           doctor: appointment?.doctor || "",
-          date: toDateOnly(changedAt) || toDateOnly(appointmentDate),
+          date: paymentDisplayDate,
+          paymentDate: paymentDisplayDate,
           description: `Payment for ${appointmentType}`,
           amount: Number(log.amount || 0),
           type: "payment",
@@ -1079,7 +1544,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           changedByName: log.changedByName,
           previousBalance: log.previousBalance,
           newBalance: log.newBalance,
-          createdAt: changedAt,
+          createdAt: paymentCreatedDate || changedAt,
           updatedAt: changedAt,
         } as RecentTransaction;
       })
@@ -1135,13 +1600,25 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       emergencyPhone: 'Emergency Phone',
       notes: 'Notes',
       profilePicture: 'Patient Photo',
+      dentalCharts: 'Dental Chart',
+    };
+
+    const toComparableValue = (value: any) => {
+      if (value === undefined || value === null) return "";
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
     };
 
     // Compare against the originally loaded data (from server), not the initial prop
     Object.keys(fieldLabels).forEach((key) => {
       const orig = originalLoadedData[key as keyof typeof originalLoadedData];
       const current = formData[key as keyof typeof formData];
-      if (String(orig) !== String(current)) {
+      if (toComparableValue(orig) !== toComparableValue(current)) {
         changes[fieldLabels[key]] = {
           old: orig,
           new: current,
@@ -1149,8 +1626,85 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
+    const knownQuestionIds = new Set(questionnaireQuestions.map((question) => question.id));
+    questionnaireQuestions.forEach((question) => {
+      const oldValue = Boolean(savedQuestionnaireAnswers[question.id]);
+      const newValue = Boolean(questionnaireAnswers[question.id]);
+      if (oldValue !== newValue) {
+        changes[`Questionnaire - ${question.text}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
+    Object.keys(questionnaireAnswers).forEach((questionId) => {
+      if (knownQuestionIds.has(questionId)) return;
+
+      const oldValue = Boolean(savedQuestionnaireAnswers[questionId]);
+      const newValue = Boolean(questionnaireAnswers[questionId]);
+      if (oldValue !== newValue) {
+        changes[`Questionnaire - ${questionId}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
+    CONSENT_ACKNOWLEDGEMENTS.forEach((item) => {
+      const oldValue = Boolean(savedConsentForm.acknowledgements[item.id]);
+      const newValue = Boolean(consentForm.acknowledgements[item.id]);
+      if (oldValue !== newValue) {
+        changes[`Consent Form - ${item.title}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
+    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage">, string> = {
+      patientSignatureName: "Consent Form - Patient / Parent / Guardian Signature Name",
+      guardianName: "Consent Form - Parent / Guardian Name",
+      dentistSignatureName: "Consent Form - Dentist Signature",
+      signedDate: "Consent Form - Date",
+      patientSignatureImage: "Consent Form - Drawn Signature",
+    };
+
+    Object.entries(consentFieldLabels).forEach(([field, label]) => {
+      const consentField = field as keyof typeof consentFieldLabels;
+      const oldValue = toComparableValue(savedConsentForm[consentField]);
+      const newValue = toComparableValue(consentForm[consentField]);
+      if (oldValue !== newValue) {
+        changes[label] = {
+          old: field === "patientSignatureImage" ? Boolean(savedConsentForm.patientSignatureImage) : savedConsentForm[consentField],
+          new: field === "patientSignatureImage" ? Boolean(consentForm.patientSignatureImage) : consentForm[consentField],
+        };
+      }
+    });
+
     return changes;
-  }, [formData, originalLoadedData]);
+  }, [
+    consentForm,
+    formData,
+    originalLoadedData,
+    questionnaireAnswers,
+    questionnaireQuestions,
+    savedConsentForm,
+    savedQuestionnaireAnswers,
+  ]);
+
+  const visibleChangedFields = React.useMemo(() => getVisiblePatientChanges(changedFields), [changedFields]);
+  const hasTrackedChanges = React.useMemo(() => Object.keys(visibleChangedFields).length > 0, [visibleChangedFields]);
+
+  const discardStoredDraft = React.useCallback(() => {
+    if (currentPatientId) clearPatientProfileDraft(currentPatientId);
+    setHasRestoredQuestionnaireDraft(false);
+    setIsRecoveryDialogOpen(false);
+  }, [currentPatientId]);
+
+  useEffect(() => {
+    setIsModified(hasTrackedChanges);
+  }, [hasTrackedChanges, setIsModified]);
 
   // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
   const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
@@ -1224,9 +1778,31 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     });
   };
 
+  const handleEditPaymentTransaction = React.useCallback((txn: RecentTransaction) => {
+    const targetPaymentId = getEditablePaymentId(txn);
+    const targetPatientId = patient.id ? String(patient.id) : "";
+
+    if (!targetPaymentId) {
+      toast.error(getPaymentEditUnavailableMessage(txn));
+      return;
+    }
+
+    if (!targetPatientId) {
+      toast.error("Could not find the patient for this payment");
+      return;
+    }
+
+    openEditPaymentModal(
+      targetPaymentId,
+      txn as any,
+      targetPatientId,
+      mockAppointmentHistoryLocal as Appointment[]
+    );
+  }, [mockAppointmentHistoryLocal, openEditPaymentModal, patient.id]);
+
   const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
     try {
-      console.log("[PatientDetailsModal] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
+      console.log("[PatientProfile] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
     } catch (e) {}
     const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
     const transactionRow = transaction as (RecentTransaction & Record<string, any>) | undefined;
@@ -1234,17 +1810,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ? transactionRow.appointmentSnapshot
       : undefined;
 
+    const isPaymentSnapshot = Boolean(transaction);
     const isHistoricalPaymentSnapshot = Boolean(transaction && isPaymentLogTransaction(transaction));
     const snapshotBase = {
       ...(originalAppointment || {}),
       ...appointment,
-      ...(isHistoricalPaymentSnapshot && transactionSnapshot ? transactionSnapshot : {}),
+      ...(transactionSnapshot ? transactionSnapshot : {}),
     } as Appointment & Record<string, any>;
     const displayDate = toDateOnly(snapshotBase.date);
     const displayTime = snapshotBase.time || String(snapshotBase.date || "").split(" ")[1] || "";
     const price = Number(snapshotBase.price ?? 0);
     const transactionNewBalance = Number(transactionRow?.newBalance);
-    const hasTransactionBalance = isHistoricalPaymentSnapshot && Number.isFinite(transactionNewBalance);
+    const hasTransactionBalance = isPaymentSnapshot && Number.isFinite(transactionNewBalance);
     const totalPaid = hasTransactionBalance
       ? Math.max(0, price - transactionNewBalance)
       : Number(snapshotBase.totalPaid ?? 0);
@@ -1254,7 +1831,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       : Number.isFinite(snapshotBalance)
         ? snapshotBalance
         : Math.max(0, price - totalPaid);
-    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transaction?.date || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
+    const transactionPaymentDate =
+      toDateOnly(transactionRow?.paymentDate) ||
+      toDateOnly(transaction?.date) ||
+      toDateOnly(snapshotBase.paymentDate);
+    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
       snapshotBase.patientName ||
       appointment.patientName ||
@@ -1294,8 +1875,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setSelectedSnapshot({
       ...snapshotBase,
-      logType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.logType,
-      changeType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.changeType,
+      logType: isPaymentSnapshot ? "payment" : snapshotBase.logType,
+      changeType: isPaymentSnapshot ? "payment" : snapshotBase.changeType,
       changedAt: logDate,
       changedBy: transactionRow?.changedBy || snapshotBase.changedBy,
       changedByName: transactionRow?.changedByName || snapshotBase.changedByName,
@@ -1320,9 +1901,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       balance,
       amount: transaction?.amount,
       paymentAmount: transaction?.amount,
+      paymentDate: transactionPaymentDate || snapshotBase.paymentDate,
       paymentMethod: transaction?.method,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
       transactionId: transaction?.transactionId,
+      _paymentTransactionId: transaction?.transactionId || transaction?.id || snapshotBase._paymentTransactionId,
+      _transactionId: transaction?.transactionId || transaction?.id || snapshotBase._transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
       _isHistorical: isHistoricalPaymentSnapshot,
@@ -1529,25 +2113,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
-    changedFields,
+    discardDraft: discardStoredDraft,
+    changedFields: visibleChangedFields,
   }));
 
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isModified) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
+    const incomingPatientId = patient.id ? String(patient.id) : "";
+    const currentLoadedPatientId = loadedPatient.id ? String(loadedPatient.id) : "";
+    if (incomingPatientId && incomingPatientId === currentLoadedPatientId && hasTrackedChanges) {
+      setLoadedPatient(patient);
+      return;
+    }
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isModified]);
-
-  useEffect(() => {
     const loadedData = {
       firstName: patient.firstName || patient.name?.split(' ')[0] || '',
       lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -1576,7 +2153,86 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setLoadedPatient(patient);
     setFormData(loadedData);
     setOriginalLoadedData(loadedData);
-  }, [patient]);
+    setQuestionnaireLoadedPatientId(null);
+    const blankConsentForm = createConsentFormState();
+    setConsentForm(blankConsentForm);
+    setSavedConsentForm(blankConsentForm);
+    setHasConsentSignatureInk(false);
+    setIsConsentSignatureDirty(false);
+  }, [loadedPatient.id, patient]);
+
+  useEffect(() => {
+    if (!currentPatientId || draftCheckPatientId === currentPatientId) return;
+
+    const draft = readPatientProfileDraft();
+    if (draft?.patientId === currentPatientId) {
+      setFormData((current) => ({
+        ...current,
+        ...draft.formData,
+      }));
+      setOriginalLoadedData((current) => ({
+        ...current,
+        ...draft.originalLoadedData,
+      }));
+      setQuestionnaireAnswers(draft.questionnaireAnswers || {});
+      setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
+      setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
+      setQuestionnaireQuestions(draft.questionnaireQuestions || []);
+      const restoredConsentForm = createConsentFormState(draft.consentForm || draft.patientQuestionnaireData || {});
+      const restoredSavedConsentForm = createConsentFormState(draft.savedConsentForm || draft.patientQuestionnaireData || {});
+      setConsentForm(restoredConsentForm);
+      setSavedConsentForm(restoredSavedConsentForm);
+      setHasConsentSignatureInk(Boolean(restoredConsentForm.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
+      setQuestionnaireLoadedPatientId(currentPatientId);
+      setActiveTab(draft.activeTab || "info");
+      setHasRestoredQuestionnaireDraft((draft.questionnaireQuestions || []).length > 0);
+      setIsRecoveryDialogOpen(true);
+      setIsModified(true);
+    }
+
+    setDraftCheckPatientId(currentPatientId);
+  }, [currentPatientId, draftCheckPatientId, setIsModified]);
+
+  useEffect(() => {
+    if (!currentPatientId || draftCheckPatientId !== currentPatientId) return;
+
+    if (!hasTrackedChanges) {
+      clearPatientProfileDraft(currentPatientId);
+      return;
+    }
+
+    writePatientProfileDraft({
+      version: 1,
+      patientId: currentPatientId,
+      patientName: patientDisplayName,
+      path: typeof window === "undefined" ? `/receptionist/patients/${encodeURIComponent(patientDisplayName)}` : window.location.pathname,
+      updatedAt: new Date().toISOString(),
+      activeTab,
+      formData,
+      originalLoadedData,
+      questionnaireAnswers,
+      savedQuestionnaireAnswers,
+      patientQuestionnaireData,
+      questionnaireQuestions,
+      consentForm,
+      savedConsentForm,
+    });
+  }, [
+    activeTab,
+    consentForm,
+    currentPatientId,
+    draftCheckPatientId,
+    formData,
+    hasTrackedChanges,
+    originalLoadedData,
+    patientDisplayName,
+    patientQuestionnaireData,
+    questionnaireAnswers,
+    questionnaireQuestions,
+    savedConsentForm,
+    savedQuestionnaireAnswers,
+  ]);
 
   useEffect(() => {
     if (!shouldLoadHistoryData) return;
@@ -1697,7 +2353,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         return {
             ...apt,
             id,
-            date: apt.date + (apt.time ? ` ${apt.time}` : ''),
+            date: apt.date + (apt.time ? ` ${formatTimeTo12h(apt.time)}` : ''),
             // keep internal type numeric if available
             type: (typeof apt.type === 'number' ? apt.type : 0) as number,
             doctor: apt.doctor || '',
@@ -1885,11 +2541,24 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
 
       if (result?.success) {
+        setOriginalLoadedData(formData);
+
+        const questionnaireSaved = await saveQuestionnaireAnswers();
+        if (!questionnaireSaved) {
+          refreshPatients();
+          return false;
+        }
+
+        const consentSaved = await saveConsentForm();
+        if (!consentSaved) {
+          refreshPatients();
+          return false;
+        }
+
         toast.success("Patient updated successfully");
         refreshPatients();
+        discardStoredDraft();
         setIsModified(false);
-        // Update original data to current form data so no changes show until next edit
-        setOriginalLoadedData(formData);
         return true; // Indicate success
       }
 
@@ -2002,21 +2671,44 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
-  const textareaClass = "mt-1.5 min-h-24 border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200";
-  const cardClass = "border-none bg-white shadow-sm ring-1 ring-slate-200";
-  const cardHeaderClass = "border-b border-slate-100 bg-white px-4 py-4 sm:px-5";
-  const cardContentClass = "space-y-6 p-4 sm:p-5";
+  const handleSaveRecoveredDraft = async () => {
+    setIsRecoverySaving(true);
+    try {
+      const saved = await handleUpdatePatient();
+      if (saved) setIsRecoveryDialogOpen(false);
+    } finally {
+      setIsRecoverySaving(false);
+    }
+  };
+
+  const handleDiscardRecoveredDraft = () => {
+    discardStoredDraft();
+    setFormData(originalLoadedData);
+    setQuestionnaireAnswers(savedQuestionnaireAnswers);
+    setConsentForm(savedConsentForm);
+    setHasConsentSignatureInk(Boolean(savedConsentForm.patientSignatureImage));
+    setIsConsentSignatureDirty(false);
+    setIsModified(false);
+  };
+
+  const textareaClass = "mt-1.5 min-h-24 rounded-lg border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200";
+  const cardClass = "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm";
+  const cardHeaderClass = "border-b border-slate-100 bg-white px-5 py-5 sm:px-6";
+  const cardContentClass = "space-y-6 p-5 sm:p-6";
   return (
-    <div className="flex-1 overflow-hidden bg-slate-50/50">
+    <div className="flex-1 overflow-hidden bg-slate-50">
       <div className="h-full flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
-          <div className="shrink-0 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
-            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-2 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
+          <div className="shrink-0 bg-slate-50 px-4 pb-4 pt-5 sm:px-6 lg:px-8">
+            <div className="mx-auto w-full max-w-[1920px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-0 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
               {[
                 { value: "info", label: "Personal Info", icon: UserIcon },
-                { value: "family", label: "Family & Relations", icon: Users },
+                // { value: "family", label: "Family & Relations", icon: Users },
                 { value: "records", label: "Medical Records", icon: FileText },
+                { value: "questionnaire", label: "Questionnaire", icon: ClipboardList },
+                { value: "consent", label: "Consent Form", icon: ShieldCheck },
                 { value: "chart", label: "Dental Chart", icon: Activity },
                 { value: "history", label: "Visit History", icon: History },
                 { value: "payments", label: "Financial Log", icon: PaymentIcon },
@@ -2025,7 +2717,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   key={tab.value}
                   value={tab.value}
                   data-tour-id={`patient-details-${tab.value}-tab`}
-                  className="group relative h-14 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 hover:text-slate-800 sm:px-4"
+                  className="group relative h-14 min-w-[165px] flex-1 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-violet-50/30 data-[state=active]:text-violet-600 hover:bg-slate-50 hover:text-slate-800 sm:px-4"
                 >
                   <div className="flex items-center gap-2">
                     <tab.icon className="h-4 w-4" />
@@ -2034,9 +2726,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 </TabsTrigger>
               ))}
             </TabsList>
+            </div>
           </div>
 
-          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">
+          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-8 sm:px-6 lg:px-8">
             <TabsContent value="info" data-tour-id="patient-details-info-content" className="mt-0 outline-none">
                 <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
                 {/* Left Column: Profile Insight Card */}
@@ -2081,7 +2774,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         >
                           <Label htmlFor={patientPhotoInputId} className="cursor-pointer">
                             <Upload className="mr-2 h-4 w-4" />
-                            Upload
+                            Upload / Edit Photo
                           </Label>
                         </Button>
                         {formData.profilePicture && (
@@ -2107,7 +2800,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         <div className="space-y-1">
                           <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Upcoming</span>
                           <span className="text-sm font-black text-violet-600 truncate block">
-                            {patient.nextAppointment ? new Date(patient.nextAppointment).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : "No Schedule"}
+                            {patient.nextAppointment ? formatPatientLogDate(patient.nextAppointment, "No Schedule") : "No Schedule"}
                           </span>
                         </div>
                       </div>
@@ -2298,7 +2991,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-2 rounded-full bg-red-600 shadow-lg shadow-red-200" />
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Emergency Protocol</h2>
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Emergency Contact</h2>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Crisis Contact Information</p>
                       </div>
                     </div>
@@ -2327,7 +3020,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-2 rounded-full bg-slate-400 shadow-lg shadow-slate-100" />
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Internal Repository</h2>
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Internal Notes</h2>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Supplemental Administrative Notes</p>
                       </div>
                     </div>
@@ -2343,8 +3036,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsContent>
 
             {/* Family & Relations Tab */}
-            <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
-              <div className="mx-auto max-w-[1180px] space-y-8 py-2 sm:py-4">
+            {/* <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
+              <div className="mx-auto w-full max-w-[1680px] space-y-8 py-2 sm:py-4">
                 <div className="flex flex-col items-start justify-between gap-4 overflow-hidden rounded-lg bg-violet-600 p-5 text-white shadow-xl shadow-violet-100 sm:p-7 md:flex-row md:items-center">
                   <div className="relative z-10">
                     <h2 className="text-2xl font-black tracking-tight">Family Network</h2>
@@ -2455,9 +3148,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </Card>
                 </div>
               </div>
-            </TabsContent>
+            </TabsContent> */}
 
-        <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto max-w-[1180px] space-y-4">
+        <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader className={cardHeaderClass}>
               <CardTitle className="text-base font-semibold text-slate-900">Dental Records & Treatment Notes</CardTitle>
@@ -2483,7 +3176,232 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto w-full max-w-[1680px] space-y-4">
+          <Card className={cardClass}>
+            <CardHeader className={cardHeaderClass}>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
+                  <ClipboardList className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <CardTitle className="text-base font-bold text-slate-900">Questionnaire</CardTitle>
+                  <p className="mt-1 text-sm font-medium text-slate-500">Patient questionnaire responses</p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-5 sm:p-6">
+              {isLoadingQuestionnaire ? (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  Loading questionnaire...
+                </div>
+              ) : questionnaireQuestions.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  No questionnaire questions have been saved yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {questionnaireQuestions.map((question) => (
+                    <label
+                      key={question.id}
+                      htmlFor={`patient-questionnaire-${question.id}`}
+                      className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
+                    >
+                      <Checkbox
+                        id={`patient-questionnaire-${question.id}`}
+                        checked={Boolean(questionnaireAnswers[question.id])}
+                        onCheckedChange={(checked) => handleQuestionnaireAnswerChange(question.id, checked === true)}
+                        disabled={isSavingQuestionnaire}
+                        className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
+                      />
+                      <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">
+          <Card className={cardClass}>
+            <CardHeader className={cardHeaderClass}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base font-bold text-slate-900">Consent Form</CardTitle>
+                    <p className="mt-1 text-sm font-medium text-slate-500">Receptionist-managed informed consent and signatures</p>
+                  </div>
+                </div>
+                {savedConsentForm.accepted && !consentFormHasChanges && (
+                  <Badge className="w-fit border-none bg-emerald-100 text-emerald-700">
+                    Consent saved
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 p-5 sm:p-6">
+              {isLoadingQuestionnaire ? (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  Loading consent form...
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                      <label
+                        key={item.id}
+                        htmlFor={`patient-consent-${item.id}`}
+                        className="flex min-h-20 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/30"
+                      >
+                        <Checkbox
+                          id={`patient-consent-${item.id}`}
+                          checked={consentForm.acknowledgements[item.id]}
+                          onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
+                          disabled={isSavingConsent}
+                          className="mt-0.5 border-emerald-200 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600"
+                        />
+                        <span className="space-y-1">
+                          <span className="block text-sm font-bold leading-5 text-slate-900">{item.title}</span>
+                          <span className="block text-sm font-medium leading-6 text-slate-600">{item.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <div className="space-y-2 lg:col-span-2">
+                      <Label htmlFor="patient-consent-signature-name">Patient / Parent / Guardian Signature Name *</Label>
+                      <Input
+                        id="patient-consent-signature-name"
+                        value={consentForm.patientSignatureName}
+                        onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Type full legal name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-consent-date">Date *</Label>
+                      <Input
+                        id="patient-consent-date"
+                        type="date"
+                        value={consentForm.signedDate}
+                        onChange={(event) => updateConsentField("signedDate", event.target.value)}
+                        disabled={isSavingConsent}
+                      />
+                    </div>
+                    <div className="space-y-2 lg:col-span-2">
+                      <Label htmlFor="patient-consent-guardian-name">Parent / Guardian Name</Label>
+                      <Input
+                        id="patient-consent-guardian-name"
+                        value={consentForm.guardianName}
+                        onChange={(event) => updateConsentField("guardianName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Required only when applicable"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-consent-dentist-signature">Dentist / Signature</Label>
+                      <Input
+                        id="patient-consent-dentist-signature"
+                        value={consentForm.dentistSignatureName}
+                        onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Dentist name or signature"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Patient / Parent / Guardian Drawn Signature *</Label>
+                    <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-4">
+                      <canvas
+                        ref={setConsentCanvasRef}
+                        className="h-32 w-full cursor-crosshair rounded border border-slate-200 bg-white"
+                        style={{ touchAction: "none" }}
+                        onPointerDown={(event) => {
+                          const canvas = event.currentTarget as HTMLCanvasElement;
+                          const context = canvas.getContext("2d");
+                          if (context) {
+                            canvas.setPointerCapture(event.pointerId);
+                            const rect = canvas.getBoundingClientRect();
+                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                            context.lineCap = "round";
+                            context.lineJoin = "round";
+                            context.lineWidth = 2;
+                            context.beginPath();
+                            context.moveTo(x, y);
+                          }
+                        }}
+                        onPointerMove={(event) => {
+                          if (event.buttons !== 1) return;
+                          const canvas = event.currentTarget as HTMLCanvasElement;
+                          const context = canvas.getContext("2d");
+                          if (context) {
+                            const rect = canvas.getBoundingClientRect();
+                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                            context.lineTo(x, y);
+                            context.stroke();
+                            setHasConsentSignatureInk(true);
+                            setIsConsentSignatureDirty(true);
+                            setIsModified(true);
+                          }
+                        }}
+                        onPointerUp={persistConsentSignatureFromCanvas}
+                        onPointerCancel={persistConsentSignatureFromCanvas}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        onClick={() => {
+                          if (consentCanvasRef) {
+                            const context = consentCanvasRef.getContext("2d");
+                            context?.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+                          }
+                          updateConsentField("patientSignatureImage", "");
+                          setHasConsentSignatureInk(false);
+                          setIsConsentSignatureDirty(true);
+                        }}
+                        disabled={isSavingConsent}
+                      >
+                        Clear Signature
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-medium text-slate-500">
+                      {isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}
+                    </p>
+                    <Button
+                      type="button"
+                      onClick={saveConsentForm}
+                      disabled={isSavingConsent || !consentFormHasChanges}
+                      className="gap-2"
+                    >
+                      {isSavingConsent ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : consentFormHasChanges ? (
+                        <Save className="h-4 w-4" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4" />
+                      )}
+                      {consentFormHasChanges ? "Save Consent Form" : savedConsentForm.accepted ? "Consent Saved" : "Save Consent Form"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <DentalChart
             records={formData.dentalCharts}
             onSaveRecords={(updatedRecords) => {
@@ -2494,7 +3412,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           />
         </TabsContent>
 
-        <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -2611,7 +3529,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex items-center space-x-3">
                                 <div className="text-sm">
                                   <div className="font-medium text-base">{appointment.type}</div>
-                                  <div className="text-muted-foreground">{appointment.date}</div>
+                                  <div className="text-muted-foreground">{formatPatientLogDate(appointment.date)}</div>
                                 </div>
                                 <div className="flex gap-2">
                                   {getAppointmentStatusBadge(String(appointment.status || ''))}
@@ -2715,7 +3633,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                             </Badge>
                                           )}
                                         </div>
-                                        <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
+                                        <div className="text-xs text-muted-foreground">{formatPatientLogDate(txn.date)} • {txn.transactionId}</div>
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -2727,6 +3645,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                       >
                                         <Eye className="h-4 w-4" />
                                         <span className="sr-only">View Appointment Snapshot</span>
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className={`h-8 w-8 p-0 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
+                                        title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                        onClick={() => handleEditPaymentTransaction(txn)}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                        <span className="sr-only">Edit Payment</span>
                                       </Button>
                                         {/* Hide edit/delete controls for now — keep view (eye) only */}
                                     </div>
@@ -2746,7 +3674,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -2856,6 +3784,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   {filteredTransactions.length > 0 ? (
                     filteredTransactions.map((txn) => {
                       const paymentDisplay = getTransactionPaymentDisplay(txn);
+                      const txnPaymentDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
 
                       return (
                       <div
@@ -2870,7 +3799,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div>
                               <div className="font-medium">{txn.method}</div>
                               <div className="text-sm text-muted-foreground">
-                                {txn.appointmentType} - {txn.appointmentDate}
+                                {txn.appointmentType} - Appointment: {formatPatientLogDate(txn.appointmentDate, "N/A")}
                               </div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Dr: {txn.doctor}
@@ -2880,7 +3809,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           <div className="flex items-start gap-3 sm:justify-end">
                             <div className="sm:text-right">
                               <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
-                              <div className="text-xs text-muted-foreground">{txn.date}</div>
+                              <div className="text-xs text-muted-foreground">Payment Date: {txnPaymentDate}</div>
                             </div>
                             <Button
                               variant="ghost"
@@ -2890,6 +3819,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             >
                               <Eye className="h-4 w-4" />
                               <span className="sr-only">View Appointment Snapshot</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={`h-8 w-8 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
+                              title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                              onClick={() => handleEditPaymentTransaction(txn)}
+                            >
+                              <Edit className="h-4 w-4" />
+                              <span className="sr-only">Edit Payment</span>
                             </Button>
                             {!isReadOnlyPaymentRow(txn) && (
                               <DropdownMenu>
@@ -2904,14 +3843,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem
-                                    onClick={() => {
-                                      try {
-                                        console.log("[PatientDetailsModal] edit payment clicked", { txnId: txn?.id, patientId: patient?.id, legacy: isLegacyPaymentRow(txn) });
-                                      } catch (e) {}
-                                      if (patient.id && patient.name) {
-                                        if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
-                                      }
-                                    }}
+                                    onClick={() => handleEditPaymentTransaction(txn)}
                                   >
                                     <Edit className="h-4 w-4 mr-2" />
                                     Edit
@@ -2965,6 +3897,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
           </div>
       </Tabs>
+      <PatientUnsavedChangesDialog
+        open={isRecoveryDialogOpen}
+        onOpenChange={setIsRecoveryDialogOpen}
+        title="Recovered Unsaved Changes"
+        description="The previous session ended before these changes were saved. Your changes are still here; save them now or keep editing."
+        changes={visibleChangedFields}
+        primaryLabel={isRecoverySaving ? "Saving..." : "Save Changes"}
+        secondaryLabel="Discard Draft"
+        cancelLabel="Keep Editing"
+        onPrimary={handleSaveRecoveredDraft}
+        onSecondary={handleDiscardRecoveredDraft}
+        loading={isRecoverySaving}
+      />
       {/* Record Payment Dialog is now a separate component */}
       <ConfirmDialog
         open={pdIsConfirmOpen}

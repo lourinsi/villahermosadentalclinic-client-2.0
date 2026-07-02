@@ -41,7 +41,8 @@ import {
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { formatTimeTo12h } from "@/lib/time-slots";
+import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import { 
@@ -227,11 +228,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     const normalizedStatus = canonicalStatus(appointment.status);
     return (
       isPaymentIncomplete(appointment.paymentStatus) &&
-      normalizedStatus !== "cancelled"
+      normalizedStatus !== "cancelled" &&
+      normalizedStatus !== "deleted"
     );
   };
 
-  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => !isPatientCartStatus(status.value));
+  const canSeeDeletedAppointments = effectiveRole === "admin";
+  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => {
+    const normalizedStatus = canonicalStatus(status.value);
+    if (isPatientCartStatus(status.value)) return false;
+    if (normalizedStatus === "deleted" && !canSeeDeletedAppointments) return false;
+    return true;
+  });
 
   const isActionableStatus = (status?: string) => {
     const k = canonicalStatus(status);
@@ -241,7 +249,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // History shows completed appointments (not pending payments)
   const isHistoryStatus = (status?: string) => {
     const k = canonicalStatus(status);
-    return k === "scheduled" || k === "completed" || k === "cancelled";
+    return k === "scheduled" || k === "completed" || k === "cancelled" || (canSeeDeletedAppointments && k === "deleted");
   };
 
   // Appointment requests include these statuses (action required)
@@ -847,7 +855,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const historyColumnCount = doctorFilter ? 7 : 8;
 
   return (
-    <div data-tour-id="requests-page" className="p-6 max-w-[1600px] mx-auto space-y-6">
+    <div data-tour-id="requests-page" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">
@@ -876,12 +884,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         }}
         className="space-y-6"
       >
-        <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
-          <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
+        <TabsList className="h-auto w-full rounded-xl border bg-white p-1 shadow-sm sm:w-fit">
+          <TabsTrigger value="requests" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
             Requests
             <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requestTotal}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="history" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
+          <TabsTrigger value="history" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
             History
           </TabsTrigger>
         </TabsList>
@@ -890,7 +898,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           <Card className="border-none shadow-xl shadow-gray-200/50 bg-white/80 backdrop-blur-xl rounded-2xl overflow-hidden">
             <CardHeader className="border-b border-gray-100 pb-6 bg-white">
               <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col items-start gap-3 lg:flex-row lg:items-center">
                   <div className="p-2.5 bg-amber-50 rounded-xl">
                     <AlertCircle className="h-6 w-6 text-amber-600" />
                   </div>
@@ -903,11 +911,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         Payment due for {sortedRequests.filter(canPromptPayment).length} appointment{sortedRequests.filter(canPromptPayment).length !== 1 ? "s" : ""}
                       </div>
                     ) : null}
-                    <div className="relative mt-4 md:mt-0">
+                    <div className="relative mt-4 w-full md:mt-0 lg:w-auto">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                       <Input 
                         placeholder="Search patient or service..." 
-                        className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
+                        className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
                         value={pendingSearchTerm}
                         onChange={(e) => {
                           setPendingSearchTerm(e.target.value);
@@ -924,7 +932,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       setRequestCurrentPage(1);
                     }}
                   >
-                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                    <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
                         <SelectValue placeholder="All Status" />
@@ -946,7 +954,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setRequestCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                         <div className="flex items-center gap-2">
                           <User className="h-3.5 w-3.5 text-gray-400" />
                           <SelectValue placeholder="All Doctors" />
@@ -1061,8 +1069,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(request.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{request.time}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
+                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
                             </div>
                           </TableCell>
                           {!doctorFilter && (
@@ -1113,13 +1121,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{request.createdAt ? new Date(request.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.createdAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{request.createdAt ? new Date(request.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{request.updatedAt ? new Date(request.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.updatedAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{request.updatedAt ? new Date(request.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
@@ -1220,12 +1228,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative">
+                <div className="flex w-full flex-wrap gap-2 md:w-auto">
+                  <div className="relative w-full sm:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
                       placeholder="Search patient or service..." 
-                      className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
+                      className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
                       value={historySearchTerm}
                       onChange={(e) => {
                         setHistorySearchTerm(e.target.value);
@@ -1241,7 +1249,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       setHistoryCurrentPage(1);
                     }}
                   >
-                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                    <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
                         <SelectValue placeholder="All Status" />
@@ -1263,7 +1271,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setHistoryCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                         <div className="flex items-center gap-2">
                           <User className="h-3.5 w-3.5 text-gray-400" />
                           <SelectValue placeholder="All Doctors" />
@@ -1355,7 +1363,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <History className="h-10 w-10 text-gray-300" />
                             </div>
                             <h3 className="text-lg font-bold text-gray-900 uppercase">No History Found</h3>
-                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No completed or cancelled appointments recorded yet.</p>
+                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No appointment history matches your filters.</p>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1378,8 +1386,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{item.time}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
+                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
                             </div>
                           </TableCell>
                           {!doctorFilter && (
@@ -1430,13 +1438,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.createdAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{item.createdAt ? new Date(item.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.updatedAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>

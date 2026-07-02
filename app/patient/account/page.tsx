@@ -13,6 +13,61 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Loader2, User, FileText, CheckCircle, Save } from "lucide-react";
 
+const CONSENT_VERSION = "focused-informed-consent-v1";
+
+const CONSENT_ACKNOWLEDGEMENTS = [
+  {
+    id: "treatment",
+    title: "Treatment to be done",
+    description:
+      "I consent to dental care after the proposed procedure, benefits, risks, and estimated cost have been explained. Care may include diagnostic images, cleaning, periodontal treatment, restorations, crowns, bridges, extractions, root canal therapy, dentures, local anesthesia, and surgical care when needed.",
+  },
+  {
+    id: "medications",
+    title: "Drugs and medications",
+    description:
+      "I understand that antibiotics, pain relievers, anesthetics, and other medicines may cause side effects or allergic reactions, including swelling, itching, nausea, vomiting, or serious reactions that may require urgent care.",
+  },
+  {
+    id: "treatmentPlanChanges",
+    title: "Changes in treatment plan",
+    description:
+      "I understand that conditions discovered during treatment may require the dentist to change, add, or postpone procedures, and I authorize clinically necessary changes after they are explained to me whenever possible.",
+  },
+  {
+    id: "noGuarantee",
+    title: "No guaranteed result",
+    description:
+      "I understand that dentistry is not an exact science and that treatment results cannot be guaranteed in every situation.",
+  },
+  {
+    id: "authorization",
+    title: "Authorization to proceed",
+    description:
+      "I authorize the clinic dentist and dental auxiliaries to perform the explained dental restorations and treatments, including reasonable modifications that may become necessary during care.",
+  },
+  {
+    id: "financialResponsibility",
+    title: "Financial responsibility",
+    description:
+      "I accept responsibility for payment of dental fees and any agreed charges related to my care, including collection or legal costs if an account becomes unpaid.",
+  },
+] as const;
+
+type ConsentAcknowledgementId = (typeof CONSENT_ACKNOWLEDGEMENTS)[number]["id"];
+type ConsentAcknowledgements = Record<ConsentAcknowledgementId, boolean>;
+
+const createConsentAcknowledgements = (
+  values?: Partial<Record<string, boolean>>,
+  defaultValue = false
+): ConsentAcknowledgements =>
+  CONSENT_ACKNOWLEDGEMENTS.reduce((acknowledgements, item) => {
+    acknowledgements[item.id] = values?.[item.id] ?? defaultValue;
+    return acknowledgements;
+  }, {} as ConsentAcknowledgements);
+
+const todayDateInputValue = () => new Date().toISOString().slice(0, 10);
+
 const AccountPage = () => {
   const { user, isLoading: authLoading } = useAuth();
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -22,8 +77,32 @@ const AccountPage = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [canvasRef, setCanvasRef] = useState<HTMLCanvasElement | null>(null);
   const [questionnaire, setQuestionnaire] = useState<any>(null);
+  const [consentAcknowledgements, setConsentAcknowledgements] = useState<ConsentAcknowledgements>(() =>
+    createConsentAcknowledgements()
+  );
+  const [consentSignatureName, setConsentSignatureName] = useState("");
+  const [consentGuardianName, setConsentGuardianName] = useState("");
+  const [consentSignedDate, setConsentSignedDate] = useState(todayDateInputValue);
+  const [consentSignatureImage, setConsentSignatureImage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedData = useRef<string>("");
+
+  const hydrateConsentData = useCallback((data: any) => {
+    if (!data || typeof data !== "object") return;
+
+    const storedAcknowledgements =
+      data.consentAcknowledgements && typeof data.consentAcknowledgements === "object"
+        ? data.consentAcknowledgements
+        : undefined;
+    const defaultAcknowledged = !storedAcknowledgements && data.consentAccepted === true;
+
+    setConsentAcknowledgements(createConsentAcknowledgements(storedAcknowledgements, defaultAcknowledged));
+    setTermsAccepted(Boolean(data.consentAccepted));
+    setConsentSignatureName(String(data.consentPatientSignatureName || ""));
+    setConsentGuardianName(String(data.consentGuardianSignatureName || ""));
+    setConsentSignedDate(String(data.consentSignedDate || todayDateInputValue()));
+    setConsentSignatureImage(String(data.consentPatientSignatureImage || ""));
+  }, []);
 
   useEffect(() => {
     const fetchPatientData = async () => {
@@ -83,18 +162,35 @@ const AccountPage = () => {
         const result = await response.json();
         if (result.success && result.data) {
           setQuestionnaire(result.data);
+          hydrateConsentData(result.data);
           // Update patient state with questionnaire data
           setPatient(prev => {
             const updated = prev ? { ...prev, ...result.data } as any : null;
             lastSavedData.current = JSON.stringify(updated);
             return updated;
           });
+          return result.data;
         }
       } catch (err) {
         console.error("Error fetching questionnaire:", err);
       }
     }
+    return null;
   };
+
+  useEffect(() => {
+    if (!canvasRef || !consentSignatureImage) return;
+
+    const context = canvasRef.getContext("2d");
+    if (!context) return;
+
+    const image = new Image();
+    image.onload = () => {
+      context.clearRect(0, 0, canvasRef.width, canvasRef.height);
+      context.drawImage(image, 0, 0, canvasRef.width, canvasRef.height);
+    };
+    image.src = consentSignatureImage;
+  }, [canvasRef, consentSignatureImage]);
 
   const handleUpdate = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -179,7 +275,16 @@ const AccountPage = () => {
     e.preventDefault();
     if (!patient) return;
 
+    const allAcknowledged = CONSENT_ACKNOWLEDGEMENTS.every((item) => consentAcknowledgements[item.id]);
+    if (!allAcknowledged || !consentSignatureName.trim() || !consentSignedDate) {
+      toast.error("Please complete every consent acknowledgement, signature name, and date.");
+      return;
+    }
+
+    setIsSaving(true);
     try {
+      const latestQuestionnaire = questionnaire || (await fetchQuestionnaireData()) || {};
+      const signatureImage = getCanvasSignatureImage();
       const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
@@ -187,21 +292,41 @@ const AccountPage = () => {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
+
+      const consentData = {
+        ...latestQuestionnaire,
+        consentAccepted: true,
+        consentVersion: CONSENT_VERSION,
+        consentAcknowledgements,
+        consentPatientSignatureName: consentSignatureName.trim(),
+        consentGuardianSignatureName: consentGuardianName.trim(),
+        consentPatientSignatureImage: signatureImage,
+        consentSignedDate,
+        consentSignedAt: new Date().toISOString(),
+      };
       
-      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), {
+      const response = await fetch(apiUrl(`/api/questionnaires/${patient.id}`), {
         method: 'PUT',
         headers,
         credentials: "include",
-        body: JSON.stringify({ termsAccepted }),
+        body: JSON.stringify(consentData),
       });
       const result = await response.json();
       if (result.success) {
-        toast.success("Terms and conditions accepted successfully!");
+        const savedData = result.data || consentData;
+        setQuestionnaire(savedData);
+        setPatient(prev => prev ? { ...prev, ...savedData } as any : prev);
+        setTermsAccepted(true);
+        setConsentSignatureImage(signatureImage);
+        lastSavedData.current = JSON.stringify({ ...(patient as any), ...savedData });
+        toast.success("Informed consent saved successfully!");
       } else {
-        toast.error(result.message || "Failed to accept terms.");
+        toast.error(result.message || "Failed to save informed consent.");
       }
     } catch {
-      toast.error("An error occurred while accepting terms.");
+      toast.error("An error occurred while saving informed consent.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -261,16 +386,22 @@ const AccountPage = () => {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
+
+      const nextQuestionnaireData = {
+        ...(questionnaire && typeof questionnaire === "object" ? questionnaire : {}),
+        ...questionnaireData,
+      };
       
       const response = await fetch(apiUrl(`/api/questionnaires/${patient.id}`), {
         method: 'PUT',
         headers,
         credentials: "include",
-        body: JSON.stringify(questionnaireData),
+        body: JSON.stringify(nextQuestionnaireData),
       });
       const result = await response.json();
       if (result.success) {
         if (e) toast.success("Questionnaire information saved successfully!");
+        setQuestionnaire(result.data || nextQuestionnaireData);
         lastSavedData.current = JSON.stringify(patient);
       } else {
         if (e) toast.error(result.message || "Failed to save questionnaire.");
@@ -280,6 +411,25 @@ const AccountPage = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const updateConsentAcknowledgement = (id: ConsentAcknowledgementId, checked: boolean) => {
+    setConsentAcknowledgements((current) => ({
+      ...current,
+      [id]: checked,
+    }));
+    if (!checked) setTermsAccepted(false);
+  };
+
+  const getCanvasSignatureImage = () => {
+    if (!canvasRef) return consentSignatureImage;
+
+    const context = canvasRef.getContext("2d");
+    if (!context) return consentSignatureImage;
+
+    const imageData = context.getImageData(0, 0, canvasRef.width, canvasRef.height).data;
+    const hasInk = imageData.some((value, index) => index % 4 === 3 && value > 0);
+    return hasInk ? canvasRef.toDataURL("image/png") : consentSignatureImage;
   };
 
   // Autosave logic
@@ -314,6 +464,11 @@ const AccountPage = () => {
 
   // Cast patient to allow additional questionnaire fields
   const patientData = patient as any;
+  const allConsentAcknowledgementsAccepted = CONSENT_ACKNOWLEDGEMENTS.every(
+    (item) => consentAcknowledgements[item.id]
+  );
+  const canSaveConsent =
+    allConsentAcknowledgementsAccepted && Boolean(consentSignatureName.trim()) && Boolean(consentSignedDate);
 
   return (
     <div className="space-y-6">
@@ -347,7 +502,10 @@ const AccountPage = () => {
           Health Info
         </button>
         <button
-          onClick={() => setActiveTab("terms")}
+          onClick={() => {
+            setActiveTab("terms");
+            fetchQuestionnaireData();
+          }}
           className={`flex items-center gap-2 px-6 py-4 font-semibold border-b-4 transition-all ${
             activeTab === "terms"
               ? "border-blue-600 text-blue-600 bg-blue-50"
@@ -355,7 +513,7 @@ const AccountPage = () => {
           }`}
         >
           <CheckCircle className="h-5 w-5" />
-          Terms & Conditions
+          Informed Consent
         </button>
       </div>
 
@@ -886,87 +1044,146 @@ const AccountPage = () => {
         {activeTab === "terms" && (
           <Card>
             <CardHeader>
-              <CardTitle>Terms & Conditions</CardTitle>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle>Informed Consent</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500">Dental treatment authorization and patient acknowledgement.</p>
+                </div>
+                {termsAccepted && (
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    Consent saved
+                  </span>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleAcceptTerms} className="space-y-6">
-                <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 max-h-96 overflow-y-auto">
-                  <h3 className="font-semibold text-gray-900 mb-3">Terms & Conditions</h3>
-                  <div className="text-sm text-gray-600 space-y-3">
-                    <p>By using Villahermosa Dental Clinic services, you agree to be bound by these Terms & Conditions.</p>
-                    <p><strong>1. Services:</strong> We provide dental healthcare services including consultations, treatments, and follow-up care.</p>
-                    <p><strong>2. Patient Responsibility:</strong> Patients are responsible for providing accurate personal and medical information.</p>
-                    <p><strong>3. Confidentiality:</strong> All patient information is kept confidential in accordance with applicable laws and regulations.</p>
-                    <p><strong>4. Payment:</strong> Payment must be made as agreed upon during consultation.</p>
-                    <p><strong>5. Cancellation Policy:</strong> Appointments must be cancelled at least 24 hours in advance.</p>
-                    <p><strong>6. Liability:</strong> We are not liable for any unforeseen complications unless caused by our negligence.</p>
-                    <p><strong>7. Changes:</strong> We reserve the right to update these terms at any time.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="termsCheckbox" 
-                      checked={termsAccepted}
-                      onCheckedChange={(checked) => setTermsAccepted(checked as boolean)}
-                    />
-                    <Label htmlFor="termsCheckbox" className="text-sm cursor-pointer">
-                      I have read and agree to the Terms & Conditions
-                    </Label>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold">Patient Signature *</Label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 bg-white">
-                      <p className="text-xs text-gray-500 mb-2">Draw your signature below:</p>
-                      <canvas
-                        ref={setCanvasRef}
-                        className="border border-gray-300 rounded w-full h-24 bg-white cursor-crosshair"
-                        onMouseDown={(e) => {
-                          const canvas = e.currentTarget as HTMLCanvasElement;
-                          const ctx = canvas.getContext('2d');
-                          if (ctx) {
-                            const rect = canvas.getBoundingClientRect();
-                            ctx.beginPath();
-                            ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-                          }
-                        }}
-                        onMouseMove={(e) => {
-                          if ((e as any).buttons !== 1) return;
-                          const canvas = e.currentTarget as HTMLCanvasElement;
-                          const ctx = canvas.getContext('2d');
-                          if (ctx) {
-                            const rect = canvas.getBoundingClientRect();
-                            ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
-                            ctx.stroke();
-                          }
-                        }}
+                <div className="space-y-3">
+                  {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                    <label
+                      key={item.id}
+                      htmlFor={`consent-${item.id}`}
+                      className="flex cursor-pointer gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/30"
+                    >
+                      <Checkbox
+                        id={`consent-${item.id}`}
+                        checked={consentAcknowledgements[item.id]}
+                        onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
+                        className="mt-1"
                       />
-                      <Button 
-                        type="button" 
-                        variant="outline" 
-                        size="sm" 
-                        className="mt-2 w-full"
-                        onClick={() => {
-                          if (canvasRef) {
-                            const ctx = canvasRef.getContext('2d');
-                            ctx?.clearRect(0, 0, canvasRef.width, canvasRef.height);
-                          }
-                        }}
-                      >
-                        Clear Signature
-                      </Button>
-                    </div>
+                      <span className="space-y-1">
+                        <span className="block text-sm font-bold text-gray-900">{item.title}</span>
+                        <span className="block text-sm leading-6 text-gray-600">{item.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="consent-signature-name">Patient / Parent / Guardian Signature Name *</Label>
+                    <Input
+                      id="consent-signature-name"
+                      value={consentSignatureName}
+                      onChange={(event) => {
+                        setConsentSignatureName(event.target.value);
+                        setTermsAccepted(false);
+                      }}
+                      placeholder="Type full legal name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="consent-date">Date *</Label>
+                    <Input
+                      id="consent-date"
+                      type="date"
+                      value={consentSignedDate}
+                      onChange={(event) => {
+                        setConsentSignedDate(event.target.value);
+                        setTermsAccepted(false);
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="consent-guardian-name">Parent / Guardian Name</Label>
+                    <Input
+                      id="consent-guardian-name"
+                      value={consentGuardianName}
+                      onChange={(event) => {
+                        setConsentGuardianName(event.target.value);
+                        setTermsAccepted(false);
+                      }}
+                      placeholder="Required only when applicable"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="consent-dentist-signature">Dentist / Signature</Label>
+                    <Input id="consent-dentist-signature" value="For clinic completion" disabled />
                   </div>
                 </div>
 
-                <Button 
-                  type="submit" 
-                  disabled={!termsAccepted}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Draw Signature</Label>
+                  <div className="rounded-lg border-2 border-dashed border-gray-300 bg-white p-4">
+                    <canvas
+                      ref={setCanvasRef}
+                      className="h-28 w-full cursor-crosshair rounded border border-gray-300 bg-white"
+                      style={{ touchAction: "none" }}
+                      onPointerDown={(event) => {
+                        const canvas = event.currentTarget as HTMLCanvasElement;
+                        const context = canvas.getContext("2d");
+                        if (context) {
+                          canvas.setPointerCapture(event.pointerId);
+                          const rect = canvas.getBoundingClientRect();
+                          const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                          const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                          context.lineCap = "round";
+                          context.lineJoin = "round";
+                          context.lineWidth = 2;
+                          context.beginPath();
+                          context.moveTo(x, y);
+                        }
+                      }}
+                      onPointerMove={(event) => {
+                        if (event.buttons !== 1) return;
+                        const canvas = event.currentTarget as HTMLCanvasElement;
+                        const context = canvas.getContext("2d");
+                        if (context) {
+                          const rect = canvas.getBoundingClientRect();
+                          const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                          const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                          context.lineTo(x, y);
+                          context.stroke();
+                          setTermsAccepted(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 w-full"
+                      onClick={() => {
+                        if (canvasRef) {
+                          const context = canvasRef.getContext("2d");
+                          context?.clearRect(0, 0, canvasRef.width, canvasRef.height);
+                          setConsentSignatureImage("");
+                          setTermsAccepted(false);
+                        }
+                      }}
+                    >
+                      Clear Signature
+                    </Button>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={!canSaveConsent || isSaving}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Accept Terms & Sign
+                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Informed Consent
                 </Button>
               </form>
             </CardContent>

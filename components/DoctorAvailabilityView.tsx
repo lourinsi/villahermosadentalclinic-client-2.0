@@ -22,8 +22,8 @@ import {
   Mail,
   Eye,
 } from "lucide-react";
-import { TIME_SLOTS } from "@/lib/time-slots";
-import { formatDateToYYYYMMDD } from "@/lib/utils";
+import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
+import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ViewMode from "@/components/viewMode";
@@ -413,7 +413,7 @@ export function DoctorAvailabilityView({
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
               <Clock className="h-5 w-5 text-blue-600" />
-              {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}
+              {formatWordyDate(selectedDate).toUpperCase()}
             </h3>
           </div>
           
@@ -443,7 +443,7 @@ export function DoctorAvailabilityView({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span>{slot.time}</span>
+                      <span>{formatTimeTo12h(slot.time)}</span>
                       <div className="flex items-center gap-1">
                         <Badge 
                           variant="secondary" 
@@ -475,7 +475,7 @@ export function DoctorAvailabilityView({
                                     <div key={idx} className="text-xs border-t border-emerald-700 pt-1 flex items-center justify-between">
                                       <div>
                                         <p className="font-medium">{apt.patientName}</p>
-                                        <p className="text-emerald-200">{apt.time} - {apt.duration} min</p>
+                                        <p className="text-emerald-200">{formatTimeTo12h(apt.time)} - {apt.duration} min</p>
                                       </div>
                                       <button
                                         onClick={(e) => {
@@ -533,7 +533,8 @@ export function DoctorAvailabilityView({
             {weekDates.map((date) => {
               const slots = getDaySlots(date);
               const isPastDate = date < now;
-              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dateStr = formatWordyDate(date);
+              const dateKey = formatDateToYYYYMMDD(date);
               const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
               
               const openSlots = slots.filter(s => s.isAvailable && !s.isPast);
@@ -541,7 +542,7 @@ export function DoctorAvailabilityView({
               const hasMore = openSlots.length > maxSlotsDisplay;
 
               return (
-                <div key={dateStr} className="flex flex-col border border-gray-100 rounded-lg overflow-hidden">
+                <div key={dateKey} className="flex flex-col border border-gray-100 rounded-lg overflow-hidden">
                   <div className={`p-3 text-center font-semibold text-sm border-b ${
                     isPastDate ? 'bg-gray-50 text-gray-400 border-gray-200' : 'bg-blue-50 text-blue-700 border-blue-100'
                   }`}>
@@ -569,7 +570,7 @@ export function DoctorAvailabilityView({
                             }}
                               className="w-full px-2 py-1 rounded text-[10px] font-bold transition-all text-center bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
                             >
-                              {slot.time}
+                              {formatTimeTo12h(slot.time)}
                             </button>
                           ))}
                         </div>
@@ -689,7 +690,7 @@ export function DoctorAvailabilityView({
                           }}
                           className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-all text-left"
                         >
-                          {slot.time}
+                          {formatTimeTo12h(slot.time)}
                         </button>
                       ))}
                       {hasMore && (

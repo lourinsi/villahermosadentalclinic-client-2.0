@@ -8,6 +8,8 @@ const STATUS_ALIASES: Record<string, string> = {
   pending: CART_APPOINTMENT_STATUS,
   tentative: "reserved",
   confirmed: "scheduled",
+  canceled: "cancelled",
+  deleted: "deleted",
   topay: "to-pay",
   "to pay": "to-pay",
   halfpaid: "half-paid",
