@@ -11,6 +11,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import type { Appointment } from "../hooks/useAppointments";
 import type { Attendance, Staff, StaffFinancialRecord, StaffFinancialRecordForm } from "@/lib/staff-types";
@@ -47,8 +54,8 @@ import {
   Mail,
   Calendar,
   CreditCard,
-  Eye,
   CalendarDays,
+  MoreVertical,
 } from "lucide-react";
 
 const monthKey = (date = new Date()) => {
@@ -66,7 +73,10 @@ const normalizeFilterValue = normalizeStaffValue;
 
 type StaffFinancialFieldErrors = Partial<Record<keyof StaffFinancialRecordForm, string>>;
 
+const FINANCIAL_RECORDS_DISABLED = true;
 const ATTENDANCE_DISABLED = true;
+const activeDropdownItemClass = (isActive: boolean) =>
+  isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
 const formatCurrency = (amount?: number) =>
   new Intl.NumberFormat("en-PH", {
@@ -239,6 +249,12 @@ export function StaffView() {
   }, []);
 
   const fetchFinancialRecords = useCallback(async () => {
+    if (FINANCIAL_RECORDS_DISABLED) {
+      setFinancialRecords([]);
+      setIsFinancialLoading(false);
+      return;
+    }
+
     setIsFinancialLoading(true);
     try {
       const response = await fetch(apiUrl("/api/staff/financials"), { credentials: "include" });
@@ -280,13 +296,13 @@ export function StaffView() {
 
   const refreshLoadedStaffData = useCallback(() => {
     fetchStaffData();
-    if (hasLoadedFinancials) fetchFinancialRecords();
+    if (!FINANCIAL_RECORDS_DISABLED && hasLoadedFinancials) fetchFinancialRecords();
     if (!ATTENDANCE_DISABLED && hasLoadedAttendance) fetchAttendanceData();
   }, [fetchAttendanceData, fetchFinancialRecords, fetchStaffData, hasLoadedAttendance, hasLoadedFinancials]);
 
   useEffect(() => {
     fetchStaffData();
-    fetchFinancialRecords();
+    if (!FINANCIAL_RECORDS_DISABLED) fetchFinancialRecords();
   }, [fetchFinancialRecords, fetchStaffData]);
 
   useEffect(() => {
@@ -802,20 +818,22 @@ export function StaffView() {
   const totalMonthlyPayroll = staffData.reduce((sum, staff) => sum + (Number(staff.baseSalary) || 0), 0);
   const activeStaffCount = staffData.filter(staff => normalizeFilterValue(staff.status) === "active").length;
     return (
-    <div data-tour-id="staff-page" className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div data-tour-id="staff-page" className="space-y-4 p-3 sm:space-y-6 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Staff Management</h1>
-          <p className="text-muted-foreground">Manage employees, salaries, and cash advances</p>
+          <p className="text-sm text-muted-foreground sm:text-base">Manage employees, salaries, and cash advances</p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex gap-2">
           <Button variant="outline" onClick={handleExportStaff} disabled={filteredStaffData.length === 0}>
             <Download className="h-4 w-4 mr-2" />
-            Export Report
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </Button>
           <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setIsAddStaffDialogOpen(true)}>
             <UserPlus className="h-4 w-4 mr-2" />
-            Add Staff Member
+            <span className="hidden sm:inline">Add Staff Member</span>
+            <span className="sm:hidden">Add</span>
           </Button>
           <AddStaffModalWrapper
             open={isAddStaffDialogOpen}
@@ -826,8 +844,8 @@ export function StaffView() {
       </div>
 
       {/* Key Staff Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-2 md:gap-6 lg:grid-cols-4">
+        <Card className="col-span-2 md:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Staff</CardTitle>
             <Users className="h-4 w-4 text-blue-600" />
@@ -840,7 +858,7 @@ export function StaffView() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="hidden md:block">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Payroll</CardTitle>
             <DollarSign className="h-4 w-4 text-green-600" />
@@ -853,22 +871,24 @@ export function StaffView() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Advances</CardTitle>
-            <CreditCard className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {financialRecords.filter(r => normalizeFilterValue(r.status) === "pending").length}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Awaiting approval
-            </p>
-          </CardContent>
-        </Card>
+        {!FINANCIAL_RECORDS_DISABLED && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Pending Advances</CardTitle>
+              <CreditCard className="h-4 w-4 text-orange-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {financialRecords.filter(r => normalizeFilterValue(r.status) === "pending").length}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Awaiting approval
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card>
+        <Card className="hidden md:block">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Average Salary</CardTitle>
             <TrendingUp className="h-4 w-4 text-blue-600" />
@@ -888,19 +908,26 @@ export function StaffView() {
         value={activeTab}
         className="space-y-6"
         onValueChange={(value) => {
+          if (value === "financial" && FINANCIAL_RECORDS_DISABLED) {
+            toast.error("Financial Records is disabled for now");
+            return;
+          }
+
           if (value === "attendance" && ATTENDANCE_DISABLED) {
             toast.error("Attendance & Hours is disabled for now");
             return;
           }
 
           setActiveTab(value);
-          if (value === "financial" && !hasLoadedFinancials) fetchFinancialRecords();
+          if (!FINANCIAL_RECORDS_DISABLED && value === "financial" && !hasLoadedFinancials) fetchFinancialRecords();
           if (!ATTENDANCE_DISABLED && value === "attendance" && !hasLoadedAttendance) setIsAttendanceLoading(true);
         }}
       >
-        <TabsList>
-          <TabsTrigger value="staff" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Staff Directory</TabsTrigger>
-          <TabsTrigger value="financial" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
+        <TabsList className="h-auto w-full rounded-xl bg-white p-1 shadow-sm sm:w-fit">
+          <TabsTrigger value="staff" className="flex-1 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white sm:flex-none">Staff Directory</TabsTrigger>
+          {!FINANCIAL_RECORDS_DISABLED && (
+            <TabsTrigger value="financial" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
+          )}
           {!ATTENDANCE_DISABLED && (
             <TabsTrigger value="attendance" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Attendance & Hours</TabsTrigger>
           )}
@@ -910,75 +937,125 @@ export function StaffView() {
         <TabsContent value="staff" className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <CardTitle>Employee Directory</CardTitle>
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative">
+                <div className="flex w-full flex-wrap gap-2 md:w-auto">
+                  <div className="flex w-full items-center gap-2 sm:w-auto">
+                  <div className="relative min-w-0 flex-1 sm:flex-none">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       type="search"
                       placeholder="Search staff..."
                       {...staffPasswordManagerIgnoreProps}
-                      className="pl-9 w-64"
+                      className="w-full pl-9 sm:w-64"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
-                  <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Department" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Departments</SelectItem>
-                      {departmentOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={roleFilter} onValueChange={setRoleFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Roles</SelectItem>
-                      {roleOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={employmentTypeFilter} onValueChange={setEmploymentTypeFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Employment Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      {employmentTypeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      {staffStatusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button variant="outline" size="icon" onClick={resetStaffFilters} title="Reset filters">
-                    <Filter className="h-4 w-4" />
-                  </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="rounded-xl sm:hidden" title="Staff filters">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-h-[70vh] w-60 overflow-y-auto">
+                        <DropdownMenuItem className={activeDropdownItemClass(departmentFilter === "all")} onSelect={() => setDepartmentFilter("all")}>
+                          All Departments
+                        </DropdownMenuItem>
+                        {departmentOptions.map((option) => (
+                          <DropdownMenuItem key={option.value} className={activeDropdownItemClass(departmentFilter === option.value)} onSelect={() => setDepartmentFilter(option.value)}>
+                            Department: {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className={activeDropdownItemClass(roleFilter === "all")} onSelect={() => setRoleFilter("all")}>
+                          All Roles
+                        </DropdownMenuItem>
+                        {roleOptions.map((option) => (
+                          <DropdownMenuItem key={option.value} className={activeDropdownItemClass(roleFilter === option.value)} onSelect={() => setRoleFilter(option.value)}>
+                            Role: {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className={activeDropdownItemClass(employmentTypeFilter === "all")} onSelect={() => setEmploymentTypeFilter("all")}>
+                          All Types
+                        </DropdownMenuItem>
+                        {employmentTypeOptions.map((option) => (
+                          <DropdownMenuItem key={option.value} className={activeDropdownItemClass(employmentTypeFilter === option.value)} onSelect={() => setEmploymentTypeFilter(option.value)}>
+                            Type: {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className={activeDropdownItemClass(statusFilter === "all")} onSelect={() => setStatusFilter("all")}>
+                          All Status
+                        </DropdownMenuItem>
+                        {staffStatusOptions.map((option) => (
+                          <DropdownMenuItem key={option.value} className={activeDropdownItemClass(statusFilter === option.value)} onSelect={() => setStatusFilter(option.value)}>
+                            Status: {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={resetStaffFilters}>Reset filters</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="hidden flex-wrap gap-2 sm:flex">
+                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Departments</SelectItem>
+                        {departmentOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Roles</SelectItem>
+                        {roleOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={employmentTypeFilter} onValueChange={setEmploymentTypeFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Employment Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Types</SelectItem>
+                        {employmentTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        {staffStatusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="outline" size="icon" onClick={resetStaffFilters} title="Reset filters">
+                      <Filter className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -991,17 +1068,17 @@ export function StaffView() {
                   </div>
                 </div>
               ) : (
-                <Table>
+                <Table className="table-fixed sm:table-auto">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Contact</TableHead>
-                      <TableHead>Hire Date</TableHead>
-                      <TableHead>Monthly Salary</TableHead>
+                      <TableHead className="hidden sm:table-cell">Role</TableHead>
+                      <TableHead className="hidden md:table-cell">Department</TableHead>
+                      <TableHead className="hidden lg:table-cell">Contact</TableHead>
+                      <TableHead className="hidden lg:table-cell">Hire Date</TableHead>
+                      <TableHead className="hidden md:table-cell">Monthly Salary</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1014,7 +1091,7 @@ export function StaffView() {
                     ) : (
                       filteredStaffData.map((staff) => (
                         <TableRow key={getStaffIdentifier(staff)}>
-                          <TableCell className="font-medium">
+                          <TableCell className="whitespace-normal font-medium">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-9 w-9 border bg-white">
                                 {staff.profilePicture ? (
@@ -1024,17 +1101,17 @@ export function StaffView() {
                                   {getStaffInitials(staff.name)}
                                 </AvatarFallback>
                               </Avatar>
-                              <div>
-                                <div>{staff.name}</div>
-                                <div className="text-xs text-muted-foreground">{staff.specialization}</div>
+                              <div className="min-w-0">
+                                <div className="truncate">{staff.name}</div>
+                                <div className="truncate text-xs text-muted-foreground">{staff.specialization || staff.role}</div>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>{staff.role}</TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">{staff.role}</TableCell>
+                          <TableCell className="hidden md:table-cell">
                             <Badge variant="secondary">{staff.department}</Badge>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden lg:table-cell">
                             <div className="space-y-1">
                               <div className="flex items-center text-xs text-muted-foreground">
                                 <Mail className="h-3 w-3 mr-1" />
@@ -1046,13 +1123,13 @@ export function StaffView() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden lg:table-cell">
                             <div className="flex items-center text-sm">
                               <Calendar className="h-3 w-3 mr-1 text-muted-foreground" />
                               {staff.hireDate}
                             </div>
                           </TableCell>
-                          <TableCell className="font-medium">{formatCurrency(staff.baseSalary)}</TableCell>
+                          <TableCell className="hidden font-medium md:table-cell">{formatCurrency(staff.baseSalary)}</TableCell>
                           <TableCell>
                             <Badge className={
                               staff.status === "active" ? "bg-green-100 text-green-800" :
@@ -1062,21 +1139,29 @@ export function StaffView() {
                               {staff.status}
                             </Badge>
                           </TableCell>
-                          <TableCell>
-                            <div className="flex space-x-2">
-                              {/* <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)} title="View Details">
-                                <Eye className="h-3 w-3" />
-                              </Button> */}
-                              <Button variant="outline" size="sm" onClick={() => openScheduleDialog(staff)} title="View Schedule">
-                                <CalendarDays className="h-3 w-3" />
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => openEditStaffDialog(staff)} title="Edit">
-                                <Edit className="h-3 w-3" />
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => openDeleteStaffDialog(staff)} title="Delete">
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" title="Staff actions">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onSelect={() => openScheduleDialog(staff)}>
+                                  <CalendarDays className="h-4 w-4 text-blue-600" />
+                                  Schedule
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => openEditStaffDialog(staff)}>
+                                  <Edit className="h-4 w-4 text-violet-600" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => openDeleteStaffDialog(staff)}>
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -1089,6 +1174,7 @@ export function StaffView() {
         </TabsContent>
 
         {/* Financial Records Tab - Cash Advances & Salary Adjustments */}
+        {!FINANCIAL_RECORDS_DISABLED && (
         <TabsContent value="financial" className="space-y-6">
           <Card>
             <CardHeader>
@@ -1241,6 +1327,7 @@ export function StaffView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* Attendance & Hours Tab */}
         {!ATTENDANCE_DISABLED && (
@@ -1361,46 +1448,50 @@ export function StaffView() {
         onDelete={handleDeleteStaff}
       />
 
-      <StaffFinancialRecordModal
-        open={isAddFinancialDialogOpen}
-        mode="create"
-        form={newFinancialRecord}
-        staffMembers={staffData}
-        isSaving={isSavingNewFinancialRecord}
-        formatCurrency={formatCurrency}
-        fieldErrors={newFinancialFieldErrors}
-        onOpenChange={(open) => {
-          setIsAddFinancialDialogOpen(open);
-          if (!open) {
-            setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
-            setNewFinancialFieldErrors({});
-          }
-        }}
-        onFormChange={updateNewFinancialRecord}
-        onSave={handleAddFinancialRecord}
-      />
+      {!FINANCIAL_RECORDS_DISABLED && (
+        <>
+          <StaffFinancialRecordModal
+            open={isAddFinancialDialogOpen}
+            mode="create"
+            form={newFinancialRecord}
+            staffMembers={staffData}
+            isSaving={isSavingNewFinancialRecord}
+            formatCurrency={formatCurrency}
+            fieldErrors={newFinancialFieldErrors}
+            onOpenChange={(open) => {
+              setIsAddFinancialDialogOpen(open);
+              if (!open) {
+                setNewFinancialRecord(createEmptyStaffFinancialRecordForm());
+                setNewFinancialFieldErrors({});
+              }
+            }}
+            onFormChange={updateNewFinancialRecord}
+            onSave={handleAddFinancialRecord}
+          />
 
-      <StaffFinancialRecordModal
-        open={isEditFinancialDialogOpen}
-        mode="edit"
-        form={editFinancialForm}
-        staffMembers={staffData}
-        isSaving={isSavingFinancialRecord}
-        formatCurrency={formatCurrency}
-        fieldErrors={editFinancialFieldErrors}
-        onOpenChange={handleFinancialEditDialogChange}
-        onFormChange={updateEditFinancialRecord}
-        onSave={handleUpdateFinancialRecord}
-      />
+          <StaffFinancialRecordModal
+            open={isEditFinancialDialogOpen}
+            mode="edit"
+            form={editFinancialForm}
+            staffMembers={staffData}
+            isSaving={isSavingFinancialRecord}
+            formatCurrency={formatCurrency}
+            fieldErrors={editFinancialFieldErrors}
+            onOpenChange={handleFinancialEditDialogChange}
+            onFormChange={updateEditFinancialRecord}
+            onSave={handleUpdateFinancialRecord}
+          />
 
-      <StaffFinancialDeleteModal
-        open={isDeleteFinancialDialogOpen}
-        record={financialRecordToDelete}
-        isDeleting={isDeletingFinancialRecord}
-        formatCurrency={formatCurrency}
-        onOpenChange={handleDeleteFinancialDialogChange}
-        onDelete={handleDeleteFinancialRecord}
-      />
+          <StaffFinancialDeleteModal
+            open={isDeleteFinancialDialogOpen}
+            record={financialRecordToDelete}
+            isDeleting={isDeletingFinancialRecord}
+            formatCurrency={formatCurrency}
+            onOpenChange={handleDeleteFinancialDialogChange}
+            onDelete={handleDeleteFinancialRecord}
+          />
+        </>
+      )}
 
       {!ATTENDANCE_DISABLED && (
         <StaffAttendanceModal

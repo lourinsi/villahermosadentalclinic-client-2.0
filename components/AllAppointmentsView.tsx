@@ -35,11 +35,19 @@ import {
   User, 
   Stethoscope, 
   CreditCard,
-  Hash
+  Hash,
+  MoreHorizontal
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 type SortKey = "date" | "patientName" | "doctor" | "status" | "price";
 type ViewType = "table" | "grid";
@@ -155,6 +163,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   const getPaymentBadgeClass = (status: string = "") => {
     return getPaymentStatusBadgeClassName(status, PAYMENT_STATUSES);
   };
+  const activeDropdownItemClass = (isActive: boolean) =>
+    isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
   if (isLoading) {
     return (
@@ -168,18 +178,41 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4 items-center">
-        <div className="relative w-full sm:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input 
-            placeholder="Search appointments..." 
-            className="pl-9 h-10 shadow-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search appointments..."
+              className="pl-9 h-10 shadow-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-10 w-10 shrink-0 rounded-xl sm:hidden" title="List options">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem className={activeDropdownItemClass(viewType === "grid")} onSelect={() => setViewType("grid")}>
+                Grid view
+              </DropdownMenuItem>
+              <DropdownMenuItem className={activeDropdownItemClass(viewType === "table")} onSelect={() => setViewType("table")}>
+                Table view
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {(["date", "patientName", "doctor", "status", "price"] as SortKey[]).map((key) => (
+                <DropdownMenuItem key={key} className={activeDropdownItemClass(sortKey === key)} onSelect={() => toggleSortOrder(key)}>
+                  Sort: {key === "patientName" ? "Patient" : key.charAt(0).toUpperCase() + key.slice(1)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         
-        <div className="flex items-center bg-gray-100 p-1 rounded-lg">
+        <div className="hidden items-center rounded-lg bg-gray-100 p-1 sm:flex">
           <Button 
             variant={viewType === "table" ? "outline" : "ghost"} 
             size="sm" 
@@ -210,8 +243,110 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
           )}
         </div>
       ) : viewType === "table" ? (
-        <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
-          <Table>
+        <>
+          <div className="grid grid-cols-1 gap-3 md:hidden">
+            {filteredAndSortedAppointments.map((appointment) => {
+              const statusAccentClass = getStatusDotColorClass(
+                getAppointmentStatusOptionWithColors(appointment.status, APPOINTMENT_STATUSES).bgColor
+              );
+              const canPay =
+                onPay &&
+                appointment.paymentStatus !== "paid" &&
+                appointment.status !== "cancelled" &&
+                appointment.status !== "deleted";
+              const canDelete = onDelete && isCartAppointmentStatus(appointment.status);
+
+              return (
+                <Card
+                  key={appointment.id}
+                  className={`relative overflow-hidden border-gray-200 shadow-sm ${onOpenAppointment ? "cursor-pointer" : ""}`}
+                  onClick={() => onOpenAppointment?.(appointment)}
+                >
+                  <div className={`absolute left-0 top-0 h-full w-1 ${statusAccentClass}`} />
+                  <CardContent className="space-y-3 p-4 pl-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-bold text-gray-900">{appointment.patientName}</p>
+                        <p className="mt-1 text-xs font-medium text-gray-500">
+                          {formatWordyDate(appointment.date, { fallback: appointment.date || "No date" })} at {formatTimeTo12h(appointment.time)}
+                        </p>
+                      </div>
+                      {canPay || canDelete ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-9 w-9 shrink-0 rounded-xl"
+                              title="Appointment actions"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            {canPay && (
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.stopPropagation();
+                                  onPay?.(appointment);
+                                }}
+                              >
+                                Pay now
+                              </DropdownMenuItem>
+                            )}
+                            {canDelete && (
+                              <DropdownMenuItem
+                                className="text-red-600 focus:text-red-600"
+                                onSelect={(event) => {
+                                  event.stopPropagation();
+                                  onDelete?.(appointment.id || "");
+                                }}
+                              >
+                                Cancel
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <Badge variant="outline" className={`shrink-0 px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointment.status)}`}>
+                          {displayStatus(appointment.status)}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getStatusBadgeClass(appointment.status)}`}>
+                        {displayStatus(appointment.status)}
+                      </Badge>
+                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getPaymentBadgeClass(appointment.paymentStatus)}`}>
+                        {displayPaymentStatus(appointment.paymentStatus)}
+                      </Badge>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 text-xs text-gray-600">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Stethoscope className="h-4 w-4 shrink-0 text-gray-400" />
+                        <span className="truncate">{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <User className="h-4 w-4 shrink-0 text-gray-400" />
+                        <span className="truncate">Dr. {appointment.doctor}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Amount</span>
+                      <span className="font-black text-gray-900">₱{appointment.price || 0}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm md:block">
+            <Table>
             <TableHeader className="bg-gray-50">
               <TableRow>
                 <TableHead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
@@ -304,10 +439,11 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </div>
+            </Table>
+          </div>
+        </>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filteredAndSortedAppointments.map((appointment) => {
             const statusAccentClass = getStatusDotColorClass(
               getAppointmentStatusOptionWithColors(appointment.status, APPOINTMENT_STATUSES).bgColor

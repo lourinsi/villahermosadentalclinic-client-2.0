@@ -872,6 +872,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   }, [appointments, requests, history]);
   const pendingRequestColumnCount = 4;
   const historyColumnCount = 4;
+  const activeDropdownItemClass = (isActive: boolean) =>
+    isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
   return (
     <div data-tour-id="requests-page" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6">
@@ -950,34 +952,48 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuItem onSelect={() => {
-                            setPendingStatusFilter("all");
-                            setRequestCurrentPage(1);
-                          }}>
+                          <DropdownMenuItem
+                            className={activeDropdownItemClass(pendingStatusFilter === "all")}
+                            onSelect={() => {
+                              setPendingStatusFilter("all");
+                              setRequestCurrentPage(1);
+                            }}
+                          >
                             All Status
                           </DropdownMenuItem>
                           {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
-                            <DropdownMenuItem key={status.value} onSelect={() => {
-                              setPendingStatusFilter(status.value);
-                              setRequestCurrentPage(1);
-                            }}>
+                            <DropdownMenuItem
+                              key={status.value}
+                              className={activeDropdownItemClass(canonicalStatus(pendingStatusFilter) === canonicalStatus(status.value))}
+                              onSelect={() => {
+                                setPendingStatusFilter(status.value);
+                                setRequestCurrentPage(1);
+                              }}
+                            >
                               Status: {status.label}
                             </DropdownMenuItem>
                           ))}
                           {!doctorFilter && (
                             <>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onSelect={() => {
-                                setPendingDoctorFilter("all");
-                                setRequestCurrentPage(1);
-                              }}>
+                              <DropdownMenuItem
+                                className={activeDropdownItemClass(pendingDoctorFilter === "all")}
+                                onSelect={() => {
+                                  setPendingDoctorFilter("all");
+                                  setRequestCurrentPage(1);
+                                }}
+                              >
                                 All Doctors
                               </DropdownMenuItem>
                               {requestDoctorOptions.map((doc: any) => (
-                                <DropdownMenuItem key={doc} onSelect={() => {
-                                  setPendingDoctorFilter(doc);
-                                  setRequestCurrentPage(1);
-                                }}>
+                                <DropdownMenuItem
+                                  key={doc}
+                                  className={activeDropdownItemClass(pendingDoctorFilter === doc)}
+                                  onSelect={() => {
+                                    setPendingDoctorFilter(doc);
+                                    setRequestCurrentPage(1);
+                                  }}
+                                >
                                   Dr. {doc}
                                 </DropdownMenuItem>
                               ))}
@@ -1252,34 +1268,48 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuItem onSelect={() => {
-                          setHistoryStatusFilter("all");
-                          setHistoryCurrentPage(1);
-                        }}>
+                        <DropdownMenuItem
+                          className={activeDropdownItemClass(historyStatusFilter === "all")}
+                          onSelect={() => {
+                            setHistoryStatusFilter("all");
+                            setHistoryCurrentPage(1);
+                          }}
+                        >
                           All Status
                         </DropdownMenuItem>
                         {staffVisibleStatusOptions.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
-                          <DropdownMenuItem key={status.value} onSelect={() => {
-                            setHistoryStatusFilter(status.value);
-                            setHistoryCurrentPage(1);
-                          }}>
+                          <DropdownMenuItem
+                            key={status.value}
+                            className={activeDropdownItemClass(canonicalStatus(historyStatusFilter) === canonicalStatus(status.value))}
+                            onSelect={() => {
+                              setHistoryStatusFilter(status.value);
+                              setHistoryCurrentPage(1);
+                            }}
+                          >
                             Status: {status.label}
                           </DropdownMenuItem>
                         ))}
                         {!doctorFilter && (
                           <>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={() => {
-                              setHistoryDoctorFilter("all");
-                              setHistoryCurrentPage(1);
-                            }}>
+                            <DropdownMenuItem
+                              className={activeDropdownItemClass(historyDoctorFilter === "all")}
+                              onSelect={() => {
+                                setHistoryDoctorFilter("all");
+                                setHistoryCurrentPage(1);
+                              }}
+                            >
                               All Doctors
                             </DropdownMenuItem>
                             {requestDoctorOptions.map((doc: any) => (
-                              <DropdownMenuItem key={doc} onSelect={() => {
-                                setHistoryDoctorFilter(doc);
-                                setHistoryCurrentPage(1);
-                              }}>
+                              <DropdownMenuItem
+                                key={doc}
+                                className={activeDropdownItemClass(historyDoctorFilter === doc)}
+                                onSelect={() => {
+                                  setHistoryDoctorFilter(doc);
+                                  setHistoryCurrentPage(1);
+                                }}
+                              >
                                 Dr. {doc}
                               </DropdownMenuItem>
                             ))}

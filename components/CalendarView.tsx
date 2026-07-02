@@ -34,6 +34,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -563,6 +565,15 @@ export function CalendarView({
   const activePrimaryViewMode = PRIMARY_VIEW_OPTIONS.some((option) => option.value === viewMode)
     ? viewMode
     : "";
+  const activeMenuItemClass = (isActive: boolean) =>
+    isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
+  const activeRadioItemClass = "data-[state=checked]:bg-violet-600 data-[state=checked]:text-white data-[state=checked]:focus:bg-violet-600 data-[state=checked]:focus:text-white";
+  const selectedStatusLabel =
+    selectedStatus === "my-calendar"
+      ? "My Calendar"
+      : APPOINTMENT_STATUSES.find((status) => status.value === selectedStatus)?.label || "Status";
+  const selectedTypeLabel =
+    selectedType === "all" ? "All Types" : APPOINTMENT_TYPES[Number(selectedType)] || "Treatment";
 
   // NOTE: Convert time string to minutes since midnight for easier comparison
   const timeToMinutes = (time: string): number => {
@@ -1007,11 +1018,12 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
     }
 
     return (
-      <div className="overflow-x-auto">
-        <div className="grid min-w-[680px] grid-cols-7 border-t border-l border-gray-200 md:min-w-0">
+      <div className="overflow-hidden sm:overflow-x-auto">
+        <div className="grid min-w-0 grid-cols-7 border-l border-t border-gray-200">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-          <div key={day} className="border-r border-b border-gray-200 bg-gray-50 p-2 text-center text-xs font-bold uppercase text-gray-500 sm:p-3">
-            {day}
+          <div key={day} className="border-b border-r border-gray-200 bg-gray-50 px-1 py-2 text-center text-[10px] font-bold uppercase text-gray-500 sm:p-3 sm:text-xs">
+            <span className="sm:hidden">{day.charAt(0)}</span>
+            <span className="hidden sm:inline">{day}</span>
           </div>
         ))}
         {days.map((item, idx) => {
@@ -1023,7 +1035,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           return (
             <div
               key={idx}
-              className={`min-h-[104px] border-r border-b border-gray-200 p-2 transition-colors sm:min-h-[120px] ${
+              className={`min-h-[72px] border-b border-r border-gray-200 p-1.5 transition-colors sm:min-h-[120px] sm:p-2 ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               } ${portal === 'public' && isPastDay ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
               onClick={() => {
@@ -1032,19 +1044,31 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 setViewMode("day");
               }}
             >
-              <div className="flex justify-between items-start mb-2">
-                <span className={`text-sm font-semibold p-1 rounded-full w-7 h-7 flex items-center justify-center ${
+              <div className="mb-1.5 flex items-start justify-between sm:mb-2">
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full p-1 text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm ${
                   isToday ? 'bg-violet-600 text-white' : ''
                 }`}>
                   {item.day}
                 </span>
                 {dayAppointments.length > 0 && (
-                  <Badge variant="secondary" className="text-[10px] h-5 px-1.5">
+                  <Badge variant="secondary" className="h-4 px-1 text-[9px] sm:h-5 sm:px-1.5 sm:text-[10px]">
                     {dayAppointments.length}
                   </Badge>
                 )}
               </div>
-              <div className="space-y-1">
+              <div className="flex flex-wrap gap-1 sm:hidden">
+                {sortedDayAppointments.slice(0, 4).map((apt: Appointment) => {
+                  const colors = getColorForType(apt.status);
+                  return (
+                    <span
+                      key={apt.id}
+                      className={`h-1.5 w-1.5 rounded-full ${colors.bg}`}
+                      title={`${formatTime(apt.time)} - ${getAppointmentTypeName(apt.type, apt.customType)}`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="hidden space-y-1 sm:block">
                 {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(apt.status);
@@ -1167,11 +1191,11 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
   };
 
   return (
-    <div className="space-y-6">
-      <Card className="shadow-sm border-none bg-white">
-        <CardContent className="p-3 sm:p-4">
-          <div ref={toolbarRef} className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+    <div className="space-y-3 sm:space-y-6">
+      <Card className="rounded-2xl border-none bg-white shadow-sm">
+        <CardContent className="p-2.5 sm:p-4">
+          <div ref={toolbarRef} className="flex flex-col gap-2 sm:gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-wrap sm:gap-3">
               <div className={`flex shrink-0 items-center rounded-lg border bg-gray-50 p-1 ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
                 <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'} aria-label="Previous date range">
                   <ChevronLeft className="h-4 w-4" />
@@ -1183,7 +1207,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               
               <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-10 min-w-0 max-w-full gap-2 px-3 font-semibold shadow-sm sm:px-4">
+                  <Button variant="outline" className="h-10 min-w-0 flex-1 gap-2 px-3 font-semibold shadow-sm sm:flex-none sm:px-4">
                     <CalendarRange className="h-4 w-4 shrink-0 text-violet-600" />
                     <span className="truncate">{formatDateLabel(selectedDate)}</span>
                   </Button>
@@ -1214,7 +1238,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-end">
               {/* Filters - visible only for admin/doctor */}
               {(portal === 'admin' || portal === 'doctor') && (
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:flex xl:items-center">
+                <div className="hidden min-w-0 grid-cols-1 gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-3 xl:flex xl:items-center">
                   {portal === 'admin' && (
                     <div className="flex min-w-0 items-center gap-2">
                       <Users className="h-4 w-4 shrink-0 text-gray-400" />
@@ -1267,7 +1291,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               )}
 
               {/* View Mode Buttons and Status Badge - always on right */}
-              <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3" data-tour-id="calendar-view-toggle">
+              <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-end sm:gap-3" data-tour-id="calendar-view-toggle">
                 {!isCompactToolbar && (
                   <div className="flex items-center gap-1 rounded-lg bg-gray-50 p-1">
                     {PRIMARY_VIEW_OPTIONS.map((option) => (
@@ -1283,7 +1307,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   </div>
                 )}
 
-                <Badge variant="secondary" className="flex h-10 min-w-0 items-center gap-2 rounded-lg border-violet-100 bg-violet-50 px-3 font-semibold text-violet-700 sm:px-4">
+                <Badge variant="secondary" className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border-violet-100 bg-violet-50 px-3 font-semibold text-violet-700 sm:flex-none sm:px-4">
                   <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
                   <span className="truncate">{calendarViewStatusLabel}</span>
                 </Badge>
@@ -1295,7 +1319,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuContent align="end" className="max-h-[70vh] w-64 overflow-y-auto">
                       <DropdownMenuLabel>Calendar view</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <DropdownMenuRadioGroup
@@ -1307,11 +1331,81 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             key={option.value}
                             value={option.value}
                             data-tour-id={`calendar-view-${option.value}`}
+                            className={activeRadioItemClass}
                           >
                             {option.statusLabel}
                           </DropdownMenuRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>
+                      {(portal === 'admin' || portal === 'doctor') && (
+                        <DropdownMenuGroup className="sm:hidden">
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="max-w-full truncate text-xs text-gray-500">
+                            Filters: {portal === 'admin' ? `${selectedDoctor === "all" ? "All Doctors" : `Dr. ${selectedDoctor}`} / ` : ""}{selectedTypeLabel} / {selectedStatusLabel}
+                          </DropdownMenuLabel>
+                          {portal === 'admin' && (
+                            <>
+                              <DropdownMenuItem
+                                className={activeMenuItemClass(selectedDoctor === "all")}
+                                onSelect={() => setSelectedDoctor("all")}
+                              >
+                                All Doctors
+                              </DropdownMenuItem>
+                              {doctors.map((doctor) => (
+                                <DropdownMenuItem
+                                  key={doctor.id}
+                                  className={activeMenuItemClass(selectedDoctor === doctor.name)}
+                                  onSelect={() => setSelectedDoctor(doctor.name)}
+                                >
+                                  Dr. {doctor.name}
+                                </DropdownMenuItem>
+                              ))}
+                              <DropdownMenuSeparator />
+                            </>
+                          )}
+                          <DropdownMenuItem
+                            className={activeMenuItemClass(selectedType === "all")}
+                            onSelect={() => setSelectedType("all")}
+                          >
+                            All Types
+                          </DropdownMenuItem>
+                          {APPOINTMENT_TYPES.map((type, index) => (
+                            <DropdownMenuItem
+                              key={type}
+                              className={activeMenuItemClass(selectedType === String(index))}
+                              onSelect={() => setSelectedType(String(index))}
+                            >
+                              Type: {type}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className={activeMenuItemClass(selectedStatus === "my-calendar")}
+                            onSelect={() => setSelectedStatus("my-calendar")}
+                          >
+                            My Calendar
+                          </DropdownMenuItem>
+                          {APPOINTMENT_STATUSES.map((status) => (
+                            <DropdownMenuItem
+                              key={status.key}
+                              className={activeMenuItemClass(selectedStatus === status.value)}
+                              onSelect={() => setSelectedStatus(status.value)}
+                            >
+                              Status: {status.label}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setSelectedDoctor(defaultDoctorFilter || "all");
+                              setSelectedType("all");
+                              setSelectedStatus(defaultStatusFilter ? defaultStatusFilter[0] : "my-calendar");
+                            }}
+                          >
+                            Reset filters
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -1321,17 +1415,40 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         </CardContent>
       </Card>
 
-      <Card className="shadow-xl border-none overflow-hidden bg-white">
-        <CardHeader className="border-b bg-gray-50/50 px-3 py-4 sm:px-6">
+      <Card className="overflow-hidden rounded-2xl border-none bg-white shadow-xl">
+        <CardHeader className="border-b bg-gray-50/50 px-3 py-3 sm:px-6 sm:py-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <CardTitle className="flex items-center gap-2 text-base font-bold sm:text-lg">
-              {viewMode === "day" && <Clock className="h-5 w-5 text-violet-600" />}
-              {viewMode === "week" && <CalendarRange className="h-5 w-5 text-violet-600" />}
-              {viewMode === "month" && <CalendarIcon className="h-5 w-5 text-violet-600" />}
-              {viewMode === "custom" && <Search className="h-5 w-5 text-violet-600" />}
-              {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}
-            </CardTitle>
-            <div className="flex w-full items-center gap-x-3 gap-y-2 overflow-x-auto pb-1 lg:w-auto lg:flex-wrap lg:justify-end lg:overflow-visible lg:pb-0">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <CardTitle className="flex min-w-0 items-center gap-2 truncate text-base font-bold sm:text-lg">
+                {viewMode === "day" && <Clock className="h-5 w-5 shrink-0 text-violet-600" />}
+                {viewMode === "week" && <CalendarRange className="h-5 w-5 shrink-0 text-violet-600" />}
+                {viewMode === "month" && <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />}
+                {viewMode === "custom" && <Search className="h-5 w-5 shrink-0 text-violet-600" />}
+                <span className="truncate">{searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}</span>
+              </CardTitle>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-xl sm:hidden" aria-label="Show status legend">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>Status legend</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {APPOINTMENT_STATUSES.map((status) => {
+                    const bgColor = getStatusSoftBgColorClass(status.bgColor);
+                    const borderColor = getStatusBorderColorClass(status.bgColor);
+                    return (
+                      <DropdownMenuItem key={status.value}>
+                        <span className={`h-3 w-3 rounded-full ${bgColor} border ${borderColor}`} />
+                        {status.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <div className="hidden w-full items-center gap-x-3 gap-y-2 overflow-x-auto pb-1 sm:flex lg:w-auto lg:flex-wrap lg:justify-end lg:overflow-visible lg:pb-0">
               {APPOINTMENT_STATUSES.map((status) => {
                 const bgColor = getStatusSoftBgColorClass(status.bgColor);
                 const borderColor = getStatusBorderColorClass(status.bgColor);

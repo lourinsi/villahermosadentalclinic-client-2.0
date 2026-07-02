@@ -10,7 +10,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
@@ -60,6 +60,16 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
 
 const isTourDemoPatient = (patient: Patient) =>
   String(patient.id || "").toUpperCase().includes("ENT_TEST");
+
+const PATIENT_STATUS_FILTERS = [
+  { value: "all", label: "All Statuses" },
+  { value: "active", label: "Active" },
+  { value: "overdue", label: "Overdue" },
+  { value: "inactive", label: "Inactive" },
+];
+
+const activeDropdownItemClass = (isActive: boolean) =>
+  isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const router = useRouter();
@@ -232,6 +242,76 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     router.push(`${profileBasePath}/${routeSegment}`);
   };
 
+  const renderPatientActions = (patient: Patient, triggerClassName = "h-8 w-8 text-slate-400 hover:text-slate-900") => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions" : undefined}
+          className={triggerClassName}
+        >
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions-menu" : undefined}
+        className="w-48"
+      >
+        <DropdownMenuItem
+          data-tour-id={isTourDemoPatient(patient) ? "patients-demo-view-details" : undefined}
+          className="gap-2"
+          onClick={() => {
+            openPatientProfile(patient);
+          }}
+        >
+          <Eye className="h-4 w-4 text-slate-400" />
+          Patient Profile
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2"
+          onClick={() => {
+            setMessagePatient(patient);
+            setIsMessageModalOpen(true);
+          }}
+        >
+          <Bell className="h-4 w-4 text-slate-400" />
+          Send Message
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2 font-medium text-violet-600 focus:text-violet-700"
+          onClick={() => {
+            setSelectedPatient(patient);
+            setBookingDefaultPatientId(String(patient.id));
+            setNextAvailableDate(undefined);
+            setNextAvailableTime(undefined);
+            if (user?.role === 'doctor') {
+              setNextAvailableDoctor(user?.username || "");
+            } else {
+              setNextAvailableDoctor("");
+            }
+            setSelectedAppointmentToEdit(null);
+            setBookingModalOpen(true);
+          }}
+        >
+          <Calendar className="h-4 w-4" />
+          Schedule Visit
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2 text-red-600 focus:text-red-700"
+          onClick={() => {
+            setPatientToDelete(patient);
+            setIsPatientDeleteDialogOpen(true);
+          }}
+        >
+          <Trash2 className="h-4 w-4" />
+          Remove Patient
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const handleConfirmDeletePatient = async () => {
     if (!patientToDelete?.id) {
       toast.error("Missing patient id");
@@ -301,14 +381,14 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   return (
     <div
       data-tour-id={doctorFilter ? "doctor-patients-page" : "patients-page"}
-      className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8 bg-[#fdfdff] min-h-screen"
+      className="mx-auto min-h-screen max-w-[1600px] space-y-5 bg-[#fdfdff] p-3 sm:space-y-8 md:p-8"
     >
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             {doctorFilter ? "My Patients" : "Patient Directory"}
           </h1>
-          <p className="text-slate-500 text-lg mt-1">
+          <p className="mt-1 text-sm text-slate-500 sm:text-lg">
             {doctorFilter
               ? "Comprehensive list of patients under your care"
               : "Access and manage all patient records and history"}
@@ -319,7 +399,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             variant="brand"
             data-tour-id="patients-new-button"
             onClick={handleAddPatient}
-            className="shadow-sm"
+            className="w-full shadow-sm sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
             New Patient
@@ -331,8 +411,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         {/* Filters and Search - Unified into one row for better desktop UX */}
         <div className="lg:col-span-12">
           <Card className="border-none shadow-sm ring-1 ring-slate-200">
-            <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row items-center gap-4">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <div className="relative flex-1 w-full sm:max-w-md">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                   <Input
@@ -345,7 +425,38 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                     className="pl-10 h-11 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-violet-200 transition-all"
                   />
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 rounded-xl sm:hidden" title="Patient filters">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    {PATIENT_STATUS_FILTERS.map((filter) => (
+                      <DropdownMenuItem
+                        key={filter.value}
+                        className={activeDropdownItemClass(statusFilter === filter.value)}
+                        onSelect={() => {
+                          setStatusFilter(filter.value);
+                          setCurrentPage(1);
+                        }}
+                      >
+                        {filter.label}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setSearchTerm("");
+                        setStatusFilter("all");
+                        setCurrentPage(1);
+                      }}
+                    >
+                      Reset filters
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <div className="hidden items-center gap-2 sm:flex sm:w-auto">
                   <Select
                     value={statusFilter}
                     onValueChange={(value) => {
@@ -357,10 +468,11 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       <SelectValue placeholder="All Statuses" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="overdue">Overdue</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
+                      {PATIENT_STATUS_FILTERS.map((filter) => (
+                        <SelectItem key={filter.value} value={filter.value}>
+                          {filter.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -398,6 +510,58 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             </div>
           ) : (
             <>
+              <div className="grid gap-3 p-3 sm:hidden">
+                {paginatedPatients.map((patient) => (
+                  <div key={patient.id} className="rounded-xl border border-slate-100 bg-white shadow-sm">
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <PatientAvatar
+                            src={patient.profilePicture}
+                            name={patient.name}
+                            dob={patient.dateOfBirth || patient.birthDate || patient.dob || patient.birthday}
+                            className="h-10 w-10 border border-slate-200 shadow-sm"
+                            sizeClass="h-10 w-10"
+                          />
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              className="block max-w-full truncate text-left text-sm font-semibold text-slate-900"
+                              onClick={() => openPatientProfile(patient)}
+                            >
+                              {patient.name}
+                            </button>
+                            {effectiveRole !== "receptionist" && (
+                              <p className="mt-1 truncate text-xs text-slate-500">ID: {patient.id?.slice(-8).toUpperCase()}</p>
+                            )}
+                          </div>
+                        </div>
+                        {renderPatientActions(patient, "h-9 w-9 shrink-0 rounded-xl text-slate-500 hover:text-slate-900")}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
+                        <Badge variant="outline" className={(patient.balance ?? 0) > 0 ? "border-red-100 bg-red-50 text-red-600" : "border-emerald-100 bg-emerald-50 text-emerald-700"}>
+                          ₱{(patient.balance ?? 0).toLocaleString()}
+                        </Badge>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span className="truncate">{patient.phone || "No phone"}</span>
+                        </div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Calendar className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                          <span className="truncate">{patient.nextAppointment || "No appointments"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden sm:block">
               <Table>
                 <TableHeader className="bg-slate-50/50">
                   <TableRow className="hover:bg-transparent border-slate-100">
@@ -488,82 +652,17 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                         </div>
                       </TableCell>
                       <TableCell className="text-right pr-6">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions" : undefined}
-                              className="h-8 w-8 text-slate-400 hover:text-slate-900"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="end"
-                            data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions-menu" : undefined}
-                            className="w-48"
-                          >
-                            <DropdownMenuItem
-                              data-tour-id={isTourDemoPatient(patient) ? "patients-demo-view-details" : undefined}
-                              className="gap-2"
-                              onClick={() => {
-                                openPatientProfile(patient);
-                              }}
-                            >
-                              <Eye className="h-4 w-4 text-slate-400" />
-                              Patient Profile
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="gap-2"
-                              onClick={() => {
-                                setMessagePatient(patient);
-                                setIsMessageModalOpen(true);
-                              }}
-                            >
-                              <Bell className="h-4 w-4 text-slate-400" />
-                              Send Message
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="gap-2 font-medium text-violet-600 focus:text-violet-700"
-                              onClick={() => {
-                                setSelectedPatient(patient);
-                                setBookingDefaultPatientId(String(patient.id));
-                                setNextAvailableDate(undefined);
-                                setNextAvailableTime(undefined);
-                                if (user?.role === 'doctor') {
-                                  setNextAvailableDoctor(user?.username || "");
-                                } else {
-                                  setNextAvailableDoctor("");
-                                }
-                                setSelectedAppointmentToEdit(null);
-                                setBookingModalOpen(true);
-                              }}
-                            >
-                              <Calendar className="h-4 w-4" />
-                              Schedule Visit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="gap-2 text-red-600 focus:text-red-700"
-                              onClick={() => {
-                                setPatientToDelete(patient);
-                                setIsPatientDeleteDialogOpen(true);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Remove Patient
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {renderPatientActions(patient)}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              </div>
 
             {/* Pagination */}
-              <div className="flex items-center justify-between mt-4 pt-4 border-t">
-              <p className="text-sm text-muted-foreground">
+              <div className="flex flex-col gap-3 border-t p-3 sm:mt-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+              <p className="text-xs text-muted-foreground sm:text-sm">
                 Page {currentPage} of {totalPages || 1} | Showing {paginatedPatients.length} of {totalFiltered} patients
               </p>
               <div className="flex space-x-2">
