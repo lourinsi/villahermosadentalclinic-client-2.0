@@ -2,6 +2,7 @@
 
 import React from "react";
 import { AdminLayoutShell, type AdminLayoutTheme } from "./AdminLayout";
+import { PatientProfileDraftRedirect } from "./PatientProfileDraftRedirect";
 
 export const receptionistLayoutTheme: AdminLayoutTheme = {
   sidebar: "w-64 bg-teal-900 text-white flex-shrink-0 flex flex-col",
@@ -16,6 +17,7 @@ export const receptionistLayoutTheme: AdminLayoutTheme = {
 
 const ReceptionistLayout = ({ children }: { children: React.ReactNode }) => (
   <AdminLayoutShell portalTitle="Receptionist" theme={receptionistLayoutTheme}>
+    <PatientProfileDraftRedirect />
     {children}
   </AdminLayoutShell>
 );

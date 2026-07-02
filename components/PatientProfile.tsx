@@ -52,7 +52,7 @@ import {
   UserPlus,
   Search,
   ClipboardList,
-  Save
+  ArrowLeft
 } from "lucide-react";
 
 import {
@@ -83,6 +83,12 @@ import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import {
   buildPatientAppointmentSummary,
 } from "@/lib/patient-aggregates";
+import {
+  clearPatientProfileDraft,
+  readPatientProfileDraft,
+  writePatientProfileDraft,
+} from "@/lib/patient-profile-draft";
+import PatientUnsavedChangesDialog from "./PatientUnsavedChangesDialog";
 
 export interface Patient {
   id?: string;
@@ -172,6 +178,7 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
 
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
+  discardDraft: () => void;
   changedFields: Record<string, { old: any; new: any }>;
 };
 
@@ -184,6 +191,7 @@ interface PatientProfileProps {
   doctorFilter?: string;
   openBookingAppointmentId?: string | null;
   onOpenBookingModal?: (appointment: Appointment) => void;
+  onBackToPatients?: () => void;
 }
 
 export function PatientProfile({
@@ -195,6 +203,7 @@ export function PatientProfile({
   doctorFilter,
   openBookingAppointmentId,
   onOpenBookingModal,
+  onBackToPatients,
 }: PatientProfileProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
   const [serverPatient, setServerPatient] = useState<Patient | null>(null);
@@ -383,23 +392,23 @@ export function PatientProfile({
     <div
       data-tour-id="patient-profile-page"
         title={`Patient Details - ${patientDisplayName}`}
-      className="flex min-h-screen flex-col gap-0 bg-[#fdfdff]"
+      className="flex min-h-screen flex-col gap-0 bg-slate-50"
       >
-        <header className="shrink-0 border-b border-slate-200 bg-white px-5 py-5 text-left sm:px-7 lg:px-8 lg:py-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 items-center gap-4 sm:gap-6">
+        <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 text-left shadow-sm sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               <div className="relative group">
-                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-16 w-16 shrink-0 border-2 border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-20 sm:w-20" sizeClass="h-16 w-16 sm:h-20 sm:w-20 rounded-md" />
-                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
+                <PatientAvatar src={resolveImageSource(patient?.profilePicture)} name={patientDisplayName} dob={patient?.dateOfBirth || patient?.dob || patient?.birthday} className="h-14 w-14 shrink-0 rounded-lg border border-violet-100 bg-white shadow-sm ring-4 ring-slate-50 transition-all group-hover:ring-violet-50 sm:h-16 sm:w-16" sizeClass="h-14 w-14 sm:h-16 sm:w-16 rounded-lg" />
+                <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-white shadow-sm sm:h-5 sm:w-5 ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
-              <div className="min-w-0 space-y-1.5">
+              <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-3">
-                  <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                  <h1 className="text-2xl font-extrabold leading-tight text-slate-900">
                     {patientDisplayName}
                   </h1>
                   {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
                     <span className="flex min-w-0 max-w-full items-center gap-2 transition-colors hover:text-violet-600">
                       <Mail className="h-4 w-4 text-slate-400" />
@@ -417,10 +426,23 @@ export function PatientProfile({
             </div>
             <div className="flex flex-wrap items-center gap-3 lg:justify-end">
               {isModified ? (
-                <div className="mr-2 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-100/50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber-700 shadow-sm animate-pulse">
+                <div className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 shadow-sm">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  Unsaved Changes
+                  Unsaved changes
                 </div>
+              ) : null}
+              {onBackToPatients ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onBackToPatients}
+                  disabled={isHeaderSaving}
+                  className="h-10 border-slate-200 px-5 font-bold text-slate-700 shadow-sm transition-all hover:bg-slate-50 active:scale-95"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to Patients
+                </Button>
               ) : null}
               <Button
                 type="button"
@@ -428,7 +450,7 @@ export function PatientProfile({
                 size="sm"
                 onClick={() => patient && onDeletePatient(patient)}
                 disabled={!patient || isHeaderSaving}
-                className="h-11 border-red-100 px-5 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm transition-all active:scale-95"
+                className="h-10 border-red-100 px-5 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm transition-all active:scale-95"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
@@ -439,7 +461,7 @@ export function PatientProfile({
                 size="sm"
                 onClick={handleSave}
                 disabled={!patient || !isModified || isHeaderSaving}
-                className="h-11 px-7 shadow-lg shadow-violet-100 transition-all active:scale-95 disabled:shadow-none font-bold"
+                className="h-10 px-7 shadow-lg shadow-violet-100 transition-all active:scale-95 disabled:shadow-none font-bold"
               >
                 {isHeaderSaving ? (
                   <Clock className="mr-2 h-4 w-4 animate-spin" />
@@ -455,29 +477,49 @@ export function PatientProfile({
         {patient ? (
           <div className="flex flex-1 flex-col">
             {/* Quick Summary Bar - High Visibility Redesign */}
-            <div data-tour-id="patient-details-summary" className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-7 lg:px-8">
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
-                  <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
+            <div data-tour-id="patient-details-summary" className="border-b border-slate-100 bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+              <div className="mx-auto grid w-full max-w-[1920px] gap-4 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                    <CheckCircle className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
+                    <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
-                  <span className={`truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                    PHP {Number(displayedBalance || 0).toLocaleString()}
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                    <CreditCard className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
+                    <span className={`block truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
+                      PHP {Number(displayedBalance || 0).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
-                  <span className="truncate text-base font-extrabold leading-tight text-slate-700">
-                    {formatPatientLogDate((serverPatient?.createdAt || patient.createdAt) as string | undefined)}
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                    <Calendar className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
+                    <span className="block truncate text-base font-extrabold leading-tight text-slate-700">
+                      {formatPatientLogDate((serverPatient?.createdAt || patient.createdAt) as string | undefined)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Record Reference</span>
-                  <span className="truncate font-mono text-[11px] font-bold uppercase tracking-tight text-slate-400">
-                    {patient.id}
-                  </span>
+                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                    <FileText className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Record Reference</span>
+                    <span className="block truncate font-mono text-[11px] font-bold uppercase tracking-tight text-slate-500">
+                      {patient.id}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -905,6 +947,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
   const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
   const [isSavingQuestionnaire, setIsSavingQuestionnaire] = useState(false);
+  const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
+  const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
+  const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
+  const [isRecoveryDialogOpen, setIsRecoveryDialogOpen] = useState(false);
+  const [isRecoverySaving, setIsRecoverySaving] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
@@ -912,6 +959,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
   const patientPhotoInputId = React.useId();
   const patientDisplayName = [formData.firstName, formData.lastName].filter(Boolean).join(" ") || patient.name || "Patient";
+  const currentPatientId = patient.id ? String(patient.id) : "";
   const rawPatientIdForBooking = patient.id || loadedPatient.id;
   const patientIdForBooking = rawPatientIdForBooking ? String(rawPatientIdForBooking) : undefined;
   useEffect(() => {
@@ -969,6 +1017,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);
+      setQuestionnaireLoadedPatientId(String(patient.id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
     } finally {
@@ -978,9 +1027,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   useEffect(() => {
     if (activeTab === "questionnaire") {
+      if (hasRestoredQuestionnaireDraft && questionnaireQuestions.length > 0) return;
+      if (questionnaireLoadedPatientId === String(patient.id || "")) return;
       loadQuestionnaireTab();
     }
-  }, [activeTab, loadQuestionnaireTab]);
+  }, [activeTab, hasRestoredQuestionnaireDraft, loadQuestionnaireTab, patient.id, questionnaireLoadedPatientId, questionnaireQuestions.length]);
 
   const questionnaireHasChanges = React.useMemo(
     () => JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers),
@@ -992,10 +1043,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ...current,
       [questionId]: checked,
     }));
+    setIsModified(true);
   };
 
-  const handleSaveQuestionnaireAnswers = async () => {
-    if (!patient.id) return;
+  const saveQuestionnaireAnswers = async () => {
+    if (!patient.id || !questionnaireHasChanges) return true;
 
     setIsSavingQuestionnaire(true);
     try {
@@ -1021,9 +1073,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
-      toast.success("Questionnaire saved");
+      setHasRestoredQuestionnaireDraft(false);
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save questionnaire answers");
+      return false;
     } finally {
       setIsSavingQuestionnaire(false);
     }
@@ -1283,13 +1337,25 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       emergencyPhone: 'Emergency Phone',
       notes: 'Notes',
       profilePicture: 'Patient Photo',
+      dentalCharts: 'Dental Chart',
+    };
+
+    const toComparableValue = (value: any) => {
+      if (value === undefined || value === null) return "";
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
     };
 
     // Compare against the originally loaded data (from server), not the initial prop
     Object.keys(fieldLabels).forEach((key) => {
       const orig = originalLoadedData[key as keyof typeof originalLoadedData];
       const current = formData[key as keyof typeof formData];
-      if (String(orig) !== String(current)) {
+      if (toComparableValue(orig) !== toComparableValue(current)) {
         changes[fieldLabels[key]] = {
           old: orig,
           new: current,
@@ -1297,8 +1363,45 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
+    const knownQuestionIds = new Set(questionnaireQuestions.map((question) => question.id));
+    questionnaireQuestions.forEach((question) => {
+      const oldValue = Boolean(savedQuestionnaireAnswers[question.id]);
+      const newValue = Boolean(questionnaireAnswers[question.id]);
+      if (oldValue !== newValue) {
+        changes[`Questionnaire - ${question.text}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
+    Object.keys(questionnaireAnswers).forEach((questionId) => {
+      if (knownQuestionIds.has(questionId)) return;
+
+      const oldValue = Boolean(savedQuestionnaireAnswers[questionId]);
+      const newValue = Boolean(questionnaireAnswers[questionId]);
+      if (oldValue !== newValue) {
+        changes[`Questionnaire - ${questionId}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
     return changes;
-  }, [formData, originalLoadedData]);
+  }, [formData, originalLoadedData, questionnaireAnswers, questionnaireQuestions, savedQuestionnaireAnswers]);
+
+  const hasTrackedChanges = React.useMemo(() => Object.keys(changedFields).length > 0, [changedFields]);
+
+  const discardStoredDraft = React.useCallback(() => {
+    if (currentPatientId) clearPatientProfileDraft(currentPatientId);
+    setHasRestoredQuestionnaireDraft(false);
+    setIsRecoveryDialogOpen(false);
+  }, [currentPatientId]);
+
+  useEffect(() => {
+    setIsModified(hasTrackedChanges);
+  }, [hasTrackedChanges, setIsModified]);
 
   // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
   const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
@@ -1707,25 +1810,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
+    discardDraft: discardStoredDraft,
     changedFields,
   }));
 
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isModified) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
+    const incomingPatientId = patient.id ? String(patient.id) : "";
+    const currentLoadedPatientId = loadedPatient.id ? String(loadedPatient.id) : "";
+    if (incomingPatientId && incomingPatientId === currentLoadedPatientId && hasTrackedChanges) {
+      setLoadedPatient(patient);
+      return;
+    }
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isModified]);
-
-  useEffect(() => {
     const loadedData = {
       firstName: patient.firstName || patient.name?.split(' ')[0] || '',
       lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -1754,7 +1850,71 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setLoadedPatient(patient);
     setFormData(loadedData);
     setOriginalLoadedData(loadedData);
-  }, [patient]);
+    setQuestionnaireLoadedPatientId(null);
+  }, [loadedPatient.id, patient]);
+
+  useEffect(() => {
+    if (!currentPatientId || draftCheckPatientId === currentPatientId) return;
+
+    const draft = readPatientProfileDraft();
+    if (draft?.patientId === currentPatientId) {
+      setFormData((current) => ({
+        ...current,
+        ...draft.formData,
+      }));
+      setOriginalLoadedData((current) => ({
+        ...current,
+        ...draft.originalLoadedData,
+      }));
+      setQuestionnaireAnswers(draft.questionnaireAnswers || {});
+      setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
+      setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
+      setQuestionnaireQuestions(draft.questionnaireQuestions || []);
+      setQuestionnaireLoadedPatientId(currentPatientId);
+      setActiveTab(draft.activeTab || "info");
+      setHasRestoredQuestionnaireDraft((draft.questionnaireQuestions || []).length > 0);
+      setIsRecoveryDialogOpen(true);
+      setIsModified(true);
+    }
+
+    setDraftCheckPatientId(currentPatientId);
+  }, [currentPatientId, draftCheckPatientId, setIsModified]);
+
+  useEffect(() => {
+    if (!currentPatientId || draftCheckPatientId !== currentPatientId) return;
+
+    if (!hasTrackedChanges) {
+      clearPatientProfileDraft(currentPatientId);
+      return;
+    }
+
+    writePatientProfileDraft({
+      version: 1,
+      patientId: currentPatientId,
+      patientName: patientDisplayName,
+      path: typeof window === "undefined" ? `/receptionist/patients/${encodeURIComponent(patientDisplayName)}` : window.location.pathname,
+      updatedAt: new Date().toISOString(),
+      activeTab,
+      formData,
+      originalLoadedData,
+      questionnaireAnswers,
+      savedQuestionnaireAnswers,
+      patientQuestionnaireData,
+      questionnaireQuestions,
+    });
+  }, [
+    activeTab,
+    currentPatientId,
+    draftCheckPatientId,
+    formData,
+    hasTrackedChanges,
+    originalLoadedData,
+    patientDisplayName,
+    patientQuestionnaireData,
+    questionnaireAnswers,
+    questionnaireQuestions,
+    savedQuestionnaireAnswers,
+  ]);
 
   useEffect(() => {
     if (!shouldLoadHistoryData) return;
@@ -2063,11 +2223,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
 
       if (result?.success) {
+        setOriginalLoadedData(formData);
+
+        const questionnaireSaved = await saveQuestionnaireAnswers();
+        if (!questionnaireSaved) {
+          refreshPatients();
+          return false;
+        }
+
         toast.success("Patient updated successfully");
         refreshPatients();
+        discardStoredDraft();
         setIsModified(false);
-        // Update original data to current form data so no changes show until next edit
-        setOriginalLoadedData(formData);
         return true; // Indicate success
       }
 
@@ -2180,17 +2347,35 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
-  const textareaClass = "mt-1.5 min-h-24 border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200";
-  const cardClass = "border-none bg-white shadow-sm ring-1 ring-slate-200";
-  const cardHeaderClass = "border-b border-slate-100 bg-white px-4 py-4 sm:px-5";
-  const cardContentClass = "space-y-6 p-4 sm:p-5";
+  const handleSaveRecoveredDraft = async () => {
+    setIsRecoverySaving(true);
+    try {
+      const saved = await handleUpdatePatient();
+      if (saved) setIsRecoveryDialogOpen(false);
+    } finally {
+      setIsRecoverySaving(false);
+    }
+  };
+
+  const handleDiscardRecoveredDraft = () => {
+    discardStoredDraft();
+    setFormData(originalLoadedData);
+    setQuestionnaireAnswers(savedQuestionnaireAnswers);
+    setIsModified(false);
+  };
+
+  const textareaClass = "mt-1.5 min-h-24 rounded-lg border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200";
+  const cardClass = "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm";
+  const cardHeaderClass = "border-b border-slate-100 bg-white px-5 py-5 sm:px-6";
+  const cardContentClass = "space-y-6 p-5 sm:p-6";
   return (
-    <div className="flex-1 overflow-hidden bg-slate-50/50">
+    <div className="flex-1 overflow-hidden bg-slate-50">
       <div className="h-full flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
-          <div className="shrink-0 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
-            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-2 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
+          <div className="shrink-0 bg-slate-50 px-4 pb-4 pt-5 sm:px-6 lg:px-8">
+            <div className="mx-auto w-full max-w-[1920px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-0 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
               {[
                 { value: "info", label: "Personal Info", icon: UserIcon },
                 { value: "family", label: "Family & Relations", icon: Users },
@@ -2204,7 +2389,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   key={tab.value}
                   value={tab.value}
                   data-tour-id={`patient-details-${tab.value}-tab`}
-                  className="group relative h-14 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 hover:text-slate-800 sm:px-4"
+                  className="group relative h-14 min-w-[165px] flex-1 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-violet-50/30 data-[state=active]:text-violet-600 hover:bg-slate-50 hover:text-slate-800 sm:px-4"
                 >
                   <div className="flex items-center gap-2">
                     <tab.icon className="h-4 w-4" />
@@ -2213,9 +2398,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 </TabsTrigger>
               ))}
             </TabsList>
+            </div>
           </div>
 
-          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">
+          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-8 sm:px-6 lg:px-8">
             <TabsContent value="info" data-tour-id="patient-details-info-content" className="mt-0 outline-none">
                 <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
                 {/* Left Column: Profile Insight Card */}
@@ -2260,7 +2446,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         >
                           <Label htmlFor={patientPhotoInputId} className="cursor-pointer">
                             <Upload className="mr-2 h-4 w-4" />
-                            Upload
+                            Upload / Edit Photo
                           </Label>
                         </Button>
                         {formData.profilePicture && (
@@ -2477,7 +2663,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-2 rounded-full bg-red-600 shadow-lg shadow-red-200" />
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Emergency Protocol</h2>
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Emergency Contact</h2>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Crisis Contact Information</p>
                       </div>
                     </div>
@@ -2506,7 +2692,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-2 rounded-full bg-slate-400 shadow-lg shadow-slate-100" />
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Internal Repository</h2>
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Internal Notes</h2>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Supplemental Administrative Notes</p>
                       </div>
                     </div>
@@ -2523,7 +2709,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
             {/* Family & Relations Tab */}
             <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
-              <div className="mx-auto max-w-[1180px] space-y-8 py-2 sm:py-4">
+              <div className="mx-auto w-full max-w-[1680px] space-y-8 py-2 sm:py-4">
                 <div className="flex flex-col items-start justify-between gap-4 overflow-hidden rounded-lg bg-violet-600 p-5 text-white shadow-xl shadow-violet-100 sm:p-7 md:flex-row md:items-center">
                   <div className="relative z-10">
                     <h2 className="text-2xl font-black tracking-tight">Family Network</h2>
@@ -2636,7 +2822,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               </div>
             </TabsContent>
 
-        <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto max-w-[1180px] space-y-4">
+        <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader className={cardHeaderClass}>
               <CardTitle className="text-base font-semibold text-slate-900">Dental Records & Treatment Notes</CardTitle>
@@ -2662,42 +2848,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto max-w-[1180px] space-y-4">
+        <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
-            <CardHeader className={`${cardHeaderClass} flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
-              <div>
-                <CardTitle className="text-base font-semibold text-slate-900">Questionnaire</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Saved questionnaire items from the management questionnaire page.</p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={loadQuestionnaireTab}
-                  disabled={isLoadingQuestionnaire}
-                >
-                  Refresh
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSaveQuestionnaireAnswers}
-                  disabled={isLoadingQuestionnaire || isSavingQuestionnaire || !questionnaireHasChanges}
-                  className="gap-2"
-                >
-                  <Save className="h-4 w-4" />
-                  {isSavingQuestionnaire ? "Saving..." : "Save"}
-                </Button>
+            <CardHeader className={cardHeaderClass}>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
+                  <ClipboardList className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <CardTitle className="text-base font-bold text-slate-900">Questionnaire</CardTitle>
+                  <p className="mt-1 text-sm font-medium text-slate-500">Patient questionnaire responses</p>
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="p-4 sm:p-5">
+            <CardContent className="p-5 sm:p-6">
               {isLoadingQuestionnaire ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
                   Loading questionnaire...
                 </div>
               ) : questionnaireQuestions.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
                   No questionnaire questions have been saved yet.
                 </div>
               ) : (
@@ -2706,14 +2876,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <label
                       key={question.id}
                       htmlFor={`patient-questionnaire-${question.id}`}
-                      className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:bg-slate-50"
+                      className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
                     >
                       <Checkbox
                         id={`patient-questionnaire-${question.id}`}
                         checked={Boolean(questionnaireAnswers[question.id])}
                         onCheckedChange={(checked) => handleQuestionnaireAnswerChange(question.id, checked === true)}
                         disabled={isSavingQuestionnaire}
-                        className="mt-0.5"
+                        className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
                       />
                       <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
                     </label>
@@ -2724,7 +2894,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <DentalChart
             records={formData.dentalCharts}
             onSaveRecords={(updatedRecords) => {
@@ -2735,7 +2905,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           />
         </TabsContent>
 
-        <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -2997,7 +3167,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -3220,6 +3390,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
           </div>
       </Tabs>
+      <PatientUnsavedChangesDialog
+        open={isRecoveryDialogOpen}
+        onOpenChange={setIsRecoveryDialogOpen}
+        title="Recovered Unsaved Changes"
+        description="The previous session ended before these changes were saved. Your changes are still here; save them now or keep editing."
+        changes={changedFields}
+        primaryLabel={isRecoverySaving ? "Saving..." : "Save Changes"}
+        secondaryLabel="Discard Draft"
+        cancelLabel="Keep Editing"
+        onPrimary={handleSaveRecoveredDraft}
+        onSecondary={handleDiscardRecoveredDraft}
+        loading={isRecoverySaving}
+      />
       {/* Record Payment Dialog is now a separate component */}
       <ConfirmDialog
         open={pdIsConfirmOpen}
