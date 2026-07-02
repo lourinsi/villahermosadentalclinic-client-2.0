@@ -14,9 +14,12 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { formatWordyDate } from "@/lib/utils";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingDateKey,
+  formatBookingPaymentAdjustmentAmountLabel,
+  getBookingPaymentAdjustment,
   getBookingTreatmentNotesValue,
   normalizeBookingHistoryStatus,
 } from "./sharedBookingLogic";
@@ -144,7 +147,7 @@ const shortScheduleLabel = (snapshot: any) => {
   const time = snapshot?.time;
   const duration = snapshot?.duration;
   try {
-    const dateLabel = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dateLabel = formatWordyDate(date, { fallback: String(date || "") });
     const timeLabel = formatAppointmentTimeRange(time, duration);
     return `${dateLabel} ${timeLabel}`;
   } catch (e) {
@@ -514,22 +517,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   if (!displayedSnapshot) return null;
 
-  const appointmentDate = new Date(displayedSnapshot.date);
-  const formattedDate = Number.isNaN(appointmentDate.getTime()) ? String(displayedSnapshot.date || "No date") : appointmentDate.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+  const formattedDate = formatWordyDate(displayedSnapshot.date, {
+    fallback: String(displayedSnapshot.date || "No date"),
   });
 
   const resolvedLogDate = logDate || displayedSnapshot.changedAt || displayedSnapshot.updatedAt || displayedSnapshot.createdAt || new Date().toISOString();
   const isDateOnlyLog = typeof resolvedLogDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(resolvedLogDate);
-  const parsedLogDate = new Date(isDateOnlyLog ? `${resolvedLogDate}T00:00:00` : resolvedLogDate);
-  const snapshotDate = Number.isNaN(parsedLogDate.getTime())
-    ? String(resolvedLogDate)
-    : isDateOnlyLog
-      ? parsedLogDate.toLocaleDateString()
-      : parsedLogDate.toLocaleString();
+  const snapshotDate = formatWordyDate(resolvedLogDate, {
+    fallback: String(resolvedLogDate),
+    includeTime: !isDateOnlyLog,
+  });
   const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
   const patientName = getAppointmentPatientDisplayName(displayedSnapshot, patientRecord);
   const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
@@ -618,8 +615,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const displayedStatusColors = getDefaultAppointmentStatusColors(nextStatus || displayedSnapshot?.status);
   const displayedPaymentStatusColors = getDefaultPaymentStatusColors(nextPaymentStatus || displayedSnapshot?.paymentStatus);
 
-  const prevScheduleLabel = prevState ? `${new Date(prevState.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
-  const nextScheduleLabel = nextState ? `${new Date(nextState.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
+  const prevScheduleLabel = prevState ? `${formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
+  const nextScheduleLabel = nextState ? `${formatWordyDate(nextState.date, { fallback: String(nextState.date || "No date") })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
   const changedByName = displayedSnapshot.changedByName || appointmentSnapshot?.changedByName;
   const isPastSnapshot = snapshotState === "historical";
   // Consider the snapshot to be a "log view" only when it's actually historical.
@@ -630,6 +627,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const openedFromLog = isPastSnapshot;
 
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
+  const paymentAdjustment = getBookingPaymentAdjustment(displayedSnapshot);
+  const isPaymentAdjustmentSnapshot = paymentAdjustment.isAdjustment;
 
   // Detect payment logs: explicit payment markers, log/change type that mentions "payment",
   // or transaction identifiers produced by the seeder like `SEED-PAY-0003`.
@@ -647,21 +646,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     (displayedSnapshot?.logType && String(displayedSnapshot.logType).toLowerCase().includes("payment")) ||
     (displayedSnapshot?.changeType && String(displayedSnapshot.changeType).toLowerCase().includes("payment")) ||
     (explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0) ||
+    isPaymentAdjustmentSnapshot ||
     isSeedPaymentId
   );
   const paidInSnapshotAmount = explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
     ? explicitSnapshotPaymentAmount
     : 0;
-  const hasPaidInSnapshot = isPaymentLogSnapshot && paidInSnapshotAmount > 0;
+  const hasPaidInSnapshot = !isPaymentAdjustmentSnapshot && isPaymentLogSnapshot && paidInSnapshotAmount > 0;
   const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
-  const shouldShowLatestPayment = !hasPaidInSnapshot && latestPaymentAmount > 0;
-  const shouldShowPaymentLine = hasPaidInSnapshot || shouldShowLatestPayment;
-  const snapshotPaymentLabel = hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+  const shouldShowLatestPayment = !isPaymentAdjustmentSnapshot && !hasPaidInSnapshot && latestPaymentAmount > 0;
+  const shouldShowPaymentLine = isPaymentAdjustmentSnapshot || hasPaidInSnapshot || shouldShowLatestPayment;
+  const snapshotPaymentLabel = isPaymentAdjustmentSnapshot
+    ? paymentAdjustment.delta < 0
+      ? "Payment Reduced"
+      : "Payment Adjusted"
+    : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
       ? latestPaymentAmount
       : 0;
+  const snapshotPaymentAmountLabel = isPaymentAdjustmentSnapshot
+    ? formatBookingPaymentAdjustmentAmountLabel(displayedSnapshot)
+    : `\u20b1${snapshotPaymentAmount.toLocaleString()}`;
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
   const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
@@ -678,15 +685,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const numeric = parseCurrencyNumber(value);
     return numeric === null ? normalizeComparableText(value) : String(numeric);
   };
-  const formatLongDate = (value: unknown) => {
-    const date = new Date(String(value || ""));
-    return Number.isNaN(date.getTime()) ? formatChangeValue(value || "No date") : date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+  const formatLongDate = (value: unknown) =>
+    formatWordyDate(String(value || ""), {
+      fallback: formatChangeValue(value || "No date"),
     });
-  };
   const paidInSnapshotPaymentDateRaw =
     displayedSnapshot?.paymentDate ||
     displayedSnapshot?.newState?.paymentDate ||
@@ -1274,7 +1276,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               </div>
               {prevState && nextState && prevState.date !== nextState.date && isValidDateValue(prevState.date) ? (
                 <p className="text-[9px] font-bold text-blue-400/80 mt-0.5 flex items-center gap-1">
-                  <History className="w-2 h-2" /> {new Date(prevState.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  <History className="w-2 h-2" /> {formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })}
                 </p>
               ) : null}
             </div>
@@ -1338,7 +1340,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               {shouldShowPaymentLine && (
                 <div className="flex justify-between items-center py-0.5 border-t border-slate-50 pt-1.5">
                   <span className="text-emerald-500/80 font-black text-[9px] uppercase tracking-wider">{snapshotPaymentLabel}</span>
-                  <span className="font-black text-emerald-600 text-[12px]">₱{snapshotPaymentAmount.toLocaleString()}</span>
+                  <span className="font-black text-emerald-600 text-[12px]">{snapshotPaymentAmountLabel}</span>
                 </div>
               )}
               {shouldShowPaymentLine && snapshotPaymentDateLabel ? (

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAppointmentTypeOptions, type AppointmentTypeForm } from "@/hooks/useAppointmentTypeOptions";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
@@ -14,9 +15,25 @@ import { Check, Loader2, Plus, RefreshCw, Save, Search, Stethoscope } from "luci
 
 const emptyForm: AppointmentTypeForm = {
   label: "",
+  icon: "🦷",
   price: 0,
   duration: 30,
 };
+
+const SERVICE_ICON_OPTIONS = [
+  { value: "🦷", label: "Tooth" },
+  { value: "✨", label: "Cleaning" },
+  { value: "🔍", label: "Checkup" },
+  { value: "🔬", label: "Root Canal" },
+  { value: "💎", label: "Whitening" },
+  { value: "👑", label: "Crown" },
+  { value: "😁", label: "Braces" },
+  { value: "➕", label: "Other" },
+  { value: "🪥", label: "Brush" },
+  { value: "🩺", label: "Consult" },
+  { value: "💊", label: "Medication" },
+  { value: "🛡️", label: "Preventive" },
+];
 
 const formatCurrency = (amount?: number) =>
   new Intl.NumberFormat("en-PH", {
@@ -59,6 +76,7 @@ export function ServicesView() {
     const draft = getDraft(service);
     return (
       draft.label !== service.label ||
+      String(draft.icon || "") !== String(service.icon || "") ||
       Number(draft.price || 0) !== Number(service.price || 0) ||
       Number(draft.duration || 0) !== Number(service.duration || 0)
     );
@@ -101,6 +119,7 @@ export function ServicesView() {
     try {
       await createService({
         label: newService.label.trim(),
+        icon: newService.icon || "🦷",
         price: Math.max(0, toNumber(newService.price)),
         duration: Math.max(1, Math.round(toNumber(newService.duration))),
       });
@@ -136,7 +155,7 @@ export function ServicesView() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(160px,0.5fr)_minmax(160px,0.5fr)_auto] md:items-end">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(120px,0.35fr)_minmax(160px,0.5fr)_minmax(160px,0.5fr)_auto] md:items-end">
             <div className="space-y-2">
               <Label htmlFor="new-service-name">Treatment Name</Label>
               <Input
@@ -145,6 +164,25 @@ export function ServicesView() {
                 onChange={(event) => setNewService((current) => ({ ...current, label: event.target.value }))}
                 placeholder="e.g. Dental Implant"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-service-icon">Icon</Label>
+              <Select
+                value={newService.icon || "🦷"}
+                onValueChange={(value) => setNewService((current) => ({ ...current, icon: value }))}
+              >
+                <SelectTrigger id="new-service-icon" className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SERVICE_ICON_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="mr-2 text-base">{option.value}</span>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-service-price">Price</Label>
@@ -196,6 +234,7 @@ export function ServicesView() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Service</TableHead>
+                  <TableHead className="w-[140px]">Icon</TableHead>
                   <TableHead className="w-[180px]">Default Price</TableHead>
                   <TableHead className="w-[160px]">Duration</TableHead>
                   <TableHead className="w-[120px]">Status</TableHead>
@@ -205,7 +244,7 @@ export function ServicesView() {
               <TableBody>
                 {visibleOptions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                       No services found.
                     </TableCell>
                   </TableRow>
@@ -222,6 +261,24 @@ export function ServicesView() {
                           disabled={service.label === "Other"}
                           className="font-semibold"
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={draft.icon || "🦷"}
+                          onValueChange={(value) => updateDraft(service, { icon: value })}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SERVICE_ICON_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                <span className="mr-2 text-base">{option.value}</span>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <Input

@@ -1,6 +1,8 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
 import React, { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,8 +24,11 @@ import {
 } from "lucide-react";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { getAuthHeaders } from "@/lib/auth-headers";
+import { useAuth } from "@/hooks/useAuth";
 
 export function SettingsView() {
+  const { user } = useAuth();
   const [clinicName, setClinicName] = useState("Villahermosa Dental Clinic");
   const [email, setEmail] = useState("info@villahermosadental.com");
   const [phone, setPhone] = useState("+1 (555) 123-4567");
@@ -38,6 +43,10 @@ export function SettingsView() {
   // Profile image upload state
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -64,6 +73,47 @@ export function SettingsView() {
     }
     setProfileImage(null);
     setProfileFile(null);
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const response = await fetch(apiUrl("/api/auth/change-password"), {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to change password");
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password changed successfully");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to change password");
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   return (
@@ -300,19 +350,42 @@ export function SettingsView() {
               <CardTitle>Password & Security</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
+                Signed in as {user?.role === "receptionist" ? "Receptionist" : "Admin"}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="current-password">Current Password</Label>
-                <Input id="current-password" type="password" />
+                <Input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
-                <Input id="new-password" type="password" />
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm Password</Label>
-                <Input id="confirm-password" type="password" />
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
               </div>
-              <Button variant="outline">Change Password</Button>
+              <Button variant="outline" onClick={handleChangePassword} disabled={isChangingPassword}>
+                {isChangingPassword ? "Changing..." : "Change Password"}
+              </Button>
             </CardContent>
           </Card>
 

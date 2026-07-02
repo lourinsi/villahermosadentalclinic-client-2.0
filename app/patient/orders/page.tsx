@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Calendar, Clock, Briefcase, CreditCard, CheckCircle2, Search, X, ArrowUpDown } from "lucide-react";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { parseBackendDateToLocal } from "@/lib/utils";
+import { formatWordyDate, parseBackendDateToLocal } from "@/lib/utils";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
@@ -367,10 +367,10 @@ const OrdersContent = () => {
                                     {dateRange?.from ? (
                                         dateRange.to ? (
                                             <>
-                                                {dateRange.from.toLocaleDateString()} - {dateRange.to.toLocaleDateString()}
+                                                {formatWordyDate(dateRange.from)} - {formatWordyDate(dateRange.to)}
                                             </>
                                         ) : (
-                                            dateRange.from.toLocaleDateString()
+                                            formatWordyDate(dateRange.from)
                                         )
                                     ) : (
                                         <span>Filter by date</span>
@@ -451,7 +451,7 @@ const OrdersContent = () => {
                                         </div>
                                         <div>
                                             <div className="text-xs text-muted-foreground">Date</div>
-                                            <div className="text-sm font-medium text-gray-900">{parseBackendDateToLocal(appointment.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                                            <div className="text-sm font-medium text-gray-900">{formatWordyDate(appointment.date, { fallback: appointment.date || "No date" })}</div>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-3">

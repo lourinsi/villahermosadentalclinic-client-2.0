@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { CheckCircle, Edit } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { formatWordyDate } from "@/lib/utils";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 
@@ -45,124 +46,28 @@ export function PaymentModal() {
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
+    if (paymentData || paymentId) return;
 
-    // If we're opening to edit but paymentData wasn't provided, try to fetch the payment
-    if (!paymentData && paymentId) {
-      (async () => {
-        try {
-          if (patientId) {
-            const res = await fetch(apiUrl(`/api/payments/patient/${patientId}`), {
-              headers: getAuthHeaders({ "Content-Type": "application/json" }),
-              credentials: "include",
-            });
-            const json = await res.json();
-            if (json?.success && Array.isArray(json.data)) {
-              const found = json.data.find((p: any) => String(p.id) === String(paymentId));
-              if (found) {
-                const method = found.method || null;
-                setPaymentMethod(method);
-                const amt = found.amount != null ? found.amount : (found.value != null ? found.value : "");
-                setAmount(amt ? String(amt) : "");
-                let formattedDate = "";
-                if (found.date) {
-                  if (typeof found.date === "string") {
-                    formattedDate = found.date.includes("T") ? found.date.split("T")[0] : found.date;
-                  }
-                }
-                setPaymentDate(formattedDate || new Date().toISOString().split("T")[0]);
-                setTransactionId(found.transactionId || "");
-                setNotes(found.notes || "");
-                setSelectedAppointment(found.appointmentId || null);
-
-                if (modalAppointments && modalAppointments.length > 0) {
-                  setAppointments(modalAppointments);
-                } else {
-                  const targetPatientId = patientId || found.patientId;
-                  if (targetPatientId) {
-                    try {
-                      const r = await fetch(apiUrl(`/api/appointments?patientId=${targetPatientId}`), {
-                        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-                        credentials: "include",
-                      });
-                      const j = await r.json();
-                      if (j?.success) setAppointments(j.data || []);
-                    } catch (err) {
-                      console.error("Error fetching appointments for patient", err);
-                      setAppointments([]);
-                    }
-                  } else {
-                    setAppointments([]);
-                  }
-                }
-                return;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error fetching payment for edit fallback", err);
-        }
-      })();
-    }
-
-    if (paymentData) {
-      // Edit mode: initialize values from paymentData
-      const method = paymentData.method || null;
-      setPaymentMethod(method);
-      const amt = paymentData.amount != null ? paymentData.amount : (paymentData.value != null ? paymentData.value : "");
-      setAmount(amt ? String(amt) : "");
-      let formattedDate = "";
-      if (paymentData.date) {
-        if (typeof paymentData.date === "string") {
-          formattedDate = paymentData.date.includes("T") ? paymentData.date.split("T")[0] : paymentData.date;
-        }
-      }
-      setPaymentDate(formattedDate || new Date().toISOString().split("T")[0]);
-      setTransactionId(paymentData.transactionId || "");
-      setNotes(paymentData.notes || "");
-      setSelectedAppointment(paymentData.appointmentId || null);
-
-      if (modalAppointments && modalAppointments.length > 0) {
-        setAppointments(modalAppointments);
-      } else {
-        const targetPatientId = patientId || paymentData.patientId;
-        if (targetPatientId) {
-          (async () => {
-            try {
-              const res = await fetch(apiUrl(`/api/appointments?patientId=${targetPatientId}`), {
-                headers: getAuthHeaders({ "Content-Type": "application/json" }),
-                credentials: "include",
-              });
-              const json = await res.json();
-              if (json.success) setAppointments(json.data || []);
-            } catch (err) {
-              console.error("Error fetching appointments for patient", err);
-            }
-          })();
-        } else {
-          setAppointments([]);
-        }
-      }
+    // Record mode: reset fields and use modalAppointments
+    setSelectedAppointment(appointmentId || null);
+    setPaymentMethod(null);
+    // If an initialRecord was provided (legacy recorded total), prefill amount/transactionId/notes
+    if (initialRecord && initialRecord.amount != null) {
+      setAmount(String(initialRecord.amount));
     } else {
-      // Record mode: reset fields and use modalAppointments
-      setSelectedAppointment(appointmentId || null);
-      setPaymentMethod(null);
-      // If an initialRecord was provided (legacy recorded total), prefill amount/transactionId/notes
-      if (initialRecord && initialRecord.amount != null) {
-        setAmount(String(initialRecord.amount));
-      } else {
-        setAmount("");
-      }
-      setPaymentDate(new Date().toISOString().split("T")[0]);
-      setTransactionId(initialRecord?.transactionId || "");
-      setNotes(initialRecord?.notes || "");
-      setAppointments(modalAppointments || []);
-      // Clear initialRecord after using it so subsequent opens don't reuse it
-      // (usePaymentModal.closePaymentModal will also clear it on modal close)
+      setAmount("");
     }
-  }, [isPaymentModalOpen, paymentData, appointmentId, modalAppointments, patientId, initialRecord]);
+    setPaymentDate(new Date().toISOString().split("T")[0]);
+    setTransactionId(initialRecord?.transactionId || "");
+    setNotes(initialRecord?.notes || "");
+    setAppointments(modalAppointments || []);
+    // Clear initialRecord after using it so subsequent opens don't reuse it
+    // (usePaymentModal.closePaymentModal will also clear it on modal close)
+  }, [isPaymentModalOpen, paymentData, paymentId, appointmentId, modalAppointments, patientId, initialRecord]);
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
+    if (paymentData || paymentId) return;
     try {
       // eslint-disable-next-line no-console
       const aptIds = (modalAppointments || []).slice(0, 20).map((a) => a.id);
@@ -174,6 +79,7 @@ export function PaymentModal() {
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
+    if (paymentData || paymentId) return;
     const fetchPaymentMethods = async () => {
       try {
         setIsFetchingPaymentMethods(true);
@@ -190,7 +96,7 @@ export function PaymentModal() {
       }
     };
     fetchPaymentMethods();
-  }, [isPaymentModalOpen]);
+  }, [isPaymentModalOpen, paymentData, paymentId]);
 
   const selectedApt = appointments.find((a) => a.id === selectedAppointment) || (appointmentId ? appointments.find((a) => a.id === appointmentId) : undefined);
   const outstandingBalance = selectedApt ? (selectedApt.price || 0) - (selectedApt.totalPaid || 0) : 0;
@@ -211,6 +117,10 @@ export function PaymentModal() {
     setAmount(String(outstandingBalance.toFixed(2)));
     paymentAmountPrefilledRef.current = true;
   }, [isPaymentModalOpen, isEditing, selectedApt, amount, outstandingBalance]);
+
+  if (isEditing) {
+    return null;
+  }
 
   const handleSubmit = async () => {
     const amt = parseFloat(amount) || 0;
@@ -330,7 +240,7 @@ export function PaymentModal() {
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>
-                  <div className="text-sm font-semibold text-gray-900">{selectedApt.date}</div>
+                  <div className="text-sm font-semibold text-gray-900">{formatWordyDate(selectedApt.date, { fallback: selectedApt.date || "No date" })}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Total Price</div>
@@ -354,7 +264,7 @@ export function PaymentModal() {
                 <SelectContent>
                   {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${formatTimeTo12h(apt.time)}` : ""} (Balance: ₱{(((apt.price || 0) - (apt.totalPaid || 0))).toFixed(2)})
+                      {getAppointmentTypeName(apt.type, apt.customType)} - {formatWordyDate(apt.date, { fallback: apt.date || "No date" })}{apt.time ? ` ${formatTimeTo12h(apt.time)}` : ""} (Balance: ₱{(((apt.price || 0) - (apt.totalPaid || 0))).toFixed(2)})
                     </SelectItem>
                   ))}
                 </SelectContent>

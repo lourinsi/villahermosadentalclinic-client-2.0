@@ -41,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
-import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { parseBackendDateToLocal, formatDateToYYYYMMDD, formatWordyDate } from "../lib/utils";
 import { apiUrl } from "@/lib/api";
 import { AllAppointmentsView } from "./AllAppointmentsView";
 import PatientAvatar from "./PatientAvatar";
@@ -471,25 +471,20 @@ export function CalendarView({
 
   const formatDateLabel = (date: Date) => {
     if (viewMode === "day") {
-      return date.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
+      return formatWordyDate(date);
     } else if (viewMode === "week") {
       const weekStart = new Date(date);
       weekStart.setDate(date.getDate() - date.getDay());
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6);
-      return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      return `${formatWordyDate(weekStart)} - ${formatWordyDate(weekEnd)}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     } else if (viewMode === "all") {
       return "All Appointments";
     } else {
       if (dateRange?.from && dateRange?.to) {
-        return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        return `${formatWordyDate(dateRange.from)} - ${formatWordyDate(dateRange.to)}`;
       }
       return "Select Range";
     }
@@ -1144,7 +1139,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {formatTime(apt.time)}</span>
+                        <span>{formatWordyDate(apt.date, { fallback: apt.date || "No date" })} at {formatTime(apt.time)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4" />

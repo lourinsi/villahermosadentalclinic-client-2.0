@@ -11,6 +11,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
+import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
@@ -50,7 +51,9 @@ import {
   ChevronRight,
   ChevronUp,
   UserPlus,
-  Search
+  Search,
+  ClipboardList,
+  Save
 } from "lucide-react";
 
 import {
@@ -69,7 +72,7 @@ import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import {
@@ -118,6 +121,12 @@ export interface Patient {
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
+
+type QuestionnaireQuestion = {
+  id: string;
+  text: string;
+  isActive?: boolean;
+};
 
 const resolveImageSource = (source?: string) => {
   if (!source) return undefined;
@@ -476,7 +485,7 @@ export function PatientDetailsModal({
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
                   <span className="truncate text-base font-extrabold leading-tight text-slate-700">
-                    { (serverPatient?.createdAt || patient.createdAt) ? new Date((serverPatient?.createdAt || patient.createdAt) as string).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A' }
+                    {formatPatientLogDate((serverPatient?.createdAt || patient.createdAt) as string | undefined)}
                   </span>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -550,12 +559,42 @@ const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").star
 const isStoredPaymentLogRow = (txn: RecentTransaction) =>
   String((txn as any).source || "") === "payment-log" || String(txn.id || "").startsWith("payment-log-");
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
+const getEditablePaymentId = (txn: RecentTransaction) => {
+  const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
+  if (explicitPaymentId) return String(explicitPaymentId).trim();
+
+  if (isStoredPaymentLogRow(txn)) {
+    const paymentLogId = String(txn.transactionId || txn.id || "").replace(/^payment-log-/, "").trim();
+    return paymentLogId.startsWith("pay_log_") ? paymentLogId : "";
+  }
+
+  if (String((txn as any).source || "") === "payment" && txn.id && !isReadOnlyPaymentRow(txn)) {
+    return String(txn.id).trim();
+  }
+
+  return "";
+};
+
+const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
+  if (isLegacyPaymentRow(txn)) {
+    return "This is a legacy recorded total from the appointment, not an individual payment record.";
+  }
+
+  if (isStoredPaymentLogRow(txn)) {
+    return "Could not connect this payment log to an editable payment record.";
+  }
+
+  return "Could not find the payment record to edit.";
+};
 
 const toDateOnly = (value?: string | Date) => {
   if (!value) return "";
   if (value instanceof Date) return value.toISOString().split("T")[0];
   return String(value).split("T")[0].split(" ")[0];
 };
+
+const formatPatientLogDate = (value?: string | Date | null, fallback = "N/A") =>
+  formatWordyDate(value, { fallback: value ? String(value) : fallback });
 
 const getPaymentTransactionKey = (txn: RecentTransaction) =>
   String(txn.id || txn.transactionId || `${txn.appointmentId || "none"}-${txn.date || "no-date"}-${txn.method || "method"}-${txn.amount || 0}`);
@@ -839,7 +878,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const [activeTab, setActiveTab] = useState("info");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
-  const shouldLoadFinancialLog = activeTab === "payments";
+  const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const { doctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
@@ -876,6 +915,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [parentPatient, setParentPatient] = useState<Patient | null>(null);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
+  const [questionnaireQuestions, setQuestionnaireQuestions] = useState<QuestionnaireQuestion[]>([]);
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, boolean>>({});
+  const [savedQuestionnaireAnswers, setSavedQuestionnaireAnswers] = useState<Record<string, boolean>>({});
+  const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
+  const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
+  const [isSavingQuestionnaire, setIsSavingQuestionnaire] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
@@ -896,6 +941,117 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   useEffect(() => {
     setActiveTab("info");
   }, [patient.id]);
+
+  const normalizeQuestionnaireAnswers = React.useCallback((data: any): Record<string, boolean> => {
+    const rawAnswers = data?.questionnaireAnswers || data?.customQuestionAnswers || {};
+
+    if (Array.isArray(rawAnswers)) {
+      return rawAnswers.reduce<Record<string, boolean>>((answers, id) => {
+        if (id) answers[String(id)] = true;
+        return answers;
+      }, {});
+    }
+
+    if (rawAnswers && typeof rawAnswers === "object") {
+      return Object.entries(rawAnswers).reduce<Record<string, boolean>>((answers, [id, checked]) => {
+        answers[id] = Boolean(checked);
+        return answers;
+      }, {});
+    }
+
+    return {};
+  }, []);
+
+  const loadQuestionnaireTab = React.useCallback(async () => {
+    if (!patient.id) return;
+
+    setIsLoadingQuestionnaire(true);
+    try {
+      const [questionsResponse, patientQuestionnaireResponse] = await Promise.all([
+        fetch(apiUrl("/api/questionnaire-questions"), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }),
+        fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }),
+      ]);
+
+      const questionsPayload = await questionsResponse.json().catch(() => ({}));
+      if (!questionsResponse.ok || !questionsPayload?.success || !Array.isArray(questionsPayload.data)) {
+        throw new Error(questionsPayload?.message || "Failed to load questionnaire questions");
+      }
+
+      const patientQuestionnairePayload = await patientQuestionnaireResponse.json().catch(() => ({}));
+      const questionnaireData = patientQuestionnairePayload?.data && typeof patientQuestionnairePayload.data === "object"
+        ? patientQuestionnairePayload.data
+        : {};
+      const answers = normalizeQuestionnaireAnswers(questionnaireData);
+
+      setQuestionnaireQuestions(questionsPayload.data.filter((question: QuestionnaireQuestion) => question.isActive !== false));
+      setPatientQuestionnaireData(questionnaireData);
+      setQuestionnaireAnswers(answers);
+      setSavedQuestionnaireAnswers(answers);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
+    } finally {
+      setIsLoadingQuestionnaire(false);
+    }
+  }, [normalizeQuestionnaireAnswers, patient.id]);
+
+  useEffect(() => {
+    if (activeTab === "questionnaire") {
+      loadQuestionnaireTab();
+    }
+  }, [activeTab, loadQuestionnaireTab]);
+
+  const questionnaireHasChanges = React.useMemo(
+    () => JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers),
+    [questionnaireAnswers, savedQuestionnaireAnswers]
+  );
+
+  const handleQuestionnaireAnswerChange = (questionId: string, checked: boolean) => {
+    setQuestionnaireAnswers((current) => ({
+      ...current,
+      [questionId]: checked,
+    }));
+  };
+
+  const handleSaveQuestionnaireAnswers = async () => {
+    if (!patient.id) return;
+
+    setIsSavingQuestionnaire(true);
+    try {
+      const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+        method: "PUT",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          ...patientQuestionnaireData,
+          questionnaireAnswers,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to save questionnaire answers");
+      }
+
+      const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
+        ...patientQuestionnaireData,
+        questionnaireAnswers,
+      };
+      const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      setPatientQuestionnaireData(nextData);
+      setQuestionnaireAnswers(nextAnswers);
+      setSavedQuestionnaireAnswers(nextAnswers);
+      toast.success("Questionnaire saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save questionnaire answers");
+    } finally {
+      setIsSavingQuestionnaire(false);
+    }
+  };
 
   const handlePatientPhotoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1240,6 +1396,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     });
   };
 
+  const handleEditPaymentTransaction = React.useCallback((txn: RecentTransaction) => {
+    const targetPaymentId = getEditablePaymentId(txn);
+    const targetPatientId = patient.id ? String(patient.id) : "";
+
+    if (!targetPaymentId) {
+      toast.error(getPaymentEditUnavailableMessage(txn));
+      return;
+    }
+
+    if (!targetPatientId) {
+      toast.error("Could not find the patient for this payment");
+      return;
+    }
+
+    openEditPaymentModal(
+      targetPaymentId,
+      txn as any,
+      targetPatientId,
+      mockAppointmentHistoryLocal as Appointment[]
+    );
+  }, [mockAppointmentHistoryLocal, openEditPaymentModal, patient.id]);
+
   const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
     try {
       console.log("[PatientDetailsModal] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
@@ -1250,17 +1428,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ? transactionRow.appointmentSnapshot
       : undefined;
 
+    const isPaymentSnapshot = Boolean(transaction);
     const isHistoricalPaymentSnapshot = Boolean(transaction && isPaymentLogTransaction(transaction));
     const snapshotBase = {
       ...(originalAppointment || {}),
       ...appointment,
-      ...(isHistoricalPaymentSnapshot && transactionSnapshot ? transactionSnapshot : {}),
+      ...(transactionSnapshot ? transactionSnapshot : {}),
     } as Appointment & Record<string, any>;
     const displayDate = toDateOnly(snapshotBase.date);
     const displayTime = snapshotBase.time || String(snapshotBase.date || "").split(" ")[1] || "";
     const price = Number(snapshotBase.price ?? 0);
     const transactionNewBalance = Number(transactionRow?.newBalance);
-    const hasTransactionBalance = isHistoricalPaymentSnapshot && Number.isFinite(transactionNewBalance);
+    const hasTransactionBalance = isPaymentSnapshot && Number.isFinite(transactionNewBalance);
     const totalPaid = hasTransactionBalance
       ? Math.max(0, price - transactionNewBalance)
       : Number(snapshotBase.totalPaid ?? 0);
@@ -1314,8 +1493,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setSelectedSnapshot({
       ...snapshotBase,
-      logType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.logType,
-      changeType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.changeType,
+      logType: isPaymentSnapshot ? "payment" : snapshotBase.logType,
+      changeType: isPaymentSnapshot ? "payment" : snapshotBase.changeType,
       changedAt: logDate,
       changedBy: transactionRow?.changedBy || snapshotBase.changedBy,
       changedByName: transactionRow?.changedByName || snapshotBase.changedByName,
@@ -1344,6 +1523,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       paymentMethod: transaction?.method,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
       transactionId: transaction?.transactionId,
+      _paymentTransactionId: transaction?.transactionId || transaction?.id || snapshotBase._paymentTransactionId,
+      _transactionId: transaction?.transactionId || transaction?.id || snapshotBase._transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
       _isHistorical: isHistoricalPaymentSnapshot,
@@ -2038,6 +2219,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 { value: "info", label: "Personal Info", icon: UserIcon },
                 { value: "family", label: "Family & Relations", icon: Users },
                 { value: "records", label: "Medical Records", icon: FileText },
+                { value: "questionnaire", label: "Questionnaire", icon: ClipboardList },
                 { value: "chart", label: "Dental Chart", icon: Activity },
                 { value: "history", label: "Visit History", icon: History },
                 { value: "payments", label: "Financial Log", icon: PaymentIcon },
@@ -2128,7 +2310,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         <div className="space-y-1">
                           <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Upcoming</span>
                           <span className="text-sm font-black text-violet-600 truncate block">
-                            {patient.nextAppointment ? new Date(patient.nextAppointment).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : "No Schedule"}
+                            {patient.nextAppointment ? formatPatientLogDate(patient.nextAppointment, "No Schedule") : "No Schedule"}
                           </span>
                         </div>
                       </div>
@@ -2504,6 +2686,68 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
+        <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto max-w-[1180px] space-y-4">
+          <Card className={cardClass}>
+            <CardHeader className={`${cardHeaderClass} flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
+              <div>
+                <CardTitle className="text-base font-semibold text-slate-900">Questionnaire</CardTitle>
+                <p className="mt-1 text-sm text-slate-500">Saved questionnaire items from the management questionnaire page.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={loadQuestionnaireTab}
+                  disabled={isLoadingQuestionnaire}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSaveQuestionnaireAnswers}
+                  disabled={isLoadingQuestionnaire || isSavingQuestionnaire || !questionnaireHasChanges}
+                  className="gap-2"
+                >
+                  <Save className="h-4 w-4" />
+                  {isSavingQuestionnaire ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-5">
+              {isLoadingQuestionnaire ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  Loading questionnaire...
+                </div>
+              ) : questionnaireQuestions.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  No questionnaire questions have been saved yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {questionnaireQuestions.map((question) => (
+                    <label
+                      key={question.id}
+                      htmlFor={`patient-questionnaire-${question.id}`}
+                      className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:bg-slate-50"
+                    >
+                      <Checkbox
+                        id={`patient-questionnaire-${question.id}`}
+                        checked={Boolean(questionnaireAnswers[question.id])}
+                        onCheckedChange={(checked) => handleQuestionnaireAnswerChange(question.id, checked === true)}
+                        disabled={isSavingQuestionnaire}
+                        className="mt-0.5"
+                      />
+                      <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto max-w-[1680px] space-y-4">
           <DentalChart
             records={formData.dentalCharts}
@@ -2632,7 +2876,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex items-center space-x-3">
                                 <div className="text-sm">
                                   <div className="font-medium text-base">{appointment.type}</div>
-                                  <div className="text-muted-foreground">{appointment.date}</div>
+                                  <div className="text-muted-foreground">{formatPatientLogDate(appointment.date)}</div>
                                 </div>
                                 <div className="flex gap-2">
                                   {getAppointmentStatusBadge(String(appointment.status || ''))}
@@ -2736,7 +2980,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                             </Badge>
                                           )}
                                         </div>
-                                        <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
+                                        <div className="text-xs text-muted-foreground">{formatPatientLogDate(txn.date)} • {txn.transactionId}</div>
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -2748,6 +2992,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                       >
                                         <Eye className="h-4 w-4" />
                                         <span className="sr-only">View Appointment Snapshot</span>
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className={`h-8 w-8 p-0 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
+                                        title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                        onClick={() => handleEditPaymentTransaction(txn)}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                        <span className="sr-only">Edit Payment</span>
                                       </Button>
                                         {/* Hide edit/delete controls for now — keep view (eye) only */}
                                     </div>
@@ -2877,7 +3131,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   {filteredTransactions.length > 0 ? (
                     filteredTransactions.map((txn) => {
                       const paymentDisplay = getTransactionPaymentDisplay(txn);
-                      const txnPaymentDate = toDateOnly((txn as any).paymentDate) || toDateOnly(txn.date);
+                      const txnPaymentDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
 
                       return (
                       <div
@@ -2892,7 +3146,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div>
                               <div className="font-medium">{txn.method}</div>
                               <div className="text-sm text-muted-foreground">
-                                {txn.appointmentType} - Appointment: {txn.appointmentDate}
+                                {txn.appointmentType} - Appointment: {formatPatientLogDate(txn.appointmentDate, "N/A")}
                               </div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Dr: {txn.doctor}
@@ -2913,6 +3167,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <Eye className="h-4 w-4" />
                               <span className="sr-only">View Appointment Snapshot</span>
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={`h-8 w-8 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
+                              title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                              onClick={() => handleEditPaymentTransaction(txn)}
+                            >
+                              <Edit className="h-4 w-4" />
+                              <span className="sr-only">Edit Payment</span>
+                            </Button>
                             {!isReadOnlyPaymentRow(txn) && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -2926,14 +3190,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem
-                                    onClick={() => {
-                                      try {
-                                        console.log("[PatientDetailsModal] edit payment clicked", { txnId: txn?.id, patientId: patient?.id, legacy: isLegacyPaymentRow(txn) });
-                                      } catch (e) {}
-                                      if (patient.id && patient.name) {
-                                        if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
-                                      }
-                                    }}
+                                    onClick={() => handleEditPaymentTransaction(txn)}
                                   >
                                     <Edit className="h-4 w-4 mr-2" />
                                     Edit

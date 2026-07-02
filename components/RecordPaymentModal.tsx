@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { CheckCircle, DollarSign } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { formatWordyDate } from "@/lib/utils";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 
@@ -136,7 +137,7 @@ export function RecordPaymentModal() {
                 <SelectContent>
                   {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${formatTimeTo12h(apt.time)}` : ""} (Balance: ₱{(
+                      {getAppointmentTypeName(apt.type, apt.customType)} - {formatWordyDate(apt.date, { fallback: apt.date || "No date" })}{apt.time ? ` ${formatTimeTo12h(apt.time)}` : ""} (Balance: ₱{(
                         (apt.price || 0) - (apt.totalPaid || 0)
                       ).toFixed(2)})
                     </SelectItem>
@@ -156,7 +157,7 @@ export function RecordPaymentModal() {
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>
-                  <div className="text-sm font-semibold text-gray-900">{selectedApt?.date}</div>
+                  <div className="text-sm font-semibold text-gray-900">{formatWordyDate(selectedApt?.date, { fallback: selectedApt?.date || "No date" })}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Total Price</div>

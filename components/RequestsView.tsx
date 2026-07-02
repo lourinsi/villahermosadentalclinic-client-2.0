@@ -42,7 +42,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import { 
@@ -1069,7 +1069,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(request.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
                             </div>
                           </TableCell>
@@ -1121,13 +1121,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{request.createdAt ? new Date(request.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.createdAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{request.createdAt ? new Date(request.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{request.updatedAt ? new Date(request.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.updatedAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{request.updatedAt ? new Date(request.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
@@ -1386,7 +1386,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
                             </div>
                           </TableCell>
@@ -1438,13 +1438,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.createdAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{item.createdAt ? new Date(item.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="font-bold text-gray-900">{formatWordyDate(item.updatedAt, { fallback: 'N/A' })}</span>
                               <span className="text-xs text-gray-500 font-medium">{item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>

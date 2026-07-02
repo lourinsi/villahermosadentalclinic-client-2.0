@@ -10,6 +10,7 @@ import {
 
 export type AppointmentTypeForm = {
   label: string;
+  icon: string;
   price: number;
   duration: number;
 };

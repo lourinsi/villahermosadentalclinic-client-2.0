@@ -6,6 +6,7 @@ import { Button } from "./ui/button";
 import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
 import { Keyboard } from "lucide-react";
+import { formatWordyDate } from "@/lib/utils";
 
 import ViewMode from "./viewMode";
 
@@ -79,8 +80,8 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
               <p className="text-sm text-gray-500 font-medium">
                 {dateRange?.from ? (
                   <>
-                    {dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    {dateRange.to && ` - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                    {formatWordyDate(dateRange.from)}
+                    {dateRange.to && ` - ${formatWordyDate(dateRange.to)}`}
                   </>
                 ) : (
                   "Choose your appointment period"
@@ -95,7 +96,7 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
               >
                 <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">Start Dates</div>
                 <div className="text-sm font-semibold text-gray-700">
-                  {dateRange?.from ? dateRange.from.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
+                  {dateRange?.from ? formatWordyDate(dateRange.from) : "MM/DD/YYYY"}
                 </div>
               </button>
               <button 
@@ -104,7 +105,7 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
               >
                 <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">End Date</div>
                 <div className="text-sm font-semibold text-gray-700">
-                  {dateRange?.to ? dateRange.to.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
+                  {dateRange?.to ? formatWordyDate(dateRange.to) : "MM/DD/YYYY"}
                 </div>
               </button>
             </div>

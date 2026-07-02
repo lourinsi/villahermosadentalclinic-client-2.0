@@ -9,8 +9,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AlertCircle, Loader2, Clock, Calendar as CalendarIcon } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
 import { DatePickerModal } from "./DatePickerModal";
-import { formatBookingPaymentDateLabel, parseLocalDateOnly } from "./sharedBookingLogic";
-import { formatDateToYYYYMMDD } from "@/lib/utils";
+import { formatBookingPaymentDateLabel, getBookingDoctorValue, parseLocalDateOnly } from "./sharedBookingLogic";
+import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
 const REPEAT_OPTIONS = [
@@ -196,7 +196,7 @@ export function ConfirmAppointmentModal({
   }, [customRepeatDate, repeatOption, selectedDate]);
 
   const repeatDateLabel = computedRepeatTarget
-    ? computedRepeatTarget.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    ? formatWordyDate(computedRepeatTarget)
     : undefined;
 
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
@@ -273,7 +273,7 @@ export function ConfirmAppointmentModal({
               <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Schedule</p>
                 <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
-                  {selectedDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} at {selectedTime ? formatTimeTo12h(selectedTime) : "—"}
+                  {formatWordyDate(selectedDate)} at {selectedTime ? formatTimeTo12h(selectedTime) : "—"}
                 </p>
               </div>
 
@@ -350,7 +350,7 @@ export function ConfirmAppointmentModal({
                         >
                           <CalendarIcon className="h-4 w-4" />
                           {customRepeatDate
-                            ? parseLocalDateOnly(customRepeatDate)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? "Pick date"
+                            ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
                             : "Pick date"}
                         </Button>
                         <DatePickerModal
@@ -361,7 +361,7 @@ export function ConfirmAppointmentModal({
                             const formatted = formatDateToYYYYMMDD(date);
                             handleCustomRepeatDateChange(formatted);
                           }}
-                          doctorName={doctorName}
+                          doctorName={getBookingDoctorValue(doctorName)}
                           patientId={patientId}
                           selectedTime={selectedTime}
                           duration={duration}

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
-import { formatDateToYYYYMMDD, parseBackendDateToLocal } from "../lib/utils";
+import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { DashboardStats } from "./DashboardStats";
@@ -51,6 +51,13 @@ const getDashboardPeriodRange = (mode: "day" | "week" | "month") => {
 
 const isDateWithinDashboardRange = (date: string | undefined, range: { start: string; end: string }) =>
   Boolean(date && date >= range.start && date <= range.end);
+
+const getAppointmentDateTime = (appointment: Appointment) => new Date(`${appointment.date}T${appointment.time}`);
+
+const isVisibleDashboardAppointment = (appointment: Appointment) => {
+  const status = normalizeAppointmentStatus(appointment.status);
+  return status !== "cancelled" && status !== "deleted" && !isCartAppointmentStatus(status);
+};
 
 interface DashboardProps {
   portal: "admin" | "doctor" | "patient";
@@ -226,6 +233,11 @@ export function Dashboard({ portal }: DashboardProps) {
     }
   }, [portalAppointments, viewMode]);
 
+  const recentScheduleAppointments = useMemo(
+    () => filteredAppointments.filter(isVisibleDashboardAppointment),
+    [filteredAppointments]
+  );
+
   const dashboardPeriodRange = useMemo(() => getDashboardPeriodRange(viewMode), [viewMode]);
   const periodRevenue = useMemo(() => (
     financeTransactions
@@ -240,8 +252,8 @@ export function Dashboard({ portal }: DashboardProps) {
       .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
   ), [dashboardPeriodRange, detailedExpenses]);
 
-  // Get next upcoming appointment
-  const nextAppointment = useMemo(() => {
+  // Get upcoming appointments visible to the current portal.
+  const upcomingAppointments = useMemo(() => {
     const now = new Date();
     const filteredByPortal = appointments.filter((apt: Appointment) => {
       if (portal === "doctor" && user?.username) {
@@ -253,19 +265,28 @@ export function Dashboard({ portal }: DashboardProps) {
       return true;
     });
 
-    const allFutureAppointments = filteredByPortal
+    return filteredByPortal
       .filter((apt: Appointment) => {
-        const aptDateTime = new Date(`${apt.date}T${apt.time}`);
-        const status = normalizeAppointmentStatus(apt.status);
-        return aptDateTime > now && status !== "cancelled" && status !== "deleted";
+        const aptDateTime = getAppointmentDateTime(apt);
+        return aptDateTime > now && isVisibleDashboardAppointment(apt);
       })
       .sort((a, b) => {
-        const timeA = new Date(`${a.date}T${a.time}`).getTime();
-        const timeB = new Date(`${b.date}T${b.time}`).getTime();
-        return timeA - timeB;
+        return getAppointmentDateTime(a).getTime() - getAppointmentDateTime(b).getTime();
       });
-    return allFutureAppointments.length > 0 ? allFutureAppointments[0] : null;
   }, [appointments, portal, user]);
+
+  const nextAppointment = upcomingAppointments[0] ?? null;
+
+  const nextAppointmentDayAppointments = useMemo(() => {
+    if (!nextAppointment) return [];
+
+    const nextAppointmentDate = formatDateToYYYYMMDD(nextAppointment.date);
+    return upcomingAppointments.filter(
+      (apt: Appointment) =>
+        apt.id !== nextAppointment.id &&
+        formatDateToYYYYMMDD(apt.date) === nextAppointmentDate
+    );
+  }, [nextAppointment, upcomingAppointments]);
 
   const pendingAppointmentsCount = useMemo(() => {
     let filtered = appointments;
@@ -285,13 +306,13 @@ export function Dashboard({ portal }: DashboardProps) {
   const getViewTitle = (): string => {
     const today = new Date();
     if (viewMode === "day") {
-      return today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+      return formatWordyDate(today);
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6);
-      return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
+      return `${formatWordyDate(weekStart)} - ${formatWordyDate(weekEnd)}`;
     } else {
       return today.toLocaleDateString("en-US", { year: "numeric", month: "long" });
     }
@@ -378,6 +399,7 @@ export function Dashboard({ portal }: DashboardProps) {
       <NextAppointmentCard
         appointment={nextAppointment}
         role={portal}
+        sameDayAppointments={nextAppointmentDayAppointments}
         onViewDetails={(apt: Appointment) => {
           handleViewAppointment(apt);
         }}
@@ -391,7 +413,7 @@ export function Dashboard({ portal }: DashboardProps) {
           portal={portal}
           viewMode={viewMode}
           setViewMode={setViewMode}
-          appointments={filteredAppointments}
+          appointments={recentScheduleAppointments}
           isLoadingView={isLoadingView}
           viewTitle={getViewTitle()}
           onAppointmentClick={(apt: Appointment) => {

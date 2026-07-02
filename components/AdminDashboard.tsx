@@ -9,7 +9,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { NextAppointmentCard } from "./NextAppointmentCard";
@@ -130,7 +130,8 @@ export function Dashboard({ portal }: { portal?: string }) {
     const allFutureAppointments = appointments
       .filter((apt: Appointment) => {
         const aptDateTime = new Date(`${apt.date}T${apt.time}`);
-        return aptDateTime > now && apt.status !== "cancelled";
+        const status = normalizeAppointmentStatus(apt.status);
+        return aptDateTime > now && status !== "cancelled" && status !== "deleted" && !isCartAppointmentStatus(status);
       })
       .sort((a, b) => {
         const timeA = new Date(`${a.date}T${a.time}`).getTime();
@@ -140,16 +141,24 @@ export function Dashboard({ portal }: { portal?: string }) {
     return allFutureAppointments.length > 0 ? allFutureAppointments[0] : null;
   }, [appointments]);
 
-  // Get all appointments at the same time as next appointment
-  const sameTimeAppointments = useMemo(() => {
+  // Get the rest of the upcoming appointments on the next appointment's day.
+  const sameDayAppointments = useMemo(() => {
     if (!nextAppointment) return [];
-    return appointments.filter(
-      (apt: Appointment) =>
-        apt.date === nextAppointment.date &&
-        apt.time === nextAppointment.time &&
-        apt.id !== nextAppointment.id &&
-        apt.status !== "cancelled"
-    );
+    const now = new Date();
+    return appointments
+      .filter((apt: Appointment) => {
+        const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+        const status = normalizeAppointmentStatus(apt.status);
+        return (
+          apt.date === nextAppointment.date &&
+          apt.id !== nextAppointment.id &&
+          aptDateTime > now &&
+          status !== "cancelled" &&
+          status !== "deleted" &&
+          !isCartAppointmentStatus(status)
+        );
+      })
+      .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
   }, [nextAppointment, appointments]);
 
   // Build dynamic stats based on backend data
@@ -191,13 +200,13 @@ export function Dashboard({ portal }: { portal?: string }) {
   const getViewTitle = (): string => {
     const today = new Date();
     if (viewMode === "day") {
-      return today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+      return formatWordyDate(today);
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6);
-      return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
+      return `${formatWordyDate(weekStart)} - ${formatWordyDate(weekEnd)}`;
     } else {
       return today.toLocaleDateString("en-US", { year: "numeric", month: "long" });
     }
@@ -466,7 +475,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                         </div>
                         {(viewMode === "week" || viewMode === "month") && (
                           <div className="text-xs text-gray-400 mt-1">
-                            {parseBackendDateToLocal(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {formatWordyDate(appointment.date, { fallback: appointment.date || "No date" })}
                           </div>
                         )}
                       </div>
@@ -588,7 +597,7 @@ export function Dashboard({ portal }: { portal?: string }) {
           <NextAppointmentCard
             appointment={nextAppointment}
             role="admin"
-            sameTimeAppointments={sameTimeAppointments}
+            sameDayAppointments={sameDayAppointments}
             onViewDetails={(apt) => {
               handleViewAppointment(apt);
             }}

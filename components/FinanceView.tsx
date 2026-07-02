@@ -2,10 +2,12 @@
 
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
 
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
@@ -84,6 +86,8 @@ const currencyFormatter = new Intl.NumberFormat("en-PH", {
 });
 
 const formatCurrency = (amount?: number) => currencyFormatter.format(Number(amount) || 0);
+
+const PAYROLL_DISABLED = true;
 
 const normalizeFilterValue = (value?: string) =>
   String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -220,20 +224,14 @@ const formatTransactionTimestamp = (value?: string) => {
   if (!value) return "";
 
   const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const parsed = new Date(isDateOnly ? `${value}T00:00:00` : value);
-  if (Number.isNaN(parsed.getTime())) return value;
-
-  return isDateOnly
-    ? parsed.toLocaleDateString("en-PH")
-    : parsed.toLocaleString("en-PH", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
+  return formatWordyDate(value, {
+    fallback: value,
+    includeTime: !isDateOnly,
+  });
 };
+
+const formatFinanceDate = (value?: string) =>
+  formatWordyDate(value, { fallback: value || "-" });
 
 const hasTimeComponent = (value?: string) =>
   Boolean(value && !/^\d{4}-\d{2}-\d{2}$/.test(value));
@@ -502,11 +500,15 @@ export interface RecentTransaction {
   changedByName?: string;
   changedByAvatar?: string;
   source?: string;
+  patientId?: string;
+  paymentId?: string;
+  paymentRecordId?: string;
 }
 
 export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
+  const { openEditPaymentModal } = usePaymentModal();
   const canManageExpenseStatus = normalizeFilterValue(effectiveRole) === "admin";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
@@ -576,6 +578,9 @@ export function FinanceView() {
   const fetchData = async (payrollMonth = selectedPayrollMonth) => {
     setIsLoading(true);
     try {
+      const payrollDataRequest = PAYROLL_DISABLED
+        ? Promise.resolve([] as PayrollEntry[])
+        : fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data");
       const [
         revenueData,
         expenseBreakdownData,
@@ -588,7 +593,7 @@ export function FinanceView() {
         fetchApiData<ExpenseBreakdownEntry[]>("/api/finance/expense-breakdown", "expense breakdown"),
         fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
-        fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data"),
+        payrollDataRequest,
         fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions?limit=500", "recent transactions"),
       ]);
 
@@ -596,7 +601,7 @@ export function FinanceView() {
       setExpenseBreakdown(expenseBreakdownData || []);
       setDetailedExpenses(detailedExpensesData || []);
       setInventoryData(inventoryData || []);
-      setPayrollData(payrollData || []);
+      setPayrollData(PAYROLL_DISABLED ? [] : payrollData || []);
       setRecentTransactions(transactionsData || []);
 
       // Load patient images for any transactions that reference a patient
@@ -911,26 +916,31 @@ export function FinanceView() {
         })),
         ...detailedExpenses.map((expense) => ({
           Section: "Expense",
-          Date: expense.date,
-          "Created At": expense.createdAt || "",
+          Date: formatFinanceDate(expense.date),
+          "Created At": expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "",
           Description: expense.description,
           Amount: expense.amount,
           Expenses: expense.amount,
           Profit: "",
         })),
-        ...payrollData.map((employee) => ({
+        ...(PAYROLL_DISABLED ? [] : payrollData.map((employee) => ({
           Section: "Payroll",
           Date: formatPayrollMonthLabel(selectedPayrollMonth),
           Description: `${employee.name} - ${employee.role}`,
           Amount: employee.total,
           Expenses: employee.total,
           Profit: "",
-        })),
+        }))),
       ]
     );
   };
 
   const handleExportPayroll = () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     downloadCsv(
       `payroll-${selectedPayrollMonth}.csv`,
       payrollData.map((employee) => ({
@@ -1148,6 +1158,11 @@ export function FinanceView() {
   };
 
   const openPayrollModal = (mode: FinancePayrollModalMode, entry?: PayrollEntry) => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setPayrollModalMode(mode);
     setSelectedPayrollEntry(entry || null);
     setPayrollPaymentDate(getDefaultPayrollPaymentDate(selectedPayrollMonth));
@@ -1166,6 +1181,11 @@ export function FinanceView() {
   };
 
   const openPayrollBonusModal = (entry?: PayrollEntry) => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setPayrollBonusForm(createPayrollBonusForm(selectedPayrollMonth, entry?.id || ""));
     setIsPayrollBonusModalOpen(true);
     if (entry?.id) {
@@ -1179,6 +1199,11 @@ export function FinanceView() {
   };
 
   const openPayrollEditModal = (entry: PayrollEntry) => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setPayrollEntryToEdit(entry);
     setPayrollEditForm(createPayrollEditFormFromEntry(entry, selectedPayrollMonth));
   };
@@ -1193,6 +1218,11 @@ export function FinanceView() {
   };
 
   const handlePayrollMonthChange = async (value: string) => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setSelectedPayrollMonth(value);
     closePayrollModal();
     setPayrollEntryToUnpay(null);
@@ -1241,7 +1271,9 @@ export function FinanceView() {
     });
 
   const payPayrollEmployee = (entry: PayrollEntry, paymentDate: string) =>
-    fetchApiData<PayrollEntry>(
+    PAYROLL_DISABLED
+      ? Promise.reject(new Error("Payroll is disabled"))
+      : fetchApiData<PayrollEntry>(
       `/api/finance/payroll/${encodeURIComponent(entry.id)}/pay`,
       "payroll payment",
       {
@@ -1254,7 +1286,9 @@ export function FinanceView() {
     );
 
   const unpayPayrollEmployee = (entry: PayrollEntry) =>
-    fetchApiData<PayrollEntry>(
+    PAYROLL_DISABLED
+      ? Promise.reject(new Error("Payroll is disabled"))
+      : fetchApiData<PayrollEntry>(
       `/api/finance/payroll/${encodeURIComponent(entry.id)}/unpay`,
       "payroll payment reversal",
       {
@@ -1266,6 +1300,8 @@ export function FinanceView() {
     );
 
   const loadPayrollBonusDetails = async (staffId: string) => {
+    if (PAYROLL_DISABLED) return;
+
     try {
       const records = await fetchStaffFinancialRecords();
       const bonusRecords = getPayrollBonusRecords(records || [], staffId, selectedPayrollMonth);
@@ -1293,11 +1329,21 @@ export function FinanceView() {
   };
 
   const handlePayrollBonusStaffChange = (staffId: string) => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setPayrollBonusForm(createPayrollBonusForm(selectedPayrollMonth, staffId));
     loadPayrollBonusDetails(staffId);
   };
 
   const handleProcessPayroll = async () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     setIsSavingPayroll(true);
     try {
       const payableEntries = payrollData.filter(
@@ -1323,6 +1369,11 @@ export function FinanceView() {
   };
 
   const handleAddPayrollBonus = async () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     if (!payrollBonusForm.staffId) {
       toast.error("Please select a staff member");
       return;
@@ -1399,6 +1450,11 @@ export function FinanceView() {
   };
 
   const handleSavePayrollEdit = async () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     if (!payrollEntryToEdit) return;
 
     if (Number(payrollEditForm.baseSalary) < 0) {
@@ -1457,6 +1513,11 @@ export function FinanceView() {
   };
 
   const handlePayPayrollEntry = async () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     if (!selectedPayrollEntry) return;
 
     setIsSavingPayroll(true);
@@ -1474,6 +1535,11 @@ export function FinanceView() {
   };
 
   const handleReversePayrollPayment = async () => {
+    if (PAYROLL_DISABLED) {
+      toast.error("Payroll is disabled");
+      return;
+    }
+
     if (!payrollEntryToUnpay) return;
 
     setIsSavingPayroll(true);
@@ -1494,6 +1560,63 @@ export function FinanceView() {
     transaction.appointmentId ||
     getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
     getAppointmentIdFromDescription(transaction.description);
+
+  const isEditablePaymentTransaction = (transaction: RecentTransaction) =>
+    Boolean(getEditablePaymentId(transaction));
+
+  const isPaymentTransactionRow = (transaction: RecentTransaction) =>
+    transaction.type === "income" &&
+    Number(transaction.amount || 0) > 0 &&
+    (
+      transaction.source === "payment" ||
+      transaction.source === "appointment-log" ||
+      Boolean(getTransactionAppointmentId(transaction)) ||
+      /payment/i.test(`${transaction.description || ""} ${transaction.method || ""}`)
+    );
+
+  const getEditablePaymentId = (transaction: RecentTransaction) => {
+    const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
+    if (explicitPaymentId) return String(explicitPaymentId).trim();
+
+    if (transaction.source === "appointment-log" && String(transaction.id || "").startsWith("apt_log_")) {
+      return String(transaction.id).trim();
+    }
+
+    if (transaction.source === "payment" && transaction.id) {
+      return String(transaction.id).trim();
+    }
+
+    return "";
+  };
+
+  const getPaymentEditUnavailableMessage = (transaction: RecentTransaction) => {
+    if (transaction.source === "appointment-log") {
+      return "Could not connect this payment log to an editable payment record.";
+    }
+
+    if (transaction.source === "finance-record") {
+      return "This is a finance record without a linked payment record.";
+    }
+
+    return "Could not find the payment record to edit.";
+  };
+
+  const handleEditPaymentTransaction = (transaction: RecentTransaction) => {
+    const paymentId = getEditablePaymentId(transaction);
+    if (!paymentId) {
+      toast.error(getPaymentEditUnavailableMessage(transaction));
+      return;
+    }
+
+    const snapshot = transaction.appointmentSnapshot as any;
+    const paymentPatientId =
+      transaction.patientId ||
+      snapshot?.patientId ||
+      snapshot?.patient?.id ||
+      null;
+
+    openEditPaymentModal(paymentId, transaction as any, paymentPatientId);
+  };
 
   const findExpenseForTransaction = (
     transaction: RecentTransaction,
@@ -1670,6 +1793,7 @@ export function FinanceView() {
       const resolvedTransactionId = transactionToView.transactionId || transactionToView.id || snapshot?.transactionId || paymentTxnId;
       const resolvedPaymentDate = transactionToView.paymentDate || transactionToView.date || snapshot?.paymentDate;
 
+      const isPaymentSnapshot = isPaymentTransactionRow(transactionToView);
       const enrichedSnapshot = {
         ...snapshot,
         transactionId: resolvedTransactionId,
@@ -1687,8 +1811,8 @@ export function FinanceView() {
         // derive from the isHistorical value we computed earlier.
         _isHistorical: Boolean(snapshot?._isHistorical) || Boolean(isHistorical),
         // mark log/change type when coming from a transaction log
-        logType: snapshot?.logType || (transactionToView.source ? String(transactionToView.source) : undefined) || (isHistorical ? "payment" : snapshot?.logType),
-        changeType: snapshot?.changeType || (isHistorical ? "payment" : snapshot?.changeType),
+        logType: isPaymentSnapshot ? "payment" : snapshot?.logType || (transactionToView.source ? String(transactionToView.source) : undefined) || (isHistorical ? "payment" : snapshot?.logType),
+        changeType: isPaymentSnapshot ? "payment" : snapshot?.changeType || (isHistorical ? "payment" : snapshot?.changeType),
       };
 
       setAppointmentSnapshot(enrichedSnapshot);
@@ -1794,7 +1918,9 @@ export function FinanceView() {
           <TabsTrigger value="overview" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Financial Overview</TabsTrigger>
           <TabsTrigger value="expenses" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Expenses</TabsTrigger>
           <TabsTrigger value="inventory" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Inventory</TabsTrigger>
-          <TabsTrigger value="payroll" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Payroll</TabsTrigger>
+          {!PAYROLL_DISABLED && (
+            <TabsTrigger value="payroll" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Payroll</TabsTrigger>
+          )}
           <TabsTrigger value="transactions" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Transactions</TabsTrigger>
         </TabsList>
 
@@ -1990,7 +2116,7 @@ export function FinanceView() {
                           const expenseStatus = normalizeFilterValue(expense.status);
                           return (
                             <TableRow key={expense.id}>
-                              <TableCell>{expense.date}</TableCell>
+                              <TableCell>{formatFinanceDate(expense.date)}</TableCell>
                               <TableCell className="text-sm text-muted-foreground">
                                 {expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "-"}
                               </TableCell>
@@ -2108,7 +2234,7 @@ export function FinanceView() {
                           </TableCell>
                           <TableCell>{formatCurrency(item.costPerUnit)}</TableCell>
                           <TableCell>{item.supplier}</TableCell>
-                          <TableCell>{item.lastOrdered}</TableCell>
+                          <TableCell>{formatFinanceDate(item.lastOrdered)}</TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-2">
                               <Button variant="outline" size="sm" onClick={() => openReorderModal(item)}>
@@ -2131,6 +2257,7 @@ export function FinanceView() {
           </Card>
         </TabsContent>
 
+        {!PAYROLL_DISABLED && (
         <TabsContent value="payroll" className="space-y-6">
           <Card>
             <CardHeader>
@@ -2318,6 +2445,7 @@ export function FinanceView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         <TabsContent value="transactions" className="space-y-6">
           <Card>
@@ -2368,7 +2496,7 @@ export function FinanceView() {
                   ) : (
                     filteredRecentTransactions.map((transaction) => {
                       const appointmentId = getTransactionAppointmentId(transaction);
-                      const transactionPaymentDate = transaction.paymentDate || transaction.date;
+                      const transactionPaymentDate = formatFinanceDate(transaction.paymentDate || transaction.date);
                       const transactionLoadingKey = appointmentId || transaction.id;
                       const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
                       const expenseForTransaction = findExpenseForTransaction(transaction);
@@ -2376,6 +2504,8 @@ export function FinanceView() {
                         transaction.type === "expense" &&
                         (Boolean(expenseForTransaction) || transaction.source === "expense");
                       const canViewAppointmentSnapshot = Boolean(appointmentId || transaction.appointmentSnapshot);
+                      const canEditPayment = isEditablePaymentTransaction(transaction);
+                      const shouldShowPaymentEdit = isPaymentTransactionRow(transaction);
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
@@ -2463,6 +2593,18 @@ export function FinanceView() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
+                            {shouldShowPaymentEdit && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 text-muted-foreground hover:text-violet-600 ${canEditPayment ? "" : "opacity-60"}`}
+                                title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
+                                onClick={() => handleEditPaymentTransaction(transaction)}
+                              >
+                                <Edit className="h-4 w-4" />
+                                <span className="sr-only">Edit Payment</span>
+                              </Button>
+                            )}
                           </div>
                         </div>
                       );
@@ -2544,79 +2686,83 @@ export function FinanceView() {
         }}
         onSave={handleReorderInventoryItem}
       />
-      <FinancePayrollBonusModal
-        open={isPayrollBonusModalOpen}
-        form={payrollBonusForm}
-        payrollData={payrollData}
-        selectedPayrollMonth={selectedPayrollMonth}
-        isSaving={isSavingPayroll}
-        formatCurrency={formatCurrency}
-        onOpenChange={(open) => !open && closePayrollBonusModal()}
-        onFormChange={setPayrollBonusForm}
-        onStaffChange={handlePayrollBonusStaffChange}
-        onSave={handleAddPayrollBonus}
-      />
-      <FinancePayrollEditModal
-        open={Boolean(payrollEntryToEdit)}
-        entry={payrollEntryToEdit}
-        form={payrollEditForm}
-        selectedPayrollMonth={selectedPayrollMonth}
-        isSaving={isSavingPayroll}
-        formatCurrency={formatCurrency}
-        onOpenChange={(open) => !open && closePayrollEditModal()}
-        onFormChange={setPayrollEditForm}
-        onSave={handleSavePayrollEdit}
-      />
-      <FinancePayrollModal
-        open={Boolean(payrollModalMode)}
-        mode={payrollModalMode || "process"}
-        entry={selectedPayrollEntry}
-        payrollData={payrollData}
-        selectedPayrollMonth={selectedPayrollMonth}
-        paymentDate={payrollPaymentDate}
-        isSaving={isSavingPayroll}
-        historyLogs={financeHistoryLogs}
-        isHistoryLoading={isFinanceHistoryLoading}
-        formatCurrency={formatCurrency}
-        onOpenChange={(open) => !open && closePayrollModal()}
-        onPaymentDateChange={setPayrollPaymentDate}
-        onProcess={handleProcessPayroll}
-        onPay={handlePayPayrollEntry}
-      />
-      <Dialog open={Boolean(payrollEntryToUnpay)} onOpenChange={(open) => !open && setPayrollEntryToUnpay(null)}>
-        <DialogContent className="p-0 sm:max-w-md">
-          <div className="border-b bg-gray-50 px-6 py-5">
-            <DialogHeader>
-              <DialogTitle>Cancel Payroll Payment</DialogTitle>
-              <DialogDescription>
-                Move this payroll entry back to pending for {formatPayrollMonthLabel(selectedPayrollMonth)}.
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-
-          {payrollEntryToUnpay ? (
-            <div className="space-y-4 px-6 py-5">
-              <div className="rounded-md border bg-white p-4">
-                <div className="font-medium text-gray-900">{payrollEntryToUnpay.name}</div>
-                <div className="mt-1 text-sm text-muted-foreground">{payrollEntryToUnpay.role}</div>
-                <div className="mt-3 text-2xl font-bold">{formatCurrency(payrollEntryToUnpay.total)}</div>
+      {!PAYROLL_DISABLED && (
+        <>
+          <FinancePayrollBonusModal
+            open={isPayrollBonusModalOpen}
+            form={payrollBonusForm}
+            payrollData={payrollData}
+            selectedPayrollMonth={selectedPayrollMonth}
+            isSaving={isSavingPayroll}
+            formatCurrency={formatCurrency}
+            onOpenChange={(open) => !open && closePayrollBonusModal()}
+            onFormChange={setPayrollBonusForm}
+            onStaffChange={handlePayrollBonusStaffChange}
+            onSave={handleAddPayrollBonus}
+          />
+          <FinancePayrollEditModal
+            open={Boolean(payrollEntryToEdit)}
+            entry={payrollEntryToEdit}
+            form={payrollEditForm}
+            selectedPayrollMonth={selectedPayrollMonth}
+            isSaving={isSavingPayroll}
+            formatCurrency={formatCurrency}
+            onOpenChange={(open) => !open && closePayrollEditModal()}
+            onFormChange={setPayrollEditForm}
+            onSave={handleSavePayrollEdit}
+          />
+          <FinancePayrollModal
+            open={Boolean(payrollModalMode)}
+            mode={payrollModalMode || "process"}
+            entry={selectedPayrollEntry}
+            payrollData={payrollData}
+            selectedPayrollMonth={selectedPayrollMonth}
+            paymentDate={payrollPaymentDate}
+            isSaving={isSavingPayroll}
+            historyLogs={financeHistoryLogs}
+            isHistoryLoading={isFinanceHistoryLoading}
+            formatCurrency={formatCurrency}
+            onOpenChange={(open) => !open && closePayrollModal()}
+            onPaymentDateChange={setPayrollPaymentDate}
+            onProcess={handleProcessPayroll}
+            onPay={handlePayPayrollEntry}
+          />
+          <Dialog open={Boolean(payrollEntryToUnpay)} onOpenChange={(open) => !open && setPayrollEntryToUnpay(null)}>
+            <DialogContent className="p-0 sm:max-w-md">
+              <div className="border-b bg-gray-50 px-6 py-5">
+                <DialogHeader>
+                  <DialogTitle>Cancel Payroll Payment</DialogTitle>
+                  <DialogDescription>
+                    Move this payroll entry back to pending for {formatPayrollMonthLabel(selectedPayrollMonth)}.
+                  </DialogDescription>
+                </DialogHeader>
               </div>
-              <p className="text-sm text-muted-foreground">
-                This keeps the salary record and history, but changes the payment status back to pending so it can be paid again later.
-              </p>
-            </div>
-          ) : null}
 
-          <DialogFooter className="border-t px-6 py-4">
-            <Button variant="outline" onClick={() => setPayrollEntryToUnpay(null)} disabled={isSavingPayroll}>
-              Keep Paid
-            </Button>
-            <Button variant="destructive" onClick={handleReversePayrollPayment} disabled={isSavingPayroll || !payrollEntryToUnpay}>
-              {isSavingPayroll ? "Cancelling..." : "Cancel Payment"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {payrollEntryToUnpay ? (
+                <div className="space-y-4 px-6 py-5">
+                  <div className="rounded-md border bg-white p-4">
+                    <div className="font-medium text-gray-900">{payrollEntryToUnpay.name}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{payrollEntryToUnpay.role}</div>
+                    <div className="mt-3 text-2xl font-bold">{formatCurrency(payrollEntryToUnpay.total)}</div>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    This keeps the salary record and history, but changes the payment status back to pending so it can be paid again later.
+                  </p>
+                </div>
+              ) : null}
+
+              <DialogFooter className="border-t px-6 py-4">
+                <Button variant="outline" onClick={() => setPayrollEntryToUnpay(null)} disabled={isSavingPayroll}>
+                  Keep Paid
+                </Button>
+                <Button variant="destructive" onClick={handleReversePayrollPayment} disabled={isSavingPayroll || !payrollEntryToUnpay}>
+                  {isSavingPayroll ? "Cancelling..." : "Cancel Payment"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {

@@ -28,6 +28,7 @@ const normalizeServiceOption = (option: Partial<ServiceCatalogItem>, fallbackId:
     id,
     value: name || `Service ${id}`,
     label: name || `Service ${id}`,
+    icon: String(option.icon || "").trim() || "🦷",
     price: Math.max(0, Number(option.price) || 0),
     duration: Math.max(1, Math.round(Number(option.duration) || 30)),
     isActive: option.isActive !== false,

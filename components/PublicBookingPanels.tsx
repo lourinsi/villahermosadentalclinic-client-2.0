@@ -50,6 +50,7 @@ import {
   getStatusBorderColorClass,
   getStatusDotColorClass,
 } from "@/lib/status-colors";
+import { formatWordyDate } from "@/lib/utils";
 
 const formatDateKey = (date: Date) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -62,22 +63,11 @@ const parseDateKey = (dateKey: string) => {
   return new Date(year, (month || 1) - 1, day || 1);
 };
 
-const formatLongDate = (dateKey: string) =>
-  parseDateKey(dateKey).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+const formatLongDate = (dateKey: string) => formatWordyDate(parseDateKey(dateKey));
 
 const formatCalendarLabel = (date: Date, viewMode: "month" | "week" | "day") => {
   if (viewMode === "day") {
-    return date.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    return formatWordyDate(date);
   }
 
   if (viewMode === "week") {
@@ -85,14 +75,7 @@ const formatCalendarLabel = (date: Date, viewMode: "month" | "week" | "day") => 
     start.setDate(date.getDate() - date.getDay());
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    return `${start.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    })} - ${end.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })}`;
+    return `${formatWordyDate(start)} - ${formatWordyDate(end)}`;
   }
 
   return date.toLocaleDateString("en-US", {

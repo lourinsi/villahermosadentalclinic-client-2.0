@@ -7,6 +7,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 interface RecentScheduleProps {
   portal: "admin" | "doctor" | "patient";
@@ -29,12 +30,14 @@ export function RecentSchedule({
   onAppointmentClick,
   onViewAll
 }: RecentScheduleProps) {
-  const sortedAppointments = [...appointments].sort((a, b) => {
-    if (a.date !== b.date) {
-      return a.date.localeCompare(b.date);
-    }
-    return a.time.localeCompare(b.time);
-  });
+  const sortedAppointments = appointments
+    .filter((appointment) => normalizeAppointmentStatus(appointment.status) !== "cancelled")
+    .sort((a, b) => {
+      if (a.date !== b.date) {
+        return a.date.localeCompare(b.date);
+      }
+      return a.time.localeCompare(b.time);
+    });
 
   return (
     <div className="w-full h-full flex flex-col">

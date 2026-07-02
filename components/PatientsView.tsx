@@ -537,7 +537,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                               }}
                             >
                               <Eye className="h-4 w-4 text-slate-400" />
-                              View Details
+                              Patient Profile
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="gap-2"

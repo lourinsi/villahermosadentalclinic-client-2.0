@@ -10,6 +10,7 @@ import { Toaster } from "sonner";
 import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal";
 import { AddPatientModal } from "@/components/AddPatientModal";
 import { PaymentModal } from "@/components/PaymentModal";
+import { EditPaymentModal } from "@/components/EditPaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
 import { GlobalBookingModalWrapper } from "@/components/GlobalBookingModalWrapper";
 import { UserTour } from "@/components/UserTour";
@@ -50,6 +51,7 @@ export default function RootLayout({
                   <AddPatientModal />
                   <GlobalBookingModalWrapper />
                   <PaymentModal />
+                  <EditPaymentModal />
                   <PatientPaymentModal />
                   <UserTour />
                 </PaymentModalProvider>

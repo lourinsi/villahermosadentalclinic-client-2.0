@@ -23,10 +23,24 @@ export interface AppointmentTypeOption {
   id: number;
   value: string;
   label: string;
+  icon?: string;
   price?: number;
   duration?: number;
   isActive?: boolean;
 }
+
+export const APPOINTMENT_TYPE_ICONS: Record<string, string> = {
+  "Routine Cleaning": "✨",
+  "Checkup": "🔍",
+  "Filling": "🦷",
+  "Root Canal": "🔬",
+  "Extraction": "🦷",
+  "Whitening": "💎",
+  "Other": "➕",
+  "Dentures": "🦷",
+  "Crowns": "👑",
+  "Braces": "😁",
+};
 
 export const APPOINTMENT_PRICES: Record<string, number> = {
   "Routine Cleaning": 1500,
@@ -58,6 +72,7 @@ export const APPOINTMENT_TYPE_OPTIONS: AppointmentTypeOption[] = APPOINTMENT_TYP
   id,
   value: name,
   label: name,
+  icon: APPOINTMENT_TYPE_ICONS[name] || "🦷",
   price: APPOINTMENT_PRICES[name] || 0,
   duration: APPOINTMENT_TYPE_DURATIONS[name] || 30,
   isActive: true,

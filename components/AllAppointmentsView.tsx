@@ -15,6 +15,7 @@ import {
 } from "@/lib/status-colors";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import { formatWordyDate } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -339,7 +340,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
                   <div className="flex items-center gap-2 text-gray-600">
                     <CalendarIcon className="h-4 w-4 text-gray-400" />
-                    <span>{appointment.date}</span>
+                    <span>{formatWordyDate(appointment.date, { fallback: appointment.date || "No date" })}</span>
                   </div>
                   <div className="flex items-center gap-2 text-gray-600 justify-end">
                     <CreditCard className="h-4 w-4 text-gray-400" />

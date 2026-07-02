@@ -16,7 +16,7 @@ import { CreditCard, Banknote } from "lucide-react";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { parseBackendDateToLocal } from "@/lib/utils";
+import { formatWordyDate } from "@/lib/utils";
 import { toast } from "sonner";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -221,9 +221,9 @@ export function PatientPaymentModal() {
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-500">Date:</span>
               <span className="font-medium">
-                {parseBackendDateToLocal(
-                  selectedAppointment.date
-                ).toLocaleDateString()}
+                {formatWordyDate(selectedAppointment.date, {
+                  fallback: selectedAppointment.date || "No date",
+                })}
               </span>
             </div>
             <div className="flex justify-between items-center">
