@@ -12,7 +12,6 @@ import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "./ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
@@ -176,9 +175,7 @@ export type PatientDetailsRef = {
   changedFields: Record<string, { old: any; new: any }>;
 };
 
-interface PatientDetailsModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface PatientProfileProps {
   patient: Patient | null;
   detailsRef: React.Ref<PatientDetailsRef>;
   onDeletePatient: (p: Patient) => void;
@@ -189,9 +186,7 @@ interface PatientDetailsModalProps {
   onOpenBookingModal?: (appointment: Appointment) => void;
 }
 
-export function PatientDetailsModal({
-  open,
-  onOpenChange,
+export function PatientProfile({
   patient,
   detailsRef,
   onDeletePatient,
@@ -200,17 +195,10 @@ export function PatientDetailsModal({
   doctorFilter,
   openBookingAppointmentId,
   onOpenBookingModal,
-}: PatientDetailsModalProps) {
+}: PatientProfileProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
   const [serverPatient, setServerPatient] = useState<Patient | null>(null);
   const patientDisplayName = patient?.name || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient";
-  const patientInitials = patientDisplayName
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "P";
 
   const { refreshTrigger } = useAppointmentModal();
   const [modalDataRefreshKey, setModalDataRefreshKey] = useState(0);
@@ -254,14 +242,14 @@ export function PatientDetailsModal({
     }
   };
 
-  // When the modal opens, fetch the authoritative patient record so the
+  // Fetch the authoritative patient record so the
   // displayed status reflects server-side computation (which considers
   // appointment paymentStatus values). Fall back to the provided `patient`
   // prop if the fetch fails.
   useEffect(() => {
     let mounted = true;
     const loadPatient = async () => {
-      if (!open || !patient?.id) {
+      if (!patient?.id) {
         setServerPatient(null);
         return;
       }
@@ -283,10 +271,10 @@ export function PatientDetailsModal({
 
     loadPatient();
     return () => { mounted = false; };
-  }, [open, patient?.id, refreshTrigger]);
+  }, [patient?.id, refreshTrigger]);
 
   useEffect(() => {
-    if (!open) {
+    if (!patient?.id) {
       setModalOverdueAppointmentCount(null);
       setModalPatientAppointments([]);
       setModalPatientAppointmentsLoaded(false);
@@ -296,14 +284,12 @@ export function PatientDetailsModal({
 
     setModalOverdueAppointmentCount(serverPatient?.overdueAppointmentCount ?? patient?.overdueAppointmentCount ?? null);
   }, [
-    open,
+    patient?.id,
     patient?.overdueAppointmentCount,
     serverPatient?.overdueAppointmentCount,
   ]);
 
   useEffect(() => {
-    if (!open) return;
-
     const handleDataRefresh = () => setModalDataRefreshKey((key) => key + 1);
     window.addEventListener("appointments:updated", handleDataRefresh);
     window.addEventListener("payments:updated", handleDataRefresh);
@@ -312,13 +298,13 @@ export function PatientDetailsModal({
       window.removeEventListener("appointments:updated", handleDataRefresh);
       window.removeEventListener("payments:updated", handleDataRefresh);
     };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
 
     const loadPatientAppointmentsForSummary = async () => {
-      if (!open || !patient?.id) {
+      if (!patient?.id) {
         setModalPatientAppointments([]);
         setModalPatientAppointmentsLoaded(false);
         setModalPatientAppointmentsPatientId("");
@@ -356,7 +342,7 @@ export function PatientDetailsModal({
     return () => {
       mounted = false;
     };
-  }, [open, patient?.id, refreshTrigger, modalDataRefreshKey]);
+  }, [patient?.id, refreshTrigger, modalDataRefreshKey]);
 
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
@@ -394,13 +380,12 @@ export function PatientDetailsModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-tour-id="patient-details-modal"
+    <div
+      data-tour-id="patient-profile-page"
         title={`Patient Details - ${patientDisplayName}`}
-        className="flex h-[min(96vh,1080px)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden rounded-2xl border-none bg-[#fdfdff] p-0 shadow-2xl ring-1 ring-slate-200 duration-200 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)] 2xl:max-w-[1800px]"
+      className="flex min-h-screen flex-col gap-0 bg-[#fdfdff]"
       >
-        <DialogHeader className="shrink-0 border-b border-slate-200 bg-white px-5 py-5 pr-12 text-left sm:px-7 lg:px-8 lg:py-6">
+        <header className="shrink-0 border-b border-slate-200 bg-white px-5 py-5 text-left sm:px-7 lg:px-8 lg:py-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4 sm:gap-6">
               <div className="relative group">
@@ -409,9 +394,9 @@ export function PatientDetailsModal({
               </div>
               <div className="min-w-0 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-3">
-                  <DialogTitle className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                  <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
                     {patientDisplayName}
-                  </DialogTitle>
+                  </h1>
                   {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
@@ -465,10 +450,10 @@ export function PatientDetailsModal({
               </Button>
             </div>
           </div>
-        </DialogHeader>
+        </header>
 
         {patient ? (
-          <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex flex-1 flex-col">
             {/* Quick Summary Bar - High Visibility Redesign */}
             <div data-tour-id="patient-details-summary" className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-7 lg:px-8">
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
@@ -510,8 +495,7 @@ export function PatientDetailsModal({
             />
           </div>
         ) : null}
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
 // Local history appointment shape (type can be string for display)
@@ -930,14 +914,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const patientDisplayName = [formData.firstName, formData.lastName].filter(Boolean).join(" ") || patient.name || "Patient";
   const rawPatientIdForBooking = patient.id || loadedPatient.id;
   const patientIdForBooking = rawPatientIdForBooking ? String(rawPatientIdForBooking) : undefined;
-  const patientInitials = patientDisplayName
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "P";
-
   useEffect(() => {
     setActiveTab("info");
   }, [patient.id]);
@@ -1420,7 +1396,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
     try {
-      console.log("[PatientDetailsModal] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
+      console.log("[PatientProfile] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
     } catch (e) {}
     const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
     const transactionRow = transaction as (RecentTransaction & Record<string, any>) | undefined;

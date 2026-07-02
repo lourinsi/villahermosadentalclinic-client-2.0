@@ -188,6 +188,17 @@ const isDateWithinRange = (date: string | undefined, range: { start: string; end
   return date >= range.start && date <= range.end;
 };
 
+const toDateOnly = (value?: string | null) => String(value || "").split("T")[0].trim();
+
+const getExpenseReportingDate = (expense: { date?: string | null }) =>
+  toDateOnly(expense.date);
+
+const getTransactionReportingDate = (transaction: {
+  date?: string | null;
+  paymentDate?: string | null;
+}) =>
+  toDateOnly(transaction.paymentDate) || toDateOnly(transaction.date);
+
 const buildAuthRequest = (init: RequestInit = {}): RequestInit => ({
   ...init,
   credentials: "include",
@@ -721,25 +732,38 @@ export function FinanceView() {
     });
   }, [detailedExpenses, endDate, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
 
+  const detailedExpenseById = useMemo(
+    () => new Map(detailedExpenses.map((expense) => [String(expense.id), expense])),
+    [detailedExpenses]
+  );
+
   const filteredRecentTransactions = useMemo(() => (
     recentTransactions.filter((transaction) => {
+      const linkedExpense =
+        transaction.type === "expense" || transaction.source === "expense"
+          ? detailedExpenseById.get(String(transaction.id || ""))
+          : undefined;
+      const reportingDate = linkedExpense
+        ? getExpenseReportingDate(linkedExpense)
+        : getTransactionReportingDate(transaction);
+
       if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
-      if (startDate && transaction.date < startDate) return false;
-      if (endDate && transaction.date > endDate) return false;
+      if (startDate && reportingDate < startDate) return false;
+      if (endDate && reportingDate > endDate) return false;
       return true;
     })
-  ), [endDate, recentTransactions, startDate, transactionTypeFilter]);
+  ), [detailedExpenseById, endDate, recentTransactions, startDate, transactionTypeFilter]);
 
   const metricPeriodRange = useMemo(() => getMetricPeriodRange(metricPeriod), [metricPeriod]);
   const metricRevenue = useMemo(() => (
     recentTransactions
-      .filter((transaction) => transaction.type === "income" && isDateWithinRange(transaction.date, metricPeriodRange))
+      .filter((transaction) => transaction.type === "income" && isDateWithinRange(getTransactionReportingDate(transaction), metricPeriodRange))
       .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
   ), [metricPeriodRange, recentTransactions]);
   const metricExpenses = useMemo(() => (
     detailedExpenses
       .filter((expense) => normalizeFilterValue(expense.status) === "paid")
-      .filter((expense) => isDateWithinRange(expense.paymentDate || expense.date, metricPeriodRange))
+      .filter((expense) => isDateWithinRange(getExpenseReportingDate(expense), metricPeriodRange))
       .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
   ), [detailedExpenses, metricPeriodRange]);
   const metricProfit = metricRevenue - metricExpenses;
@@ -960,7 +984,7 @@ export function FinanceView() {
     const invoiceRows = recentTransactions
       .filter((transaction) => transaction.type === "income")
       .map((transaction) => ({
-        Date: transaction.paymentDate || transaction.date,
+        Date: getTransactionReportingDate(transaction),
         Description: transaction.description,
         Method: transaction.method,
         Amount: transaction.amount,
@@ -2496,10 +2520,14 @@ export function FinanceView() {
                   ) : (
                     filteredRecentTransactions.map((transaction) => {
                       const appointmentId = getTransactionAppointmentId(transaction);
-                      const transactionPaymentDate = formatFinanceDate(transaction.paymentDate || transaction.date);
                       const transactionLoadingKey = appointmentId || transaction.id;
                       const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
                       const expenseForTransaction = findExpenseForTransaction(transaction);
+                      const transactionReportingDate =
+                        transaction.type === "expense" && expenseForTransaction
+                          ? getExpenseReportingDate(expenseForTransaction)
+                          : getTransactionReportingDate(transaction);
+                      const transactionDateLabel = formatFinanceDate(transactionReportingDate);
                       const canViewExpense =
                         transaction.type === "expense" &&
                         (Boolean(expenseForTransaction) || transaction.source === "expense");
@@ -2545,7 +2573,7 @@ export function FinanceView() {
                             <div className="min-w-0 flex-1">
                               <div className="font-medium truncate text-gray-900">{transaction.description}</div>
                               <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                <span>Payment Date: {transactionPaymentDate}</span>
+                                <span>{transaction.type === "expense" ? "Expense Date" : "Payment Date"}: {transactionDateLabel}</span>
                                 <span>•</span>
                                 <span>{transaction.method}</span>
                               </div>

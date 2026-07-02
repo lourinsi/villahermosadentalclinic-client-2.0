@@ -52,6 +52,14 @@ const getDashboardPeriodRange = (mode: "day" | "week" | "month") => {
 const isDateWithinDashboardRange = (date: string | undefined, range: { start: string; end: string }) =>
   Boolean(date && date >= range.start && date <= range.end);
 
+const toDashboardDateOnly = (value?: string | null) => String(value || "").split("T")[0].trim();
+
+const getDashboardTransactionReportingDate = (transaction: { date?: string | null; paymentDate?: string | null }) =>
+  toDashboardDateOnly(transaction.paymentDate) || toDashboardDateOnly(transaction.date);
+
+const getDashboardExpenseReportingDate = (expense: { date?: string | null }) =>
+  toDashboardDateOnly(expense.date);
+
 const getAppointmentDateTime = (appointment: Appointment) => new Date(`${appointment.date}T${appointment.time}`);
 
 const isVisibleDashboardAppointment = (appointment: Appointment) => {
@@ -242,13 +250,13 @@ export function Dashboard({ portal }: DashboardProps) {
   const periodRevenue = useMemo(() => (
     financeTransactions
       .filter((transaction) => transaction.type === "income")
-      .filter((transaction) => isDateWithinDashboardRange(transaction.date, dashboardPeriodRange))
+      .filter((transaction) => isDateWithinDashboardRange(getDashboardTransactionReportingDate(transaction), dashboardPeriodRange))
       .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
   ), [dashboardPeriodRange, financeTransactions]);
   const periodExpenses = useMemo(() => (
     detailedExpenses
       .filter((expense) => String(expense.status || "").toLowerCase().trim() === "paid")
-      .filter((expense) => isDateWithinDashboardRange(expense.paymentDate || expense.date, dashboardPeriodRange))
+      .filter((expense) => isDateWithinDashboardRange(getDashboardExpenseReportingDate(expense), dashboardPeriodRange))
       .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
   ), [dashboardPeriodRange, detailedExpenses]);
 
