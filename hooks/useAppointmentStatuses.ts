@@ -86,7 +86,7 @@ export const useAppointmentStatuses = (): UseAppointmentStatusesReturn => {
       const data = await response.json();
       
       if (data.success && Array.isArray(data.data)) {
-        setStatuses(normalizeStatusOptions(data.data));
+        setStatuses(normalizeStatusOptions([...data.data, ...DEFAULT_APPOINTMENT_STATUS_OPTIONS]));
         setError(null);
       } else {
         throw new Error('Invalid response format from server');

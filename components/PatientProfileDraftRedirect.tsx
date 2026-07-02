@@ -19,9 +19,16 @@ export function PatientProfileDraftRedirect() {
   const router = useRouter();
 
   React.useEffect(() => {
-    if (!pathname.startsWith("/receptionist") || pathname === "/receptionist/login") return;
+    const portalBasePath = pathname.startsWith("/admin")
+      ? "/admin"
+      : pathname.startsWith("/receptionist")
+        ? "/receptionist"
+        : null;
+
+    if (!portalBasePath || pathname === `${portalBasePath}/login`) return;
 
     const draft = readPatientProfileDraft();
+    if (!draft?.path.startsWith(`${portalBasePath}/patients/`)) return;
     if (!draft || normalizePath(draft.path) === normalizePath(pathname)) return;
 
     toast.info("Recovered unsaved patient changes.");

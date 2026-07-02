@@ -77,6 +77,10 @@ interface UseAppointmentsOptions {
   enabled?: boolean;
 }
 
+export type DeleteAppointmentOptions = {
+  hardDelete?: boolean;
+};
+
 export const useAppointments = (
   refreshTrigger?: number,
   filters?: AppointmentFilters,
@@ -214,7 +218,7 @@ export const useAppointments = (
     }
   };
 
-  const deleteAppointment = async (id: string) => {
+  const deleteAppointment = async (id: string, options?: DeleteAppointmentOptions) => {
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
       const headers: HeadersInit = {
@@ -224,7 +228,10 @@ export const useAppointments = (
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`${API_URL}/${id}`, {
+      const url = options?.hardDelete
+        ? `${API_URL}/${id}?hardDelete=true`
+        : `${API_URL}/${id}`;
+      const response = await fetch(url, {
         method: "DELETE",
         headers,
         credentials: "include",

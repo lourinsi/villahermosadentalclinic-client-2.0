@@ -4,7 +4,7 @@ import { apiUrl } from "@/lib/api";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
 import { BookingCreationMode, isPastAppointmentSchedule } from "@/components/sharedBookingLogic";
-import { useAppointments, Appointment, AppointmentFilters } from "./useAppointments";
+import { useAppointments, Appointment, AppointmentFilters, DeleteAppointmentOptions } from "./useAppointments";
 
 interface AppointmentModalContextType {
   isCreateModalOpen: boolean;
@@ -45,7 +45,7 @@ interface AppointmentModalContextType {
   isLoading: boolean;
   addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<Appointment>;
   updateAppointment: (id: string, updates: Partial<Appointment>) => Promise<Appointment>;
-  deleteAppointment: (id: string) => Promise<void>;
+  deleteAppointment: (id: string, options?: DeleteAppointmentOptions) => Promise<void>;
 }
 
 const AppointmentModalContext = createContext<AppointmentModalContextType | undefined>(undefined);

@@ -1062,10 +1062,12 @@ export function getBookingCancellationConfig({
   const existingStatus = normalizeAppointmentStatus(appointmentToEdit?.status || "");
   const currentStatus = selectedStatus || existingStatus;
   const isCancelled = currentStatus === "cancelled" || existingStatus === "cancelled";
+  const isDeleted = currentStatus === "deleted" || existingStatus === "deleted";
 
   return {
     isCancelled,
-    canCancelAppointment: Boolean(appointmentToEdit) && !isCancelled,
+    isDeleted,
+    canCancelAppointment: Boolean(appointmentToEdit) && !isCancelled && !isDeleted,
   };
 }
 

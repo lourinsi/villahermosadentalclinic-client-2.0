@@ -1,5 +1,10 @@
 export const PATIENT_PROFILE_DRAFT_STORAGE_KEY = "villahermosa.patientProfileDraft.v1";
 
+const PATIENT_PROFILE_DRAFT_PATH_PREFIXES = ["/receptionist/patients/", "/admin/patients/"];
+
+const isPatientProfileDraftPath = (path: string) =>
+  PATIENT_PROFILE_DRAFT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+
 export type PatientProfileDraft = {
   version: 1;
   patientId: string;
@@ -26,11 +31,11 @@ export const parsePatientProfileDraft = (raw: string | null): PatientProfileDraf
 
   try {
     const draft = JSON.parse(raw) as Partial<PatientProfileDraft>;
+    const draftPath = typeof draft.path === "string" ? draft.path : "";
     if (
       draft?.version !== 1 ||
       !draft.patientId ||
-      !draft.path ||
-      !draft.path.startsWith("/receptionist/patients/")
+      !isPatientProfileDraftPath(draftPath)
     ) {
       return null;
     }
@@ -39,7 +44,7 @@ export const parsePatientProfileDraft = (raw: string | null): PatientProfileDraf
       version: 1,
       patientId: String(draft.patientId),
       patientName: String(draft.patientName || "Patient"),
-      path: String(draft.path),
+      path: draftPath,
       updatedAt: String(draft.updatedAt || new Date().toISOString()),
       activeTab: String(draft.activeTab || "info"),
       formData: draft.formData && typeof draft.formData === "object" ? draft.formData : {},
