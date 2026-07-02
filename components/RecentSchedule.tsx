@@ -42,18 +42,18 @@ export function RecentSchedule({
   return (
     <div className="w-full h-full flex flex-col">
       <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col w-full flex-1 min-h-[240px]">
-      <CardHeader className="border-b border-gray-50 p-8 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
+      <CardHeader className="space-y-4 border-b border-gray-50 p-4 sm:p-8">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <CardTitle className="text-xl font-black text-gray-900 tracking-tight">
               {portal === "admin" ? "Recent Schedule" : "My Schedule"}
             </CardTitle>
-            <p className="text-sm font-medium text-gray-500 mt-1">{viewTitle}</p>
+            <p className="mt-1 truncate text-sm font-medium text-gray-500">{viewTitle}</p>
           </div>
           <Button 
             variant="ghost" 
             size="sm" 
-            className={`rounded-lg font-bold ${portal === 'patient' ? 'text-violet-600 hover:bg-violet-50' : 'text-emerald-600 hover:bg-emerald-50'}`}
+            className={`shrink-0 rounded-lg font-bold ${portal === 'patient' ? 'text-violet-600 hover:bg-violet-50' : 'text-emerald-600 hover:bg-emerald-50'}`}
             onClick={onViewAll}
           >
             View All
@@ -78,7 +78,7 @@ export function RecentSchedule({
         </div>
       </CardHeader>
       <CardContent className="p-0 flex-1">
-        <div className="divide-y divide-gray-50 h-full min-h-[400px]">
+        <div className="h-full min-h-[300px] divide-y divide-gray-50 sm:min-h-[400px]">
           {isLoadingView ? (
             <div className="flex flex-col items-center justify-center h-full py-16">
               <div className="h-10 w-10 rounded-full border-4 border-violet-100 border-t-violet-600 animate-spin"></div>
@@ -94,10 +94,10 @@ export function RecentSchedule({
               return (
                 <div
                   key={appointment.id}
-                  className="group flex items-center justify-between p-5 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
+                  className="group flex cursor-pointer items-center justify-between p-4 transition-all duration-300 hover:bg-violet-50/50 sm:p-5"
                   onClick={() => onAppointmentClick(appointment)}
                 >
-                  <div className="flex items-center space-x-4">
+                  <div className="flex min-w-0 items-center space-x-4">
                     <div className="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
                       {viewMode === "day" ? (
                         <>
@@ -111,11 +111,11 @@ export function RecentSchedule({
                         </>
                       )}
                     </div>
-                    <div>
-                      <div className="text-sm font-black text-gray-900 group-hover:text-violet-700 transition-colors">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-gray-900 transition-colors group-hover:text-violet-700">
                         {portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}
                       </div>
-                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5 flex items-center gap-2">
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-tight text-gray-400">
                         {viewMode !== "day" && (
                           <>
                             <span>{appointmentTimeLabel}</span>

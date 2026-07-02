@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import {
+  loadQuestionnaireQuestions,
+  type QuestionnaireQuestion,
+} from "@/lib/questionnaire-questions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,15 +15,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Check, ClipboardList, ListPlus, Loader2, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ClipboardList, ListPlus, Loader2, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
-export type QuestionnaireQuestion = {
-  id: string;
-  text: string;
-  isActive?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-};
+export type { QuestionnaireQuestion };
 
 export function QuestionnaireView() {
   const [questions, setQuestions] = useState<QuestionnaireQuestion[]>([]);
@@ -31,6 +29,8 @@ export function QuestionnaireView() {
   const [isRestoringDefaults, setIsRestoringDefaults] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [questionRouteMessage, setQuestionRouteMessage] = useState("");
+  const isQuestionRouteUnavailable = Boolean(questionRouteMessage);
 
   const visibleQuestions = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -40,16 +40,10 @@ export function QuestionnaireView() {
   const loadQuestions = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(apiUrl("/api/questionnaire-questions"), {
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.success || !Array.isArray(payload.data)) {
-        throw new Error(payload?.message || "Failed to load questionnaire questions");
-      }
-      setQuestions(payload.data);
+      const result = await loadQuestionnaireQuestions({ includeInactive: true });
+      setQuestions(result.questions);
       setDrafts({});
+      setQuestionRouteMessage(result.isFallback ? result.unavailableMessage || "Questionnaire question route is unavailable." : "");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load questionnaire questions");
     } finally {
@@ -74,6 +68,11 @@ export function QuestionnaireView() {
   };
 
   const handleCreate = async () => {
+    if (isQuestionRouteUnavailable) {
+      toast.error("Questionnaire question management is not available on the current production API.");
+      return;
+    }
+
     const text = newQuestion.trim();
     if (!text) {
       toast.error("Question text is required");
@@ -103,6 +102,11 @@ export function QuestionnaireView() {
   };
 
   const handleRestoreDefaults = async () => {
+    if (isQuestionRouteUnavailable) {
+      toast.error("Questionnaire question management is not available on the current production API.");
+      return;
+    }
+
     setIsRestoringDefaults(true);
     try {
       const response = await fetch(apiUrl("/api/questionnaire-questions/baseline"), {
@@ -125,6 +129,11 @@ export function QuestionnaireView() {
   };
 
   const handleSave = async (question: QuestionnaireQuestion) => {
+    if (isQuestionRouteUnavailable) {
+      toast.error("Questionnaire question management is not available on the current production API.");
+      return;
+    }
+
     const draft = getDraft(question);
     if (!draft.text.trim()) {
       toast.error("Question text is required");
@@ -153,6 +162,11 @@ export function QuestionnaireView() {
   };
 
   const handleDelete = async (question: QuestionnaireQuestion) => {
+    if (isQuestionRouteUnavailable) {
+      toast.error("Questionnaire question management is not available on the current production API.");
+      return;
+    }
+
     setDeletingId(question.id);
     try {
       const response = await fetch(apiUrl(`/api/questionnaire-questions/${encodeURIComponent(question.id)}`), {
@@ -183,7 +197,12 @@ export function QuestionnaireView() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={handleRestoreDefaults} disabled={isRestoringDefaults || isLoading} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={handleRestoreDefaults}
+            disabled={isQuestionRouteUnavailable || isRestoringDefaults || isLoading}
+            className="gap-2"
+          >
             {isRestoringDefaults ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
             Restore Defaults
           </Button>
@@ -193,6 +212,18 @@ export function QuestionnaireView() {
           </Button>
         </div>
       </div>
+
+      {isQuestionRouteUnavailable && (
+        <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-5 w-5 flex-none" />
+          <div>
+            <p className="font-semibold">{questionRouteMessage}</p>
+            <p className="mt-1 text-amber-800">
+              Showing the checked-in questionnaire list so patient questionnaire and consent tabs can keep loading.
+            </p>
+          </div>
+        </div>
+      )}
 
       <Card className="border-gray-100 shadow-sm">
         <CardHeader>
@@ -210,9 +241,10 @@ export function QuestionnaireView() {
                 value={newQuestion}
                 onChange={(event) => setNewQuestion(event.target.value)}
                 placeholder="e.g. Has the patient experienced tooth sensitivity?"
+                disabled={isQuestionRouteUnavailable}
               />
             </div>
-            <Button onClick={handleCreate} disabled={isCreating} className="gap-2">
+            <Button onClick={handleCreate} disabled={isQuestionRouteUnavailable || isCreating} className="gap-2">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
             </Button>
@@ -270,6 +302,7 @@ export function QuestionnaireView() {
                           value={draft.text}
                           onChange={(event) => updateDraft(question, { text: event.target.value })}
                           className="font-semibold"
+                          disabled={isQuestionRouteUnavailable}
                         />
                       </TableCell>
                       <TableCell>
@@ -283,7 +316,7 @@ export function QuestionnaireView() {
                             size="sm"
                             variant={changed ? "default" : "outline"}
                             onClick={() => handleSave(question)}
-                            disabled={!changed || savingId === question.id}
+                            disabled={isQuestionRouteUnavailable || !changed || savingId === question.id}
                             className="gap-2"
                           >
                             {savingId === question.id ? (
@@ -299,7 +332,7 @@ export function QuestionnaireView() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleDelete(question)}
-                            disabled={deletingId === question.id}
+                            disabled={isQuestionRouteUnavailable || deletingId === question.id}
                             className="gap-2 text-red-600 hover:text-red-700"
                           >
                             {deletingId === question.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
