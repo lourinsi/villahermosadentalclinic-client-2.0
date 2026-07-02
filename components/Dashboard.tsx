@@ -362,20 +362,20 @@ export function Dashboard({ portal }: DashboardProps) {
   );
 
   return (
-    <div data-tour-id={`${portal}-dashboard-page`} className="p-8 space-y-10 bg-[#f8fafc] min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div data-tour-id={`${portal}-dashboard-page`} className="min-h-screen space-y-6 bg-[#f8fafc] p-4 sm:p-6 md:space-y-10 lg:p-8">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
-          <h1 className="text-4xl font-black text-gray-900 tracking-tight">{headerText.title}</h1>
-          <p className="text-gray-500 font-medium">{headerText.subtitle}</p>
+          <h1 className="text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">{headerText.title}</h1>
+          <p className="text-sm font-medium text-gray-500 sm:text-base">{headerText.subtitle}</p>
         </div>
         {portal !== "patient" && (
-          <div className="flex items-center space-x-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-1.5 shadow-sm sm:w-auto sm:justify-start sm:space-x-3">
             {(["day", "week", "month"] as const).map((mode) => (
               <Button
                 key={mode}
                 size="sm"
                 variant="ghost"
-                className={`px-6 py-2 text-xs font-bold rounded-xl transition-all duration-300 ${
+                className={`flex-1 rounded-xl px-4 py-2 text-xs font-bold transition-all duration-300 sm:flex-none sm:px-6 ${
                   viewMode === mode
                     ? "bg-violet-600 text-white shadow-md shadow-violet-200"
                     : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
@@ -390,7 +390,10 @@ export function Dashboard({ portal }: DashboardProps) {
       </div>
 
       {/* Stats Cards */}
-      <div data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}>
+      <div
+        data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}
+        className="hidden md:block"
+      >
         <DashboardStats
           portal={portal}
           appointments={portalAppointments}
@@ -416,7 +419,7 @@ export function Dashboard({ portal }: DashboardProps) {
       />
 
       {/* Bottom Grid: Schedule, Stats, and Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3 lg:gap-8">
         <RecentSchedule
           portal={portal}
           viewMode={viewMode}
@@ -430,20 +433,26 @@ export function Dashboard({ portal }: DashboardProps) {
           onViewAll={handleViewAll}
         />
 
-        <VisitStatistics
-          appointments={portalAppointments}
-          colorPalette={colorPalette}
-        />
+        <div className="hidden md:block">
+          <VisitStatistics
+            appointments={portalAppointments}
+            colorPalette={colorPalette}
+          />
+        </div>
 
-        <QuickActions
-          portal={portal}
-          openCreateModal={openCreateModal}
-          openAddPatientModal={openAddPatientModal}
-        />
+        <div className="hidden md:block">
+          <QuickActions
+            portal={portal}
+            openCreateModal={openCreateModal}
+            openAddPatientModal={openAddPatientModal}
+          />
+        </div>
       </div>
 
       {/* Revenue Overview (Full Width, Admin/Doctor Only) */}
-      <RevenueOverview portal={portal} revenueData={revenueData} />
+      <div className="hidden md:block">
+        <RevenueOverview portal={portal} revenueData={revenueData} />
+      </div>
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {

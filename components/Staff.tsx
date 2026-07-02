@@ -66,6 +66,8 @@ const normalizeFilterValue = normalizeStaffValue;
 
 type StaffFinancialFieldErrors = Partial<Record<keyof StaffFinancialRecordForm, string>>;
 
+const ATTENDANCE_DISABLED = true;
+
 const formatCurrency = (amount?: number) =>
   new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -254,6 +256,12 @@ export function StaffView() {
   }, []);
 
   const fetchAttendanceData = useCallback(async () => {
+    if (ATTENDANCE_DISABLED) {
+      setAttendanceData([]);
+      setIsAttendanceLoading(false);
+      return;
+    }
+
     setIsAttendanceLoading(true);
     try {
       const response = await fetch(apiUrl(`/api/staff/attendance?month=${encodeURIComponent(attendanceMonth)}`), { credentials: "include" });
@@ -273,7 +281,7 @@ export function StaffView() {
   const refreshLoadedStaffData = useCallback(() => {
     fetchStaffData();
     if (hasLoadedFinancials) fetchFinancialRecords();
-    if (hasLoadedAttendance) fetchAttendanceData();
+    if (!ATTENDANCE_DISABLED && hasLoadedAttendance) fetchAttendanceData();
   }, [fetchAttendanceData, fetchFinancialRecords, fetchStaffData, hasLoadedAttendance, hasLoadedFinancials]);
 
   useEffect(() => {
@@ -282,7 +290,7 @@ export function StaffView() {
   }, [fetchFinancialRecords, fetchStaffData]);
 
   useEffect(() => {
-    if (activeTab === "attendance") fetchAttendanceData();
+    if (!ATTENDANCE_DISABLED && activeTab === "attendance") fetchAttendanceData();
   }, [activeTab, fetchAttendanceData]);
 
   const getStaffIdentifier = (staff: Staff) => String(staff.id || staff.email || staff.name);
@@ -323,11 +331,21 @@ export function StaffView() {
   };
 
   const openAttendanceModal = (record: Attendance) => {
+    if (ATTENDANCE_DISABLED) {
+      toast.error("Attendance & Hours is disabled for now");
+      return;
+    }
+
     setAttendanceForm(record);
     setIsAttendanceDialogOpen(true);
   };
 
   const handleAttendanceSave = async () => {
+    if (ATTENDANCE_DISABLED) {
+      toast.error("Attendance & Hours is disabled for now");
+      return;
+    }
+
     if (!attendanceForm.staffId) return;
     setIsSavingAttendance(true);
     try {
@@ -762,6 +780,11 @@ export function StaffView() {
   };
 
   const handleExportAttendance = () => {
+    if (ATTENDANCE_DISABLED) {
+      toast.error("Attendance & Hours is disabled for now");
+      return;
+    }
+
     downloadCsv(
       `staff-attendance-${attendanceMonth}.csv`,
       attendanceTableRows.map((attendance) => ({
@@ -865,15 +888,22 @@ export function StaffView() {
         value={activeTab}
         className="space-y-6"
         onValueChange={(value) => {
+          if (value === "attendance" && ATTENDANCE_DISABLED) {
+            toast.error("Attendance & Hours is disabled for now");
+            return;
+          }
+
           setActiveTab(value);
           if (value === "financial" && !hasLoadedFinancials) fetchFinancialRecords();
-          if (value === "attendance" && !hasLoadedAttendance) setIsAttendanceLoading(true);
+          if (!ATTENDANCE_DISABLED && value === "attendance" && !hasLoadedAttendance) setIsAttendanceLoading(true);
         }}
       >
         <TabsList>
           <TabsTrigger value="staff" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Staff Directory</TabsTrigger>
           <TabsTrigger value="financial" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
-          <TabsTrigger value="attendance" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Attendance & Hours</TabsTrigger>
+          {!ATTENDANCE_DISABLED && (
+            <TabsTrigger value="attendance" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">Attendance & Hours</TabsTrigger>
+          )}
         </TabsList>
 
         {/* Staff Directory Tab */}
@@ -1213,6 +1243,7 @@ export function StaffView() {
         </TabsContent>
 
         {/* Attendance & Hours Tab */}
+        {!ATTENDANCE_DISABLED && (
         <TabsContent value="attendance" className="space-y-6">
           <Card>
             <CardHeader>
@@ -1304,6 +1335,7 @@ export function StaffView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
 
       <AddStaffModalWrapper
@@ -1370,15 +1402,17 @@ export function StaffView() {
         onDelete={handleDeleteFinancialRecord}
       />
 
-      <StaffAttendanceModal
-        open={isAttendanceDialogOpen}
-        attendance={attendanceForm}
-        month={attendanceMonth}
-        isSaving={isSavingAttendance}
-        onOpenChange={setIsAttendanceDialogOpen}
-        onAttendanceChange={setAttendanceForm}
-        onSave={handleAttendanceSave}
-      />
+      {!ATTENDANCE_DISABLED && (
+        <StaffAttendanceModal
+          open={isAttendanceDialogOpen}
+          attendance={attendanceForm}
+          month={attendanceMonth}
+          isSaving={isSavingAttendance}
+          onOpenChange={setIsAttendanceDialogOpen}
+          onAttendanceChange={setAttendanceForm}
+          onSave={handleAttendanceSave}
+        />
+      )}
 
       <StaffScheduleModal
         open={isScheduleDialogOpen}

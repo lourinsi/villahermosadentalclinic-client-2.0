@@ -90,6 +90,10 @@ import {
   readPatientProfileDraft,
   writePatientProfileDraft,
 } from "@/lib/patient-profile-draft";
+import {
+  loadQuestionnaireQuestions,
+  type QuestionnaireQuestion,
+} from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 
 export interface Patient {
@@ -128,12 +132,6 @@ export interface Patient {
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
-
-type QuestionnaireQuestion = {
-  id: string;
-  text: string;
-  isActive?: boolean;
-};
 
 const CONSENT_VERSION = "focused-informed-consent-v1";
 
@@ -1109,21 +1107,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setIsLoadingQuestionnaire(true);
     try {
-      const [questionsResponse, patientQuestionnaireResponse] = await Promise.all([
-        fetch(apiUrl("/api/questionnaire-questions"), {
-          credentials: "include",
-          headers: getAuthHeaders(),
-        }),
+      const [questionsResult, patientQuestionnaireResponse] = await Promise.all([
+        loadQuestionnaireQuestions(),
         fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
           credentials: "include",
           headers: getAuthHeaders(),
         }),
       ]);
-
-      const questionsPayload = await questionsResponse.json().catch(() => ({}));
-      if (!questionsResponse.ok || !questionsPayload?.success || !Array.isArray(questionsPayload.data)) {
-        throw new Error(questionsPayload?.message || "Failed to load questionnaire questions");
-      }
 
       const patientQuestionnairePayload = await patientQuestionnaireResponse.json().catch(() => ({}));
       const questionnaireData = patientQuestionnairePayload?.data && typeof patientQuestionnairePayload.data === "object"
@@ -1132,7 +1122,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const answers = normalizeQuestionnaireAnswers(questionnaireData);
       const nextConsentForm = createConsentFormState(questionnaireData);
 
-      setQuestionnaireQuestions(questionsPayload.data.filter((question: QuestionnaireQuestion) => question.isActive !== false));
+      setQuestionnaireQuestions(questionsResult.questions.filter((question) => question.isActive !== false));
       setPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);

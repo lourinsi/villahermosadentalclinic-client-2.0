@@ -537,6 +537,7 @@ export function UserTour() {
   const pathname = usePathname();
   const { openCreateModal } = useAppointmentModal();
   const [isMounted, setIsMounted] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isActive, setIsActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
@@ -573,6 +574,7 @@ export function UserTour() {
   const step = TOUR_STEPS[stepIndex];
   const progressText = `${stepIndex + 1} of ${TOUR_STEPS.length}`;
   const isWaiting = step?.action?.type === "wait";
+  const isAdminRoute = pathname.startsWith("/admin");
 
   const persistStep = useCallback((index: number) => {
     localStorage.setItem(ACTIVE_KEY, "true");
@@ -785,13 +787,37 @@ export function UserTour() {
   useEffect(() => {
     setIsMounted(true);
 
+    const mediaQuery = window.matchMedia("(min-width: 768px)");
+    const updateViewport = () => setIsDesktopViewport(mediaQuery.matches);
+    updateViewport();
+
+    mediaQuery.addEventListener("change", updateViewport);
+
     const storedActive = localStorage.getItem(ACTIVE_KEY) === "true";
 
     if (storedActive) {
       localStorage.removeItem(ACTIVE_KEY);
       localStorage.removeItem(STEP_KEY);
     }
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateViewport);
+    };
   }, [persistStep]);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    if (!isAdminRoute && isDesktopViewport) return;
+
+    localStorage.removeItem(ACTIVE_KEY);
+    localStorage.removeItem(STEP_KEY);
+    setIsActive(false);
+    setIsExitDialogOpen(false);
+    setTargetRect(null);
+    setActiveNavRect(null);
+    pendingRouteStepRef.current = null;
+    clearTransition();
+  }, [clearTransition, isAdminRoute, isDesktopViewport, isMounted]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -1203,7 +1229,7 @@ export function UserTour() {
     };
   }, [activeNavRect]);
 
-  if (!isMounted) return null;
+  if (!isMounted || isAdminRoute || !isDesktopViewport) return null;
 
   if (!isActive || !step) {
     return (

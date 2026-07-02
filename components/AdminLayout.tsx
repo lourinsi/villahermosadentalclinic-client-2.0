@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -44,10 +44,10 @@ const navItems = [
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/requests", label: "Requests", icon: ClipboardList },
   { path: "/patients", label: "Patients", icon: Users },
+  { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/doctors", label: "Find Doctors", icon: Stethoscope, hideForReceptionist: true },
   { path: "/services", label: "Services", icon: ListChecks },
   { path: "/questionnaire", label: "Questionnaire", icon: ClipboardList },
-  { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/finance", label: "Finance", icon: DollarSign },
   { path: "/staff", label: "Staff", icon: Shield },
   { path: "/notifications", label: "Notifications", icon: Bell },
@@ -68,6 +68,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
   const { isReceptionistView, canSwitchAdminView, toggleViewMode } = useAdminViewMode();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const managementBasePath = user?.role === "receptionist" ? "/receptionist" : "/admin";
   const {
     notifications,
@@ -172,10 +173,28 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   return (
     <div className="flex min-h-dvh flex-col bg-gray-100 md:h-screen md:flex-row">
-      <aside data-tour-id="admin-sidebar" className={theme.sidebar}>
-        <div className={theme.title}>{portalTitle}</div>
-        <nav className="flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4">
-          <ul className="flex gap-1 px-2 md:block md:space-y-1 md:px-0">
+      <aside
+        data-tour-id="admin-sidebar"
+        className={`${theme.sidebar} transition-[width] duration-300 ${isSidebarCollapsed ? "md:!w-20" : ""}`}
+      >
+        <div className={`${theme.title} flex items-center justify-between gap-2 ${isSidebarCollapsed ? "md:px-3" : ""}`}>
+          <span className={`truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{portalTitle}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+            className={`hidden h-8 w-8 shrink-0 rounded-lg border border-white/15 bg-white/10 text-white hover:bg-white/20 hover:text-white md:inline-flex ${
+              isSidebarCollapsed ? "md:mx-auto" : ""
+            }`}
+          >
+            {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        </div>
+        <nav className={`flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4 ${isSidebarCollapsed ? "md:px-2" : ""}`}>
+          <ul className={`flex gap-1 px-2 md:block md:px-0 ${isSidebarCollapsed ? "md:space-y-2" : "md:space-y-1"}`}>
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const itemHref = `${managementBasePath}${item.path}`;
@@ -186,32 +205,36 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
                     href={itemHref}
                     prefetch={false}
                     data-tour-id={getNavTourId(item.label)}
+                    title={isSidebarCollapsed ? item.label : undefined}
                     className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-2 md:gap-3 md:px-4 md:py-3 md:text-base ${
+                      isSidebarCollapsed ? "md:mx-auto md:h-12 md:w-12 md:justify-center md:px-0" : ""
+                    } ${
                       isActive
                         ? theme.navActive
                         : theme.navInactive
                     }`}
                   >
                     <Icon className="h-5 w-5 shrink-0" />
-                    <span className="whitespace-nowrap">{item.label}</span>
+                    <span className={`whitespace-nowrap ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{item.label}</span>
                   </Link>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div className={theme.footer}>
-          <div className={theme.userBox}>
+        <div className={`${theme.footer} ${isSidebarCollapsed ? "md:flex md:flex-col md:items-center md:gap-3 md:space-y-0" : ""}`}>
+          <div className={`${theme.userBox} ${isSidebarCollapsed ? "md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0" : ""}`}>
             <User className={theme.userIcon} />
-            <span className="text-sm font-medium truncate">{user?.username || portalTitle}</span>
+            <span className={`text-sm font-medium truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{user?.username || portalTitle}</span>
           </div>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className={theme.logoutButton}
+            className={`${theme.logoutButton} ${isSidebarCollapsed ? "md:!w-10 md:justify-center md:px-0" : ""}`}
+            title={isSidebarCollapsed ? "Logout" : undefined}
           >
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
+            <LogOut className={`w-4 h-4 ${isSidebarCollapsed ? "md:mr-0" : "mr-2"}`} />
+            <span className={isSidebarCollapsed ? "md:sr-only" : ""}>Logout</span>
           </Button>
         </div>
       </aside>
