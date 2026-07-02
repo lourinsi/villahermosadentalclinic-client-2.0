@@ -17,6 +17,8 @@ export type PatientProfileDraft = {
     text: string;
     isActive?: boolean;
   }>;
+  consentForm?: Record<string, any>;
+  savedConsentForm?: Record<string, any>;
 };
 
 export const parsePatientProfileDraft = (raw: string | null): PatientProfileDraft | null => {
@@ -54,6 +56,14 @@ export const parsePatientProfileDraft = (raw: string | null): PatientProfileDraf
         draft.patientQuestionnaireData && typeof draft.patientQuestionnaireData === "object"
           ? draft.patientQuestionnaireData
           : {},
+      consentForm:
+        draft.consentForm && typeof draft.consentForm === "object"
+          ? draft.consentForm
+          : undefined,
+      savedConsentForm:
+        draft.savedConsentForm && typeof draft.savedConsentForm === "object"
+          ? draft.savedConsentForm
+          : undefined,
       questionnaireQuestions: Array.isArray(draft.questionnaireQuestions)
         ? draft.questionnaireQuestions
             .filter((question) => question?.id && question?.text)

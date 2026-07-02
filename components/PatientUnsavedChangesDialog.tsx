@@ -1,14 +1,13 @@
 "use client";
 
 import React from "react";
-import { Loader2, Save, Trash2, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileWarning, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -30,6 +29,19 @@ const summarizeValue = (label: string, value: any) => {
   if (text.startsWith("data:image/")) return "Image selected";
   return text.length > 160 ? `${text.slice(0, 157)}...` : text;
 };
+
+const normalizeSummary = (label: string, value: any) => summarizeValue(label, value).trim().toLowerCase();
+
+const formatChangeLabel = (label: string) =>
+  label.replace(/\b\w+/g, (word) => {
+    if (word.length <= 2 && word.toUpperCase() === word) return word;
+    return `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`;
+  });
+
+export const getVisiblePatientChanges = (changes: PatientChangeMap): PatientChangeMap =>
+  Object.fromEntries(
+    Object.entries(changes).filter(([field, change]) => normalizeSummary(field, change.old) !== normalizeSummary(field, change.new))
+  );
 
 interface PatientUnsavedChangesDialogProps {
   open: boolean;
@@ -60,77 +72,114 @@ export default function PatientUnsavedChangesDialog({
   onCancel,
   loading = false,
 }: PatientUnsavedChangesDialogProps) {
-  const entries = Object.entries(changes);
+  const entries = Object.entries(getVisiblePatientChanges(changes));
+  const reviewedLabel = `${entries.length} change${entries.length === 1 ? "" : "s"} reviewed`;
+
+  if (entries.length === 0) return null;
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !loading && onOpenChange(nextOpen)}>
-      <DialogContent className="max-h-[88vh] max-w-2xl overflow-hidden p-0" showCloseButton={!loading}>
-        <DialogHeader className="border-b border-slate-100 px-6 py-5">
-          <DialogTitle className="text-xl font-bold text-slate-900">{title}</DialogTitle>
-          <DialogDescription className="text-sm font-medium text-slate-500">
-            {description}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] w-[min(920px,calc(100vw-2rem))] max-w-none overflow-x-hidden overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-0 shadow-2xl"
+        showCloseButton={false}
+      >
+        <button
+          type="button"
+          onClick={() => !loading && onOpenChange(false)}
+          disabled={loading}
+          className="absolute right-8 top-8 z-10 flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:pointer-events-none disabled:opacity-50"
+          aria-label="Close"
+        >
+          <X className="h-7 w-7" />
+        </button>
+        <div className="space-y-8 p-6 sm:p-9 lg:p-12">
+          <DialogHeader className="grid gap-6 pr-8 text-left sm:grid-cols-[104px_minmax(0,1fr)] sm:items-start">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-violet-100 text-violet-600">
+              <FileWarning className="h-11 w-11" />
+            </div>
+            <div className="space-y-4">
+              <DialogTitle className="text-3xl font-black leading-tight text-slate-950 sm:whitespace-nowrap lg:text-4xl">
+                {title}
+              </DialogTitle>
+              <DialogDescription className="max-w-2xl text-lg font-medium leading-8 text-slate-500 lg:text-xl">
+                {description}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
 
-        <div className="max-h-[52vh] overflow-y-auto px-6 py-4">
-          {entries.length > 0 ? (
-            <div className="space-y-3">
-              {entries.map(([field, change]) => (
-                <div key={field} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                  <div className="text-xs font-black uppercase tracking-wide text-slate-500">{field}</div>
-                  <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                    <div className="rounded-md bg-white p-2 ring-1 ring-slate-200">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Before</div>
-                      <div className="mt-1 break-words font-semibold text-slate-600">
+          <div className="inline-flex items-center gap-3 rounded-xl bg-violet-50 px-5 py-3 text-lg font-bold text-violet-600">
+            <CheckCircle2 className="h-6 w-6" />
+            {reviewedLabel}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="overflow-x-auto">
+              <div className="min-w-[760px]">
+                <div className="grid grid-cols-[minmax(320px,1fr)_140px_32px_140px] items-center gap-4 border-b border-slate-200 px-8 py-5 text-sm font-black uppercase tracking-wide text-slate-500">
+                  <div>Change</div>
+                  <div className="text-center">Before</div>
+                  <ArrowRight className="h-4 w-4 justify-self-center text-slate-500" />
+                  <div className="text-center">After</div>
+                </div>
+                <div className="max-h-[min(38vh,430px)] overflow-y-auto px-8 [scrollbar-color:#cbd5e1_transparent] [scrollbar-width:thin]">
+                  {entries.map(([field, change]) => (
+                    <div
+                      key={field}
+                      className="grid grid-cols-[minmax(320px,1fr)_140px_32px_140px] items-center gap-4 border-b border-slate-100 py-7 last:border-b-0"
+                    >
+                      <div className="pr-4 text-lg font-semibold leading-7 text-slate-950">
+                        {formatChangeLabel(field)}
+                      </div>
+                      <div className="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-50 px-4 text-base font-semibold text-slate-600">
+                        <span className="mr-1 text-slate-400">Before:</span>
                         {summarizeValue(field, change.old)}
                       </div>
-                    </div>
-                    <div className="rounded-md bg-white p-2 ring-1 ring-violet-100">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-violet-500">After</div>
-                      <div className="mt-1 break-words font-semibold text-slate-900">
+                      <ArrowRight className="h-5 w-5 justify-self-center text-slate-500" />
+                      <div className="inline-flex min-h-11 items-center justify-center rounded-lg bg-violet-50 px-4 text-base font-bold text-violet-600">
+                        <span className="mr-1 text-violet-400">After:</span>
                         {summarizeValue(field, change.new)}
                       </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
-              Unsaved patient changes are pending.
-            </div>
-          )}
-        </div>
+          </div>
 
-        <DialogFooter className="border-t border-slate-100 px-6 py-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              onCancel?.();
-              onOpenChange(false);
-            }}
-            disabled={loading}
-            className="gap-2"
-          >
-            <X className="h-4 w-4" />
-            {cancelLabel}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={onSecondary}
-            disabled={loading}
-            className="gap-2"
-          >
-            <Trash2 className="h-4 w-4" />
-            {secondaryLabel}
-          </Button>
-          <Button type="button" variant="brand" onClick={onPrimary} disabled={loading} className="gap-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {primaryLabel}
-          </Button>
-        </DialogFooter>
+          <div className="grid gap-5 pt-2 sm:grid-cols-[1fr_1.35fr_1.1fr]">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onCancel?.();
+                onOpenChange(false);
+              }}
+              disabled={loading}
+              className="h-14 rounded-xl border-slate-200 bg-white text-lg font-bold text-slate-700 hover:bg-slate-50"
+            >
+              {cancelLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onSecondary}
+              disabled={loading}
+              className="h-14 rounded-xl border-red-200 bg-white text-lg font-bold text-red-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+            >
+              {secondaryLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="brand"
+              onClick={onPrimary}
+              disabled={loading}
+              className="h-14 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-lg font-bold text-white shadow-lg shadow-violet-200 hover:from-violet-700 hover:to-purple-700"
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {primaryLabel}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

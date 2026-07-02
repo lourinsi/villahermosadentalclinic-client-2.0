@@ -855,7 +855,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const historyColumnCount = doctorFilter ? 7 : 8;
 
   return (
-    <div data-tour-id="requests-page" className="p-6 max-w-[1600px] mx-auto space-y-6">
+    <div data-tour-id="requests-page" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">
@@ -884,12 +884,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         }}
         className="space-y-6"
       >
-        <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
-          <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
+        <TabsList className="h-auto w-full rounded-xl border bg-white p-1 shadow-sm sm:w-fit">
+          <TabsTrigger value="requests" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
             Requests
             <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requestTotal}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="history" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
+          <TabsTrigger value="history" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
             History
           </TabsTrigger>
         </TabsList>
@@ -898,7 +898,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           <Card className="border-none shadow-xl shadow-gray-200/50 bg-white/80 backdrop-blur-xl rounded-2xl overflow-hidden">
             <CardHeader className="border-b border-gray-100 pb-6 bg-white">
               <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col items-start gap-3 lg:flex-row lg:items-center">
                   <div className="p-2.5 bg-amber-50 rounded-xl">
                     <AlertCircle className="h-6 w-6 text-amber-600" />
                   </div>
@@ -911,11 +911,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         Payment due for {sortedRequests.filter(canPromptPayment).length} appointment{sortedRequests.filter(canPromptPayment).length !== 1 ? "s" : ""}
                       </div>
                     ) : null}
-                    <div className="relative mt-4 md:mt-0">
+                    <div className="relative mt-4 w-full md:mt-0 lg:w-auto">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                       <Input 
                         placeholder="Search patient or service..." 
-                        className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
+                        className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
                         value={pendingSearchTerm}
                         onChange={(e) => {
                           setPendingSearchTerm(e.target.value);
@@ -932,7 +932,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       setRequestCurrentPage(1);
                     }}
                   >
-                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                    <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
                         <SelectValue placeholder="All Status" />
@@ -954,7 +954,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setRequestCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                         <div className="flex items-center gap-2">
                           <User className="h-3.5 w-3.5 text-gray-400" />
                           <SelectValue placeholder="All Doctors" />
@@ -1228,12 +1228,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative">
+                <div className="flex w-full flex-wrap gap-2 md:w-auto">
+                  <div className="relative w-full sm:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
                       placeholder="Search patient or service..." 
-                      className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
+                      className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
                       value={historySearchTerm}
                       onChange={(e) => {
                         setHistorySearchTerm(e.target.value);
@@ -1249,7 +1249,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       setHistoryCurrentPage(1);
                     }}
                   >
-                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                    <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
                         <SelectValue placeholder="All Status" />
@@ -1271,7 +1271,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setHistoryCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
                         <div className="flex items-center gap-2">
                           <User className="h-3.5 w-3.5 text-gray-400" />
                           <SelectValue placeholder="All Doctors" />

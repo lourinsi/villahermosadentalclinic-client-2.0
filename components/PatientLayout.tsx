@@ -126,51 +126,51 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   ];
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      <aside className="w-64 bg-emerald-900 text-white flex-shrink-0 flex flex-col">
-        <div className="p-4 text-2xl font-bold border-b border-emerald-800">Patient Portal</div>
-        <nav className="flex-1 py-4">
-          <ul className="space-y-1">
+    <div className="flex min-h-dvh flex-col bg-gray-100 md:h-screen md:flex-row">
+      <aside className="flex w-full flex-shrink-0 flex-col bg-emerald-900 text-white md:h-full md:w-64">
+        <div className="border-b border-emerald-800 px-4 py-3 text-lg font-bold md:p-4 md:text-2xl">Patient Portal</div>
+        <nav className="flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4">
+          <ul className="flex gap-1 px-2 md:block md:space-y-1 md:px-0">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
               return (
-                <li key={item.href}>
+                <li key={item.href} className="shrink-0">
                   <Link
                     href={item.href}
                     prefetch={false}
-                    className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
+                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-2 md:gap-3 md:px-4 md:py-3 md:text-base ${
                       isActive
                         ? "bg-emerald-950 text-white"
                         : "text-emerald-100 hover:bg-emerald-800 hover:text-white"
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
-                    <span>{item.label}</span>
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="whitespace-nowrap">{item.label}</span>
                   </Link>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div className="p-4 border-t border-emerald-800 space-y-3">
-          <div className="flex items-center space-x-2 px-3 py-2 bg-emerald-800 rounded-lg">
+        <div className="flex items-center gap-2 border-t border-emerald-800 p-2 md:block md:space-y-3 md:p-4">
+          <div className="hidden min-w-0 items-center space-x-2 rounded-lg bg-emerald-800 px-3 py-2 sm:flex">
             <User className="w-4 h-4 text-emerald-200" />
             <span className="text-sm font-medium truncate">{user?.username || "Patient"}</span>
           </div>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="w-full justify-start text-emerald-900 hover:bg-emerald-50 bg-white"
+            className="w-auto shrink-0 justify-start bg-white text-emerald-900 hover:bg-emerald-50 md:w-full"
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout
           </Button>
         </div>
       </aside>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
-          <div className="flex items-center gap-3">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 md:h-16 md:px-6">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-3">
             <Button
               onClick={toggleMode}
               variant="outline"
@@ -201,7 +201,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
           />
         </header>
-        <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <main className="flex-1 overflow-auto bg-gray-50 p-3 sm:p-4 md:p-6">{children}</main>
         <AppointmentHistoryView
           open={isAppointmentHistoryOpen}
           onOpenChange={(open) => {

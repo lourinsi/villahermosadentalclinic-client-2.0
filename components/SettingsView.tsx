@@ -117,8 +117,8 @@ export function SettingsView() {
   };
 
   return (
-    <div data-tour-id="settings-page" className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div data-tour-id="settings-page" className="space-y-6 p-3 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
           <p className="text-muted-foreground">Manage your clinic settings and preferences</p>
@@ -130,7 +130,7 @@ export function SettingsView() {
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
           <TabsTrigger value="general">
             <Settings className="h-4 w-4 mr-2" />
             General
@@ -159,7 +159,7 @@ export function SettingsView() {
               <CardTitle>Clinic Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="clinic-name">Clinic Name</Label>
                   <Input 
@@ -204,9 +204,9 @@ export function SettingsView() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 gap-4">
                 {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
-                  <div key={day} className="flex items-center justify-between">
-                    <span className="w-24">{day}</span>
-                    <div className="flex items-center space-x-2">
+                  <div key={day} className="flex flex-col gap-2 rounded-lg border border-gray-100 p-3 sm:flex-row sm:items-center sm:justify-between sm:border-0 sm:p-0">
+                    <span className="w-full font-medium sm:w-24">{day}</span>
+                    <div className="flex flex-wrap items-center gap-2">
                       <Select defaultValue={TIME_SLOTS.indexOf("09:00").toString()}>
                         <SelectTrigger className="w-32">
                           <SelectValue />
@@ -243,7 +243,7 @@ export function SettingsView() {
               <CardTitle>Administrator Profile</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center space-x-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div>
                   <label htmlFor="profile-image-input" className="cursor-pointer block">
                     {profileImage ? (
@@ -272,7 +272,7 @@ export function SettingsView() {
                   <div className="text-sm text-muted-foreground">Add or change your profile picture</div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="first-name">First Name</Label>
                   <Input id="first-name" defaultValue="Dr. John" />
@@ -414,7 +414,7 @@ export function SettingsView() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Theme</Label>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <Button variant="outline" className="h-20 flex-col">
                     <div className="w-4 h-4 bg-white border rounded mb-2"></div>
                     Light

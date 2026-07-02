@@ -242,6 +242,16 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color: var(--foreground);
+    overflow-x: hidden;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  img, svg, video, canvas {
+    max-width: 100%;
   }
 
   /* Make cards and buttons friendlier by default */

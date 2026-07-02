@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Check, ClipboardList, Loader2, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { Check, ClipboardList, ListPlus, Loader2, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
 export type QuestionnaireQuestion = {
   id: string;
@@ -28,6 +28,7 @@ export function QuestionnaireView() {
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isRestoringDefaults, setIsRestoringDefaults] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -101,6 +102,28 @@ export function QuestionnaireView() {
     }
   };
 
+  const handleRestoreDefaults = async () => {
+    setIsRestoringDefaults(true);
+    try {
+      const response = await fetch(apiUrl("/api/questionnaire-questions/baseline"), {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to restore default questions");
+      }
+      await loadQuestions();
+      const added = typeof payload.added === "number" ? payload.added : 0;
+      toast.success(added > 0 ? `Restored ${added} default question${added === 1 ? "" : "s"}` : "Default questions are already present");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to restore default questions");
+    } finally {
+      setIsRestoringDefaults(false);
+    }
+  };
+
   const handleSave = async (question: QuestionnaireQuestion) => {
     const draft = getDraft(question);
     if (!draft.text.trim()) {
@@ -156,13 +179,19 @@ export function QuestionnaireView() {
         <div>
           <h1 className="text-3xl font-black tracking-tight text-gray-900">Questionnaire</h1>
           <p className="text-sm font-medium text-gray-500">
-            Manage checkbox questions shown on patient records.
+            Manage baseline medical questionnaire items shown on patient records.
           </p>
         </div>
-        <Button variant="outline" onClick={loadQuestions} disabled={isLoading} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onClick={handleRestoreDefaults} disabled={isRestoringDefaults || isLoading} className="gap-2">
+            {isRestoringDefaults ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+            Restore Defaults
+          </Button>
+          <Button variant="outline" onClick={loadQuestions} disabled={isLoading} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Card className="border-gray-100 shadow-sm">

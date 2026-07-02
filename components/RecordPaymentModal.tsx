@@ -150,7 +150,7 @@ export function RecordPaymentModal() {
           {(appointmentId || selectedAppointment) && selectedApt && (
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
               <div className="text-sm font-semibold text-blue-900 mb-3">Appointment & Payment Summary</div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
                   <div className="text-sm font-semibold text-gray-900">{selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : ''}</div>
@@ -255,7 +255,7 @@ export function RecordPaymentModal() {
             </div>
           </div>
 
-          <div className="flex justify-end space-x-2 pt-2 border-t">
+          <div className="flex flex-col-reverse gap-2 border-t pt-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={closePaymentModal}>
               Cancel
             </Button>

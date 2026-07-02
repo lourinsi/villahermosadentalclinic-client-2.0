@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { PatientProfile, PatientDetailsRef, Patient } from "@/components/PatientProfile";
 import BookingModalWrapper from "@/components/BookingModalWrapper";
-import PatientUnsavedChangesDialog from "@/components/PatientUnsavedChangesDialog";
+import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "@/components/PatientUnsavedChangesDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -43,7 +43,10 @@ export default function ReceptionistPatientProfilePage() {
     isModifiedRef.current = isModified;
   }, [isModified]);
 
-  const getChangedFields = React.useCallback(() => detailsRef.current?.changedFields || {}, []);
+  const getChangedFields = React.useCallback(
+    () => getVisiblePatientChanges(detailsRef.current?.changedFields || {}),
+    []
+  );
 
   const hasUnsavedChanges = React.useCallback(() => {
     return isModifiedRef.current && Object.keys(getChangedFields()).length > 0;

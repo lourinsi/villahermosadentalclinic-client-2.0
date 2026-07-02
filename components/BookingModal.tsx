@@ -2057,7 +2057,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
+        <DialogContent className="max-h-[90dvh] max-w-4xl">
           <DialogHeader>
             <div className="flex items-center justify-between mb-4">
               {/* Calendar icon on step 1, Back button on step 2 */}
@@ -2624,7 +2624,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
                 <div className="space-y-3">
                   <h3 className="font-semibold text-sm">Select Payment Method</h3>
-                  <div className={`grid gap-2 ${isStaffBookingMode ? "grid-cols-4" : "grid-cols-3"}`}>
+                  <div className={`grid grid-cols-2 gap-2 ${isStaffBookingMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
                     <Button
                       variant="outline"
                       className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${paymentMethod === "GCash" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-200"}`}

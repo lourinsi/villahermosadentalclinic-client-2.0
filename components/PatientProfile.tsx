@@ -52,6 +52,8 @@ import {
   UserPlus,
   Search,
   ClipboardList,
+  Loader2,
+  Save,
   ArrowLeft
 } from "lucide-react";
 
@@ -88,7 +90,7 @@ import {
   readPatientProfileDraft,
   writePatientProfileDraft,
 } from "@/lib/patient-profile-draft";
-import PatientUnsavedChangesDialog from "./PatientUnsavedChangesDialog";
+import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 
 export interface Patient {
   id?: string;
@@ -132,6 +134,116 @@ type QuestionnaireQuestion = {
   text: string;
   isActive?: boolean;
 };
+
+const CONSENT_VERSION = "focused-informed-consent-v1";
+
+const CONSENT_ACKNOWLEDGEMENTS = [
+  {
+    id: "treatment",
+    title: "Treatment to be done",
+    description:
+      "Consent is given for explained dental care, including diagnostic images, cleaning, periodontal treatment, restorations, crowns, bridges, extractions, root canal therapy, dentures, local anesthesia, and surgical care when needed.",
+  },
+  {
+    id: "medications",
+    title: "Drugs and medications",
+    description:
+      "The patient understands that antibiotics, pain relievers, anesthetics, and other medicines may cause side effects or allergic reactions that may require urgent care.",
+  },
+  {
+    id: "treatmentPlanChanges",
+    title: "Changes in treatment plan",
+    description:
+      "The patient authorizes clinically necessary changes, additions, or postponements if conditions discovered during treatment require them.",
+  },
+  {
+    id: "noGuarantee",
+    title: "No guaranteed result",
+    description:
+      "The patient understands that dentistry is not an exact science and that treatment results cannot be guaranteed in every situation.",
+  },
+  {
+    id: "authorization",
+    title: "Authorization to proceed",
+    description:
+      "The patient authorizes the clinic dentist and dental auxiliaries to perform the explained dental restorations and treatments.",
+  },
+  {
+    id: "financialResponsibility",
+    title: "Financial responsibility",
+    description:
+      "The patient accepts responsibility for dental fees and agreed charges related to care, including collection or legal costs if an account becomes unpaid.",
+  },
+] as const;
+
+type ConsentAcknowledgementId = (typeof CONSENT_ACKNOWLEDGEMENTS)[number]["id"];
+type ConsentAcknowledgements = Record<ConsentAcknowledgementId, boolean>;
+
+type ConsentFormState = {
+  accepted: boolean;
+  acknowledgements: ConsentAcknowledgements;
+  patientSignatureName: string;
+  guardianName: string;
+  dentistSignatureName: string;
+  signedDate: string;
+  patientSignatureImage: string;
+  signedAt: string;
+};
+
+const todayDateInputValue = () => new Date().toISOString().slice(0, 10);
+
+const createConsentAcknowledgements = (
+  values?: Partial<Record<string, boolean>>,
+  defaultValue = false
+): ConsentAcknowledgements =>
+  CONSENT_ACKNOWLEDGEMENTS.reduce((acknowledgements, item) => {
+    acknowledgements[item.id] = values?.[item.id] ?? defaultValue;
+    return acknowledgements;
+  }, {} as ConsentAcknowledgements);
+
+const createConsentFormState = (data?: Record<string, any>): ConsentFormState => {
+  const source = data && typeof data === "object" ? data : {};
+  const rawAcknowledgements =
+    source.acknowledgements && typeof source.acknowledgements === "object"
+      ? source.acknowledgements
+      : source.consentAcknowledgements && typeof source.consentAcknowledgements === "object"
+        ? source.consentAcknowledgements
+        : undefined;
+  const defaultAcknowledged = !rawAcknowledgements && (source.accepted === true || source.consentAccepted === true);
+
+  return {
+    accepted: Boolean(source.accepted ?? source.consentAccepted),
+    acknowledgements: createConsentAcknowledgements(rawAcknowledgements, defaultAcknowledged),
+    patientSignatureName: String(source.patientSignatureName ?? source.consentPatientSignatureName ?? ""),
+    guardianName: String(source.guardianName ?? source.consentGuardianSignatureName ?? ""),
+    dentistSignatureName: String(source.dentistSignatureName ?? source.consentDentistSignatureName ?? ""),
+    signedDate: String(source.signedDate ?? source.consentSignedDate ?? todayDateInputValue()),
+    patientSignatureImage: String(source.patientSignatureImage ?? source.consentPatientSignatureImage ?? ""),
+    signedAt: String(source.signedAt ?? source.consentSignedAt ?? ""),
+  };
+};
+
+const serializeConsentForm = (consentForm: ConsentFormState) => ({
+  consentAccepted: consentForm.accepted,
+  consentVersion: CONSENT_VERSION,
+  consentAcknowledgements: consentForm.acknowledgements,
+  consentPatientSignatureName: consentForm.patientSignatureName.trim(),
+  consentGuardianSignatureName: consentForm.guardianName.trim(),
+  consentDentistSignatureName: consentForm.dentistSignatureName.trim(),
+  consentPatientSignatureImage: consentForm.patientSignatureImage,
+  consentSignedDate: consentForm.signedDate,
+  consentSignedAt: consentForm.signedAt,
+});
+
+const consentFormComparable = (consentForm: ConsentFormState) => ({
+  accepted: consentForm.accepted,
+  acknowledgements: consentForm.acknowledgements,
+  patientSignatureName: consentForm.patientSignatureName.trim(),
+  guardianName: consentForm.guardianName.trim(),
+  dentistSignatureName: consentForm.dentistSignatureName.trim(),
+  signedDate: consentForm.signedDate,
+  patientSignatureImage: consentForm.patientSignatureImage,
+});
 
 const resolveImageSource = (source?: string) => {
   if (!source) return undefined;
@@ -948,6 +1060,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
   const [isSavingQuestionnaire, setIsSavingQuestionnaire] = useState(false);
   const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
+  const [consentForm, setConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
+  const [savedConsentForm, setSavedConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
+  const [consentCanvasRef, setConsentCanvasRef] = useState<HTMLCanvasElement | null>(null);
+  const [hasConsentSignatureInk, setHasConsentSignatureInk] = useState(false);
+  const [isConsentSignatureDirty, setIsConsentSignatureDirty] = useState(false);
+  const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
   const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
   const [isRecoveryDialogOpen, setIsRecoveryDialogOpen] = useState(false);
@@ -1012,11 +1130,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         ? patientQuestionnairePayload.data
         : {};
       const answers = normalizeQuestionnaireAnswers(questionnaireData);
+      const nextConsentForm = createConsentFormState(questionnaireData);
 
       setQuestionnaireQuestions(questionsPayload.data.filter((question: QuestionnaireQuestion) => question.isActive !== false));
       setPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);
+      setConsentForm(nextConsentForm);
+      setSavedConsentForm(nextConsentForm);
+      setHasConsentSignatureInk(Boolean(nextConsentForm.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(String(patient.id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
@@ -1026,23 +1149,102 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   }, [normalizeQuestionnaireAnswers, patient.id]);
 
   useEffect(() => {
-    if (activeTab === "questionnaire") {
-      if (hasRestoredQuestionnaireDraft && questionnaireQuestions.length > 0) return;
+    if (activeTab === "questionnaire" || activeTab === "consent") {
+      if (activeTab === "questionnaire" && hasRestoredQuestionnaireDraft && questionnaireQuestions.length > 0) return;
       if (questionnaireLoadedPatientId === String(patient.id || "")) return;
       loadQuestionnaireTab();
     }
   }, [activeTab, hasRestoredQuestionnaireDraft, loadQuestionnaireTab, patient.id, questionnaireLoadedPatientId, questionnaireQuestions.length]);
+
+  useEffect(() => {
+    if (!consentCanvasRef) return;
+
+    const context = consentCanvasRef.getContext("2d");
+    if (!context) return;
+
+    context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+    if (!consentForm.patientSignatureImage) return;
+
+    const image = new Image();
+    image.onload = () => {
+      context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+      context.drawImage(image, 0, 0, consentCanvasRef.width, consentCanvasRef.height);
+    };
+    image.src = consentForm.patientSignatureImage;
+  }, [consentCanvasRef, consentForm.patientSignatureImage]);
 
   const questionnaireHasChanges = React.useMemo(
     () => JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers),
     [questionnaireAnswers, savedQuestionnaireAnswers]
   );
 
+  const consentFormHasChanges = React.useMemo(
+    () =>
+      JSON.stringify(consentFormComparable(consentForm)) !== JSON.stringify(consentFormComparable(savedConsentForm)),
+    [consentForm, savedConsentForm]
+  );
+
+  const allConsentAcknowledgementsAccepted = React.useMemo(
+    () => CONSENT_ACKNOWLEDGEMENTS.every((item) => consentForm.acknowledgements[item.id]),
+    [consentForm.acknowledgements]
+  );
+
+  const hasConsentSignature = hasConsentSignatureInk || Boolean(consentForm.patientSignatureImage);
+  const canSaveConsentForm =
+    allConsentAcknowledgementsAccepted &&
+    Boolean(consentForm.patientSignatureName.trim()) &&
+    Boolean(consentForm.signedDate) &&
+    hasConsentSignature;
+
   const handleQuestionnaireAnswerChange = (questionId: string, checked: boolean) => {
     setQuestionnaireAnswers((current) => ({
       ...current,
       [questionId]: checked,
     }));
+    setIsModified(true);
+  };
+
+  const updateConsentField = <K extends keyof ConsentFormState>(field: K, value: ConsentFormState[K]) => {
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      [field]: value,
+    }));
+    setIsModified(true);
+  };
+
+  const updateConsentAcknowledgement = (id: ConsentAcknowledgementId, checked: boolean) => {
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      acknowledgements: {
+        ...current.acknowledgements,
+        [id]: checked,
+      },
+    }));
+    setIsModified(true);
+  };
+
+  const getConsentCanvasSignatureImage = () => {
+    if (!consentCanvasRef) return consentForm.patientSignatureImage;
+
+    const context = consentCanvasRef.getContext("2d");
+    if (!context) return consentForm.patientSignatureImage;
+
+    const imageData = context.getImageData(0, 0, consentCanvasRef.width, consentCanvasRef.height).data;
+    const hasInk = imageData.some((value, index) => index % 4 === 3 && value > 0);
+    return hasInk ? consentCanvasRef.toDataURL("image/png") : "";
+  };
+
+  const persistConsentSignatureFromCanvas = () => {
+    const signatureImage = getConsentCanvasSignatureImage();
+    setConsentForm((current) => ({
+      ...current,
+      accepted: false,
+      patientSignatureImage: signatureImage,
+    }));
+    setHasConsentSignatureInk(Boolean(signatureImage));
+    setIsConsentSignatureDirty(true);
     setIsModified(true);
   };
 
@@ -1080,6 +1282,67 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return false;
     } finally {
       setIsSavingQuestionnaire(false);
+    }
+  };
+
+  const saveConsentForm = async () => {
+    if (!patient.id || !consentFormHasChanges) return true;
+
+    if (!canSaveConsentForm) {
+      toast.error("Complete every consent acknowledgement, patient signature, and date before saving.");
+      return false;
+    }
+
+    setIsSavingConsent(true);
+    try {
+      const signatureImage = getConsentCanvasSignatureImage();
+      const nextConsentForm: ConsentFormState = {
+        ...consentForm,
+        accepted: true,
+        patientSignatureName: consentForm.patientSignatureName.trim(),
+        guardianName: consentForm.guardianName.trim(),
+        dentistSignatureName: consentForm.dentistSignatureName.trim(),
+        patientSignatureImage: signatureImage,
+        signedAt: new Date().toISOString(),
+      };
+
+      const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
+        method: "PUT",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          ...patientQuestionnaireData,
+          questionnaireAnswers,
+          ...serializeConsentForm(nextConsentForm),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to save consent form");
+      }
+
+      const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
+        ...patientQuestionnaireData,
+        questionnaireAnswers,
+        ...serializeConsentForm(nextConsentForm),
+      };
+      const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      const savedConsent = createConsentFormState(nextData);
+      setPatientQuestionnaireData(nextData);
+      setQuestionnaireAnswers(nextAnswers);
+      setSavedQuestionnaireAnswers(nextAnswers);
+      setConsentForm(savedConsent);
+      setSavedConsentForm(savedConsent);
+      setHasConsentSignatureInk(Boolean(savedConsent.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
+      setHasRestoredQuestionnaireDraft(false);
+      toast.success("Consent form saved");
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save consent form");
+      return false;
+    } finally {
+      setIsSavingConsent(false);
     }
   };
 
@@ -1388,10 +1651,50 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
-    return changes;
-  }, [formData, originalLoadedData, questionnaireAnswers, questionnaireQuestions, savedQuestionnaireAnswers]);
+    CONSENT_ACKNOWLEDGEMENTS.forEach((item) => {
+      const oldValue = Boolean(savedConsentForm.acknowledgements[item.id]);
+      const newValue = Boolean(consentForm.acknowledgements[item.id]);
+      if (oldValue !== newValue) {
+        changes[`Consent Form - ${item.title}`] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
 
-  const hasTrackedChanges = React.useMemo(() => Object.keys(changedFields).length > 0, [changedFields]);
+    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage">, string> = {
+      patientSignatureName: "Consent Form - Patient / Parent / Guardian Signature Name",
+      guardianName: "Consent Form - Parent / Guardian Name",
+      dentistSignatureName: "Consent Form - Dentist Signature",
+      signedDate: "Consent Form - Date",
+      patientSignatureImage: "Consent Form - Drawn Signature",
+    };
+
+    Object.entries(consentFieldLabels).forEach(([field, label]) => {
+      const consentField = field as keyof typeof consentFieldLabels;
+      const oldValue = toComparableValue(savedConsentForm[consentField]);
+      const newValue = toComparableValue(consentForm[consentField]);
+      if (oldValue !== newValue) {
+        changes[label] = {
+          old: field === "patientSignatureImage" ? Boolean(savedConsentForm.patientSignatureImage) : savedConsentForm[consentField],
+          new: field === "patientSignatureImage" ? Boolean(consentForm.patientSignatureImage) : consentForm[consentField],
+        };
+      }
+    });
+
+    return changes;
+  }, [
+    consentForm,
+    formData,
+    originalLoadedData,
+    questionnaireAnswers,
+    questionnaireQuestions,
+    savedConsentForm,
+    savedQuestionnaireAnswers,
+  ]);
+
+  const visibleChangedFields = React.useMemo(() => getVisiblePatientChanges(changedFields), [changedFields]);
+  const hasTrackedChanges = React.useMemo(() => Object.keys(visibleChangedFields).length > 0, [visibleChangedFields]);
 
   const discardStoredDraft = React.useCallback(() => {
     if (currentPatientId) clearPatientProfileDraft(currentPatientId);
@@ -1811,7 +2114,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
     discardDraft: discardStoredDraft,
-    changedFields,
+    changedFields: visibleChangedFields,
   }));
 
   useEffect(() => {
@@ -1851,6 +2154,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setFormData(loadedData);
     setOriginalLoadedData(loadedData);
     setQuestionnaireLoadedPatientId(null);
+    const blankConsentForm = createConsentFormState();
+    setConsentForm(blankConsentForm);
+    setSavedConsentForm(blankConsentForm);
+    setHasConsentSignatureInk(false);
+    setIsConsentSignatureDirty(false);
   }, [loadedPatient.id, patient]);
 
   useEffect(() => {
@@ -1870,6 +2178,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
       setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
       setQuestionnaireQuestions(draft.questionnaireQuestions || []);
+      const restoredConsentForm = createConsentFormState(draft.consentForm || draft.patientQuestionnaireData || {});
+      const restoredSavedConsentForm = createConsentFormState(draft.savedConsentForm || draft.patientQuestionnaireData || {});
+      setConsentForm(restoredConsentForm);
+      setSavedConsentForm(restoredSavedConsentForm);
+      setHasConsentSignatureInk(Boolean(restoredConsentForm.patientSignatureImage));
+      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(currentPatientId);
       setActiveTab(draft.activeTab || "info");
       setHasRestoredQuestionnaireDraft((draft.questionnaireQuestions || []).length > 0);
@@ -1901,9 +2215,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       savedQuestionnaireAnswers,
       patientQuestionnaireData,
       questionnaireQuestions,
+      consentForm,
+      savedConsentForm,
     });
   }, [
     activeTab,
+    consentForm,
     currentPatientId,
     draftCheckPatientId,
     formData,
@@ -1913,6 +2230,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     patientQuestionnaireData,
     questionnaireAnswers,
     questionnaireQuestions,
+    savedConsentForm,
     savedQuestionnaireAnswers,
   ]);
 
@@ -2231,6 +2549,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           return false;
         }
 
+        const consentSaved = await saveConsentForm();
+        if (!consentSaved) {
+          refreshPatients();
+          return false;
+        }
+
         toast.success("Patient updated successfully");
         refreshPatients();
         discardStoredDraft();
@@ -2361,6 +2685,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     discardStoredDraft();
     setFormData(originalLoadedData);
     setQuestionnaireAnswers(savedQuestionnaireAnswers);
+    setConsentForm(savedConsentForm);
+    setHasConsentSignatureInk(Boolean(savedConsentForm.patientSignatureImage));
+    setIsConsentSignatureDirty(false);
     setIsModified(false);
   };
 
@@ -2378,9 +2705,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             <TabsList className="flex h-auto min-h-14 w-full justify-start gap-0 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
               {[
                 { value: "info", label: "Personal Info", icon: UserIcon },
-                { value: "family", label: "Family & Relations", icon: Users },
+                // { value: "family", label: "Family & Relations", icon: Users },
                 { value: "records", label: "Medical Records", icon: FileText },
                 { value: "questionnaire", label: "Questionnaire", icon: ClipboardList },
+                { value: "consent", label: "Consent Form", icon: ShieldCheck },
                 { value: "chart", label: "Dental Chart", icon: Activity },
                 { value: "history", label: "Visit History", icon: History },
                 { value: "payments", label: "Financial Log", icon: PaymentIcon },
@@ -2708,7 +3036,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsContent>
 
             {/* Family & Relations Tab */}
-            <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
+            {/* <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
               <div className="mx-auto w-full max-w-[1680px] space-y-8 py-2 sm:py-4">
                 <div className="flex flex-col items-start justify-between gap-4 overflow-hidden rounded-lg bg-violet-600 p-5 text-white shadow-xl shadow-violet-100 sm:p-7 md:flex-row md:items-center">
                   <div className="relative z-10">
@@ -2820,7 +3148,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </Card>
                 </div>
               </div>
-            </TabsContent>
+            </TabsContent> */}
 
         <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
@@ -2889,6 +3217,185 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     </label>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">
+          <Card className={cardClass}>
+            <CardHeader className={cardHeaderClass}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base font-bold text-slate-900">Consent Form</CardTitle>
+                    <p className="mt-1 text-sm font-medium text-slate-500">Receptionist-managed informed consent and signatures</p>
+                  </div>
+                </div>
+                {savedConsentForm.accepted && !consentFormHasChanges && (
+                  <Badge className="w-fit border-none bg-emerald-100 text-emerald-700">
+                    Consent saved
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 p-5 sm:p-6">
+              {isLoadingQuestionnaire ? (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                  Loading consent form...
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                      <label
+                        key={item.id}
+                        htmlFor={`patient-consent-${item.id}`}
+                        className="flex min-h-20 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/30"
+                      >
+                        <Checkbox
+                          id={`patient-consent-${item.id}`}
+                          checked={consentForm.acknowledgements[item.id]}
+                          onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
+                          disabled={isSavingConsent}
+                          className="mt-0.5 border-emerald-200 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600"
+                        />
+                        <span className="space-y-1">
+                          <span className="block text-sm font-bold leading-5 text-slate-900">{item.title}</span>
+                          <span className="block text-sm font-medium leading-6 text-slate-600">{item.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <div className="space-y-2 lg:col-span-2">
+                      <Label htmlFor="patient-consent-signature-name">Patient / Parent / Guardian Signature Name *</Label>
+                      <Input
+                        id="patient-consent-signature-name"
+                        value={consentForm.patientSignatureName}
+                        onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Type full legal name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-consent-date">Date *</Label>
+                      <Input
+                        id="patient-consent-date"
+                        type="date"
+                        value={consentForm.signedDate}
+                        onChange={(event) => updateConsentField("signedDate", event.target.value)}
+                        disabled={isSavingConsent}
+                      />
+                    </div>
+                    <div className="space-y-2 lg:col-span-2">
+                      <Label htmlFor="patient-consent-guardian-name">Parent / Guardian Name</Label>
+                      <Input
+                        id="patient-consent-guardian-name"
+                        value={consentForm.guardianName}
+                        onChange={(event) => updateConsentField("guardianName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Required only when applicable"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-consent-dentist-signature">Dentist / Signature</Label>
+                      <Input
+                        id="patient-consent-dentist-signature"
+                        value={consentForm.dentistSignatureName}
+                        onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Dentist name or signature"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Patient / Parent / Guardian Drawn Signature *</Label>
+                    <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-4">
+                      <canvas
+                        ref={setConsentCanvasRef}
+                        className="h-32 w-full cursor-crosshair rounded border border-slate-200 bg-white"
+                        style={{ touchAction: "none" }}
+                        onPointerDown={(event) => {
+                          const canvas = event.currentTarget as HTMLCanvasElement;
+                          const context = canvas.getContext("2d");
+                          if (context) {
+                            canvas.setPointerCapture(event.pointerId);
+                            const rect = canvas.getBoundingClientRect();
+                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                            context.lineCap = "round";
+                            context.lineJoin = "round";
+                            context.lineWidth = 2;
+                            context.beginPath();
+                            context.moveTo(x, y);
+                          }
+                        }}
+                        onPointerMove={(event) => {
+                          if (event.buttons !== 1) return;
+                          const canvas = event.currentTarget as HTMLCanvasElement;
+                          const context = canvas.getContext("2d");
+                          if (context) {
+                            const rect = canvas.getBoundingClientRect();
+                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                            context.lineTo(x, y);
+                            context.stroke();
+                            setHasConsentSignatureInk(true);
+                            setIsConsentSignatureDirty(true);
+                            setIsModified(true);
+                          }
+                        }}
+                        onPointerUp={persistConsentSignatureFromCanvas}
+                        onPointerCancel={persistConsentSignatureFromCanvas}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        onClick={() => {
+                          if (consentCanvasRef) {
+                            const context = consentCanvasRef.getContext("2d");
+                            context?.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
+                          }
+                          updateConsentField("patientSignatureImage", "");
+                          setHasConsentSignatureInk(false);
+                          setIsConsentSignatureDirty(true);
+                        }}
+                        disabled={isSavingConsent}
+                      >
+                        Clear Signature
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-medium text-slate-500">
+                      {canSaveConsentForm ? "Ready to save consent." : "Complete all acknowledgements, patient signature, and date to save."}
+                    </p>
+                    <Button
+                      type="button"
+                      onClick={saveConsentForm}
+                      disabled={isSavingConsent || !consentFormHasChanges || !canSaveConsentForm}
+                      className="gap-2"
+                    >
+                      {isSavingConsent ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : consentFormHasChanges ? (
+                        <Save className="h-4 w-4" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4" />
+                      )}
+                      {consentFormHasChanges ? "Save Consent Form" : savedConsentForm.accepted ? "Consent Saved" : "Save Consent Form"}
+                    </Button>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -3395,7 +3902,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         onOpenChange={setIsRecoveryDialogOpen}
         title="Recovered Unsaved Changes"
         description="The previous session ended before these changes were saved. Your changes are still here; save them now or keep editing."
-        changes={changedFields}
+        changes={visibleChangedFields}
         primaryLabel={isRecoverySaving ? "Saving..." : "Save Changes"}
         secondaryLabel="Discard Draft"
         cancelLabel="Keep Editing"
