@@ -16,7 +16,7 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -53,6 +53,8 @@ import useSharedBookingLogic, {
   isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
   getBookingTreatmentNotesValue,
+  getBookingToothNumberEntries,
+  getBookingToothNumbersValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
@@ -64,6 +66,7 @@ import useSharedBookingLogic, {
   isUnassignedBookingDoctor,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
+  normalizeBookingToothNumbers,
   normalizePastAppointmentStatus,
   toBookingPatientOption as toPatientOption,
   UNASSIGNED_DOCTOR_LABEL,
@@ -396,12 +399,32 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
   const [treatmentNotes, setTreatmentNotes] = useState<string>("");
+  const [toothNumberEntries, setToothNumberEntries] = useState<string[]>([""]);
   const [selectedDate, setSelectedDate] = useState<Date>(() => toDate(defaultDate ?? new Date()));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
   const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
   const [durationConflict, setDurationConflict] = useState<string>("");
+
+  const toothNumbers = useMemo(
+    () => normalizeBookingToothNumbers(toothNumberEntries),
+    [toothNumberEntries]
+  );
+  const handleToothNumberChange = useCallback((index: number, value: string) => {
+    setToothNumberEntries((current) =>
+      current.map((entry, entryIndex) => (entryIndex === index ? value : entry))
+    );
+  }, []);
+  const handleAddToothNumber = useCallback(() => {
+    setToothNumberEntries((current) => [...current, ""]);
+  }, []);
+  const handleRemoveToothNumber = useCallback((index: number) => {
+    setToothNumberEntries((current) => {
+      if (current.length <= 1) return [""];
+      return current.filter((_, entryIndex) => entryIndex !== index);
+    });
+  }, []);
 
   // New states for multi-step flow (patient -> schedule -> treatment -> doctor -> payment)
   const [modalStep, setModalStep] = useState<ImprovedBookingStep>("patient");
@@ -1684,6 +1707,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // but they are not auto-copied into the editable notes field.
       setNotes('');
       setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
+      setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
       setSelectedDate(toDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate })));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
@@ -1721,6 +1745,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setCustomPrice('0');
       setNotes('');
       setTreatmentNotes('');
+      setToothNumberEntries(['']);
       setSelectedDate(toDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode })));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
@@ -1904,9 +1929,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = parseFloat(amountToPay) || 0;
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
+  const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === appointmentType);
   const selectedTreatmentName = appointmentType === "Other"
     ? customAppointmentTypeName || "Custom Treatment"
     : appointmentType || "Selected Treatment";
+  const selectedTreatmentDuration = normalizeBookingDuration(duration);
+  const selectedTreatmentBasePrice = Number(customPrice === "0" ? finalPrice : customPrice) || 0;
+  const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
+  const filledToothNumbers = toothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
+  const treatmentNotesCount = treatmentNotes.length;
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -2191,6 +2222,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       appointmentId: appointmentToEdit?.id,
       patientId: selectedPatient,
       type: appointmentType,
+      toothNumbers,
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
@@ -2210,7 +2242,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
-      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
+      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes, toothNumbers);
       const originalAppointmentNotes = repeatTargetDate
         ? buildRepeatAppointmentNotes(notes, selectedDate, repeatTargetDate)
         : notes;
@@ -2983,7 +3015,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             )}
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-6 sm:p-8 lg:p-10 custom-scrollbar">
+          <div className={modalStep === 'treatment'
+            ? "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-3 pb-4 custom-scrollbar sm:p-5 lg:p-6"
+            : "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-6 sm:p-8 lg:p-10 custom-scrollbar"
+          }>
             <div className="w-full mx-auto">
               
               {/* STEP 1: PATIENT */}
@@ -3215,39 +3250,74 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div data-tour-id="booking-treatment-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 sm:space-y-10">
-                  {/* Treatment Selection */}
-                  <div className="space-y-6">
-                    <div className="mb-6 flex items-center gap-4 sm:mb-10 sm:gap-5">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50 sm:h-14 sm:w-14 sm:rounded-[1.25rem]">
-                        <Plus className="h-6 w-6 sm:h-7 sm:w-7" />
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="text-xl font-black tracking-tight text-gray-900 sm:text-2xl">Select Treatment</h3>
-                        <p className="text-sm font-bold text-gray-400">What service do you need today?</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-                      {bookingTreatmentOptions.map((t) => (
-                        <button
-                          key={t.name}
-                          data-tour-id={t.name === "Routine Cleaning" ? "booking-routine-cleaning" : undefined}
-                          type="button"
-                          onClick={() => handleTreatmentSelect(t.name)}
-                          className={`flex min-h-[6.25rem] flex-col items-center justify-center gap-2 rounded-2xl border-2 p-3 shadow-sm transition-all sm:min-h-[8rem] sm:gap-3 sm:rounded-[2rem] sm:p-4 ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-[1.02] sm:scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
+                <div data-tour-id="booking-treatment-step" className="mx-auto max-w-5xl space-y-3 animate-in fade-in slide-in-from-bottom-4 sm:space-y-4">
+                  <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-5">
+                    <Label htmlFor="improved-booking-treatment-select" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
+                        Treatment Service
+                      </Label>
+                      <Select value={appointmentType} onValueChange={handleTreatmentSelect} disabled={isPatientReadonly}>
+                        <SelectTrigger
+                          id="improved-booking-treatment-select"
+                          data-tour-id="booking-treatment-select"
+                          className="mt-3 h-auto min-h-[4.75rem] rounded-xl border border-blue-100 bg-blue-50/30 px-3 py-3 text-left shadow-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-0 sm:min-h-[5.25rem] sm:rounded-2xl sm:px-4"
                         >
-                          <div className={`flex h-10 w-10 items-center justify-center rounded-full ${t.color} text-lg text-white shadow-lg shadow-gray-100 sm:h-12 sm:w-12 sm:text-xl`}>{t.icon}</div>
-                          <span className="text-center text-[9px] font-black uppercase tracking-tighter text-gray-900 sm:text-[10px]">{t.short}</span>
-                        </button>
-                      ))}
-                    </div>
+                          {selectedTreatmentOption ? (
+                            <div className="flex min-w-0 items-center gap-3 pr-2">
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xl text-blue-600 shadow-inner sm:h-12 sm:w-12">
+                                {selectedTreatmentOption.icon}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-black text-gray-900 sm:text-base">{selectedTreatmentName}</p>
+                                <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold text-gray-500">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Clock className="h-4 w-4 text-blue-600" />
+                                    {selectedTreatmentDuration} mins
+                                  </span>
+                                  <span className="text-gray-300">-</span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Tag className="h-4 w-4 text-blue-600" />
+                                    PHP {selectedTreatmentBasePrice.toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <SelectValue placeholder="Choose treatment" />
+                          )}
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
+                          {bookingTreatmentOptions.map((t) => {
+                            const optionDuration = normalizeBookingDuration(serviceDurationByName[t.name]);
+                            const optionPrice = servicePriceByName[t.name] || 0;
+
+                            return (
+                              <SelectItem key={t.name} value={t.name} className="rounded-xl py-2.5">
+                                <div className="flex items-center gap-3">
+                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${t.color} text-sm text-white shadow-sm`}>
+                                    {t.icon}
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-black text-gray-900">{t.name}</span>
+                                    <span className="block text-xs font-semibold text-gray-500">
+                                      {t.name === "Other"
+                                        ? "Custom treatment"
+                                        : `${optionDuration} mins${optionPrice ? ` - PHP ${optionPrice.toLocaleString()}` : ""}`}
+                                    </span>
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                  </div>
                     {appointmentType === "Other" && (
                       <div className="space-y-3">
                         <Input
                           placeholder="Type custom treatment..."
                           value={customAppointmentTypeName}
                           onChange={(e) => handleCustomTreatmentNameChange(e.target.value)}
-                          className="h-14 rounded-2xl border-gray-100 bg-white px-6 font-bold shadow-inner"
+                          className="h-12 rounded-xl border-gray-100 bg-white px-4 font-bold shadow-inner sm:rounded-2xl"
                         />
                         {otherTreatmentSuggestion && (
                           <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -3281,122 +3351,195 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         )}
                       </div>
                     )}
+
+                  <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <Label htmlFor="improved-booking-tooth-number-0" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
+                        Tooth No./s
+                      </Label>
+                      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 sm:flex">
+                        🦷
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                      {toothNumberEntries.map((toothNumber, index) => (
+                        <div key={index} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2.5 shadow-sm">
+                          <Input
+                            id={index === 0 ? "improved-booking-tooth-number-0" : undefined}
+                            value={toothNumber}
+                            inputMode="numeric"
+                            onChange={(event) => handleToothNumberChange(index, event.target.value)}
+                            placeholder={`Tooth ${index + 1}`}
+                            disabled={isPatientReadonly}
+                            className="h-8 w-[4.75rem] border-0 bg-transparent px-0 text-center text-sm font-black text-blue-700 shadow-none placeholder:text-blue-700 focus-visible:ring-0 focus-visible:ring-offset-0"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (toothNumberEntries.length > 1) {
+                                handleRemoveToothNumber(index);
+                              } else {
+                                handleToothNumberChange(index, "");
+                              }
+                            }}
+                            disabled={isPatientReadonly}
+                            aria-label={`Clear tooth number ${index + 1}`}
+                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={handleAddToothNumber}
+                        disabled={isPatientReadonly}
+                        aria-label="Add tooth number"
+                        className="flex h-11 w-11 items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Plus className="h-5 w-5" />
+                      </button>
+                    </div>
+                    <p className="mt-3 text-xs font-medium text-gray-500 sm:text-sm">Select one or more teeth for this treatment.</p>
                   </div>
 
-                  {/* Financials & Duration */}
-                  <div className="grid grid-cols-1 gap-4 pt-1 lg:grid-cols-2">
-                    <div className="order-2 grid grid-cols-1 gap-4">
-                      <div className="flex min-h-[8.5rem] flex-col justify-between rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                            <Clock className="h-5 w-5" />
-                          </div>
-                          <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">Duration</span>
+                  <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
+                    <div className="relative overflow-hidden border-b border-gray-200/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
+                      <div className="relative z-10 flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                          <ClipboardList className="h-[18px] w-[18px]" />
                         </div>
-                        <div className="mt-4">
-                          {canManagePricing ? (
-                            <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))}>
-                              <SelectTrigger className="h-12 w-full rounded-2xl border-0 bg-gray-50 px-4 text-base font-black text-gray-900 focus:ring-0 focus:ring-offset-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent className="rounded-xl">
-                                {ALLOWED_BOOKING_DURATIONS.map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className="flex h-12 items-center rounded-2xl bg-gray-50 px-4 text-base font-black text-blue-600">
-                              {duration} mins
-                            </div>
-                          )}
+                        <h3 className="text-base font-black text-gray-900">Treatment Summary</h3>
+                      </div>
+
+                      <div className="relative z-10 mt-4 grid gap-4 border-t border-gray-200 pt-4 sm:grid-cols-2 lg:grid-cols-1">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500">Service</p>
+                          <p className="mt-1 text-sm font-black text-gray-900">{selectedTreatmentName}</p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500">Tooth No./s</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {filledToothNumbers.length > 0 ? (
+                              filledToothNumbers.map((toothNumber, index) => (
+                                <span key={`${toothNumber}-${index}`} className="inline-flex h-7 items-center rounded-lg border border-blue-100 bg-blue-50 px-2.5 text-xs font-black text-blue-700">
+                                  Tooth {toothNumber}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-sm font-semibold text-gray-400">No teeth selected</span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex min-h-[8.5rem] flex-col justify-between rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-                              <Award className="h-5 w-5" />
-                            </div>
-                            <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">Discount</span>
-                          </div>
-                          <div className="relative mt-4">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-black text-orange-400">₱</span>
-                            <Input
-                              type="number"
-                              value={discount}
-                              onChange={(e) => setDiscount(e.target.value)}
-                              disabled={!canManagePricing}
-                              className="h-12 rounded-2xl border-0 bg-gray-50 pl-8 pr-4 text-base font-black text-orange-600 shadow-none focus-visible:ring-0"
-                            />
-                          </div>
-                        </div>
-                    </div>
-
-                    <div className="order-1 grid grid-cols-1 gap-4">
-                      {/* Blue Estimated Cost Card */}
-                      <div 
-                      onClick={() => {
-                        if (canManagePricing && !isPriceEditable) setIsPriceEditable(true);
-                      }}
-                      className={`group relative flex min-h-[9.5rem] flex-col justify-between overflow-hidden rounded-2xl bg-blue-600 p-4 text-white shadow-2xl shadow-blue-200/50 sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
-                    >
-                      <div className="absolute top-0 right-0 h-28 w-28 rounded-full bg-white/5 -mr-14 -mt-14 transition-transform group-hover:scale-110" />
-                      <CreditCard className="absolute top-5 right-5 h-9 w-9 text-white/10" />
-                      
-                      <div className="relative z-10">
-                        <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest mb-1">Estimated Cost</p>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-lg font-black sm:text-xl">Treatment Fee</h4>
-                        </div>
-                      </div>
-
-                        <div className="relative z-10 mt-4 flex flex-col items-end">
-                        {/* Upper small text logic */}
-                        {isPriceEditable ? (
-                          <p className="text-xs text-blue-100 font-bold opacity-90 mb-2 bg-white/10 px-3 py-1 rounded-full">
-                            Reflected Total: ₱{Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
-                          </p>
-                        ) : (
-                          Number(discount) > 0 && <p className="text-xs text-blue-200 line-through opacity-80 mb-0.5">₱{finalPrice.toLocaleString()}</p>
+                      <div
+                        onClick={() => {
+                          if (canManagePricing && !isPriceEditable) setIsPriceEditable(true);
+                        }}
+                        className={`relative z-10 mt-4 border-t border-dashed border-gray-200 pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
+                      >
+                        <p className="text-sm font-semibold text-gray-700">Estimated Cost</p>
+                        {hasDiscount && !isPriceEditable && (
+                          <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{finalPrice.toLocaleString()}</p>
                         )}
-                        
-                        <div className="flex items-center justify-end w-full">
-                          <span className="mr-2 text-3xl font-black opacity-40 sm:text-4xl">₱</span>
-                          {/* AIRTIGHT LOCK: MUST BE EDITABLE *AND* USER MUST BE ADMIN/DOCTOR */}
+                        <div className="mt-1.5 flex items-center text-blue-600">
+                          <span className="mr-2 text-2xl font-black sm:text-3xl">&#8369;</span>
                           {isPriceEditable && canManagePricing ? (
-                            <input 
+                            <input
                               type="number"
                               value={customPrice === "0" ? finalPrice : customPrice}
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) => setCustomPrice(e.target.value)}
                               onBlur={() => setIsPriceEditable(false)}
-                              className="w-[120px] appearance-none border-b-4 border-white/50 bg-transparent p-0 text-right text-3xl font-black text-white outline-none ring-0 transition-all placeholder-blue-300 focus:border-white sm:w-[140px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              className="w-[130px] appearance-none border-b-2 border-blue-200 bg-transparent p-0 text-3xl font-black text-blue-600 outline-none ring-0 transition-all placeholder:text-blue-200 focus:border-blue-500 sm:w-[160px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                               placeholder={String(finalPrice)}
                               autoFocus
                             />
                           ) : (
-                            <span className="text-3xl font-black tracking-tighter sm:text-4xl">
-                              {Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
-                            </span>
+                            <span className="text-3xl font-black tracking-tight sm:text-4xl">{selectedTreatmentTotal.toLocaleString()}</span>
                           )}
                         </div>
+                        {isPriceEditable && canManagePricing && (
+                          <p className="mt-2 text-xs font-semibold text-blue-500">
+                            Reflected total: &#8369;{Math.max(0, selectedTreatmentBasePrice - discountAmount).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="pointer-events-none absolute bottom-4 right-4 hidden h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-3xl text-blue-600 md:flex">
+                        🦷
                       </div>
                     </div>
 
-                      <div className="flex min-h-[9.5rem] flex-col rounded-2xl border-2 border-gray-100 bg-white p-4 shadow-sm sm:min-h-[11rem] sm:rounded-[2rem] sm:p-5">
-                        <Label htmlFor="improved-booking-treatment-notes" className="text-[11px] font-black uppercase tracking-widest text-gray-500">
-                          Treatment Notes
+                    <div className="space-y-3 p-4 sm:p-5">
+                      <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                            <Clock className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-gray-500">Duration</p>
+                            {canManagePricing ? (
+                              <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))}>
+                                <SelectTrigger className="mt-0.5 h-auto min-h-0 border-0 bg-transparent px-0 py-0 text-left text-lg font-black text-gray-900 shadow-none focus:ring-0 focus:ring-offset-0">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="rounded-xl">
+                                  {ALLOWED_BOOKING_DURATIONS.map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-0.5 text-lg font-black text-gray-900">{duration} mins</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                            <Tag className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-gray-500">Discount</p>
+                            <div className="mt-0.5 flex items-center gap-2">
+                              <span className="text-lg font-black text-gray-900">PHP</span>
+                              <Input
+                                type="number"
+                                value={discount}
+                                onChange={(e) => setDiscount(e.target.value)}
+                                disabled={!canManagePricing}
+                                className="h-7 flex-1 border-0 bg-transparent px-0 text-lg font-black text-gray-900 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="improved-booking-treatment-notes" className="text-sm font-black text-gray-800">
+                          Treatment Notes <span className="font-semibold text-gray-500">(Optional)</span>
                         </Label>
-                        <Textarea
-                          id="improved-booking-treatment-notes"
-                          value={treatmentNotes}
-                          onChange={(event) => setTreatmentNotes(event.target.value)}
-                          placeholder="Add treatment-specific notes..."
-                          disabled={isPatientReadonly}
-                          className="mt-4 min-h-0 flex-1 resize-none rounded-2xl border-0 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 shadow-none focus-visible:ring-2 focus-visible:ring-blue-200 focus-visible:ring-offset-0"
-                        />
+                        <div className="relative mt-2">
+                          <Textarea
+                            id="improved-booking-treatment-notes"
+                            value={treatmentNotes}
+                            onChange={(event) => setTreatmentNotes(event.target.value)}
+                            placeholder="Add any notes or special instructions..."
+                            disabled={isPatientReadonly}
+                            maxLength={250}
+                            className="min-h-[5.75rem] resize-none rounded-xl border-gray-200 bg-white px-3 py-3 pr-14 text-sm font-semibold text-gray-700 shadow-sm focus-visible:ring-2 focus-visible:ring-blue-200 focus-visible:ring-offset-0 sm:rounded-2xl"
+                          />
+                          <span className="pointer-events-none absolute bottom-3 right-4 text-xs font-semibold text-gray-500">
+                            {treatmentNotesCount} / 250
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
+
                 </div>
               )}
 
@@ -3553,7 +3696,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 flex-col gap-3 border-t bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <DialogFooter className={modalStep === 'treatment'
+            ? "mx-3 mb-3 shrink-0 flex-col gap-3 rounded-xl border border-gray-100 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-sm sm:mx-5 sm:mb-5 sm:flex-row sm:items-center sm:justify-between sm:rounded-2xl sm:p-4"
+            : "shrink-0 flex-col gap-3 border-t bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:p-6"
+          }>
             {isCancelled && user?.role === 'patient' ? (
               <Button
                 onClick={handleClose}
@@ -3563,6 +3709,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </Button>
             ) : (
               <>
+                {modalStep === 'treatment' && (
+                  <div className="flex w-full items-center gap-2.5 sm:w-auto">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 sm:h-11 sm:w-11">
+                      <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 text-left">
+                      <p className="text-xs font-black text-gray-900 sm:text-sm">Your information is secure</p>
+                      <p className="mt-0.5 text-[11px] font-semibold text-gray-500 sm:text-xs">Industry-standard encryption</p>
+                    </div>
+                  </div>
+                )}
                 {(canCancelAppointment || canDeleteAppointment) && (
                   <Button
                     type="button"
@@ -3580,7 +3737,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   onClick={handlePrimaryBookingAction}
                   disabled={isBooking}
                   data-tour-id="booking-next-button"
-                  className={`h-12 w-full rounded-2xl px-8 font-black uppercase tracking-widest text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${modalStep === 'payment' ? 'bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:min-w-[260px]' : 'bg-blue-600 shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'}`}
+                  className={`w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
+                    modalStep === 'payment'
+                      ? 'h-12 bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:min-w-[260px]'
+                      : modalStep === 'treatment'
+                      ? 'h-12 bg-blue-600 text-sm normal-case tracking-normal shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[16rem] sm:text-base'
+                      : 'h-12 bg-blue-600 uppercase tracking-widest shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'
+                  }`}
                 >
                   {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
                     <div className="flex items-center justify-center gap-2">
@@ -3634,6 +3797,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedDate={selectedDate}
         selectedTime={selectedTime}
         duration={duration}
+        toothNumbers={toothNumbers}
         treatmentNotes={treatmentNotes}
         notes={notes}
         onNotesChange={setNotes}

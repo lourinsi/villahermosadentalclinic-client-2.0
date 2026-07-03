@@ -15,7 +15,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertTriangle, Check, ClipboardList, ListPlus, Loader2, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertTriangle, Check, ClipboardList, ListPlus, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
 export type { QuestionnaireQuestion };
 
@@ -188,10 +189,10 @@ export function QuestionnaireView() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-gray-900">Questionnaire</h1>
+          <h1 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">Questionnaire</h1>
           <p className="text-sm font-medium text-gray-500">
             Manage baseline medical questionnaire items shown on patient records.
           </p>
@@ -270,13 +271,13 @@ export function QuestionnaireView() {
         </CardHeader>
         <CardContent>
           <div className="overflow-hidden rounded-xl border border-gray-100">
-            <Table>
+            <Table className="table-fixed sm:table-auto">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[72px]">Box</TableHead>
+                  <TableHead className="hidden w-[72px] sm:table-cell">Box</TableHead>
                   <TableHead>Question</TableHead>
-                  <TableHead className="w-[120px]">Status</TableHead>
-                  <TableHead className="w-[180px] text-right">Action</TableHead>
+                  <TableHead className="hidden w-[120px] md:table-cell">Status</TableHead>
+                  <TableHead className="w-[56px] text-right sm:w-[180px]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -294,7 +295,7 @@ export function QuestionnaireView() {
 
                   return (
                     <TableRow key={question.id}>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <Checkbox checked={false} disabled aria-label="Question checkbox preview" />
                       </TableCell>
                       <TableCell>
@@ -304,14 +305,19 @@ export function QuestionnaireView() {
                           className="font-semibold"
                           disabled={isQuestionRouteUnavailable}
                         />
+                        <div className="mt-2 md:hidden">
+                          <Badge className="border-none bg-emerald-100 text-emerald-700">
+                            Active
+                          </Badge>
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <Badge className="border-none bg-emerald-100 text-emerald-700">
                           Active
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
+                        <div className="hidden justify-end gap-2 sm:flex">
                           <Button
                             size="sm"
                             variant={changed ? "default" : "outline"}
@@ -339,6 +345,29 @@ export function QuestionnaireView() {
                             Delete
                           </Button>
                         </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl sm:hidden" title="Question actions">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem
+                              disabled={isQuestionRouteUnavailable || !changed || savingId === question.id}
+                              onSelect={() => handleSave(question)}
+                            >
+                              {savingId === question.id ? "Saving..." : changed ? "Save" : "Saved"}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-red-600 focus:text-red-600"
+                              disabled={isQuestionRouteUnavailable || deletingId === question.id}
+                              onSelect={() => handleDelete(question)}
+                            >
+                              {deletingId === question.id ? "Deleting..." : "Delete"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   );

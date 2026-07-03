@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { Lock, User, Loader2, Settings, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { getManagementDashboardPath } from "@/lib/management-routes";
 
 export default function AdminLoginPage() {
   const { login, logout, isLoading, user } = useAuth();
@@ -27,8 +28,11 @@ export default function AdminLoginPage() {
   };
 
   useEffect(() => {
-    if (!isLoading && user?.role === "admin") {
-      router.replace("/admin/dashboard");
+    if (!isLoading) {
+      const dashboardPath = getManagementDashboardPath(user?.role);
+      if (dashboardPath) {
+        router.replace(dashboardPath);
+      }
     }
   }, [isLoading, router, user]);
 

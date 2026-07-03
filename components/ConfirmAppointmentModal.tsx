@@ -41,6 +41,7 @@ interface ConfirmAppointmentModalProps {
   selectedDate: Date;
   selectedTime: string;
   duration: string;
+  toothNumbers?: string;
   treatmentNotes?: string;
   notes: string;
   onNotesChange: (notes: string) => void;
@@ -103,6 +104,7 @@ export function ConfirmAppointmentModal({
   selectedDate,
   selectedTime,
   duration,
+  toothNumbers = "",
   treatmentNotes = "",
   notes,
   onNotesChange,
@@ -200,6 +202,7 @@ export function ConfirmAppointmentModal({
     : undefined;
 
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
+  const toothNumbersText = String(toothNumbers || "").trim();
   const treatmentNotesText = String(treatmentNotes || "").trim();
   const paymentDateLabel = paymentAmountNow > 0 ? formatBookingPaymentDateLabel(paymentDate) : "";
   const handleConfirmClick = () => {
@@ -258,6 +261,14 @@ export function ConfirmAppointmentModal({
                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Service</p>
                 <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
                   {treatmentName}
+                </p>
+              </div>
+
+              {/* Tooth Numbers */}
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Tooth No./s</p>
+                <p className={`line-clamp-2 text-sm font-bold leading-snug ${toothNumbersText ? "text-gray-900" : "text-gray-400"}`}>
+                  {toothNumbersText || "No tooth numbers added."}
                 </p>
               </div>
 
