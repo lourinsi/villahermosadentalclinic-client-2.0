@@ -1,12 +1,22 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef } from "react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { AlertCircle, Loader2, Clock, Calendar as CalendarIcon } from "lucide-react";
+import {
+  AlertCircle,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  CircleDot,
+  ClipboardList,
+  Clock,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
 import { DatePickerModal } from "./DatePickerModal";
 import { formatBookingPaymentDateLabel, getBookingDoctorValue, parseLocalDateOnly } from "./sharedBookingLogic";
@@ -19,6 +29,46 @@ const REPEAT_OPTIONS = [
   { value: "3-months", label: "3 months from now" },
   { value: "custom", label: "Custom date" },
 ];
+
+function DetailIcon({
+  children,
+  tone = "blue",
+}: {
+  children: ReactNode;
+  tone?: "blue" | "green";
+}) {
+  return (
+    <span
+      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl shadow-sm ${
+        tone === "green" ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-blue-600"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function DetailCell({
+  label,
+  children,
+  icon,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  icon?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 p-5 sm:p-6 ${className}`}>
+      <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">{label}</p>
+      <div className="flex min-w-0 items-center gap-4">
+        {icon}
+        <div className="min-w-0 text-[19px] font-black leading-tight tracking-tight text-slate-950">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 interface ConfirmAppointmentModalProps {
   open: boolean;
@@ -186,25 +236,23 @@ export function ConfirmAppointmentModal({
       case "3-months":
         target.setMonth(baseDate.getMonth() + 3);
         return target;
-          case "custom":
+      case "custom":
         if (!customRepeatDate) {
           return null;
         }
-        const parsed = parseLocalDateOnly(customRepeatDate);
-        return parsed;
+        return parseLocalDateOnly(customRepeatDate);
       default:
         return null;
     }
   }, [customRepeatDate, repeatOption, selectedDate]);
 
-  const repeatDateLabel = computedRepeatTarget
-    ? formatWordyDate(computedRepeatTarget)
-    : undefined;
-
+  const repeatDateLabel = computedRepeatTarget ? formatWordyDate(computedRepeatTarget) : undefined;
   const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
   const toothNumbersText = String(toothNumbers || "").trim();
   const treatmentNotesText = String(treatmentNotes || "").trim();
   const paymentDateLabel = paymentAmountNow > 0 ? formatBookingPaymentDateLabel(paymentDate) : "";
+  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow);
+
   const handleConfirmClick = () => {
     return onConfirm({ repeatOption, customRepeatDate });
   };
@@ -212,312 +260,361 @@ export function ConfirmAppointmentModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
-        <DialogHeader className="border-b bg-gray-50 px-6 py-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
-              <AlertCircle className="h-6 w-6" />
+        <DialogContent
+          data-tour-id="booking-summary-modal"
+          showCloseButton={false}
+          className="w-[calc(100vw-1.25rem)] max-w-[960px] gap-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl sm:max-w-[960px]"
+        >
+          <DialogHeader className="relative bg-white px-6 pb-5 pt-7 text-left sm:px-10 sm:pt-9">
+            <div className="flex items-start gap-5 pr-10">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-200">
+                <AlertCircle className="h-8 w-8" />
+              </div>
+              <div className="min-w-0 pt-1">
+                <DialogTitle className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                  Confirm Appointment
+                </DialogTitle>
+                <p className="mt-2 text-lg font-semibold text-slate-500">Please review all details before saving</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <DialogTitle className="text-xl font-black text-gray-900">Confirm Appointment</DialogTitle>
-              <p className="mt-1 text-sm font-bold text-gray-500">Please review all details before saving</p>
-            </div>
-          </div>
-        </DialogHeader>
+            <DialogClose
+              className="absolute right-6 top-7 flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 sm:right-9 sm:top-9"
+              aria-label="Close"
+            >
+              <X className="h-7 w-7" />
+            </DialogClose>
+          </DialogHeader>
 
-        <div className="space-y-5 bg-white p-6">
-          <div className="rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
-            <div className="grid gap-4 sm:grid-cols-6">
-              {/* Patient */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Patient</p>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
-                    {patientAvatar && <AvatarImage src={patientAvatar} alt={patientName} className="object-cover" />}
-                    <AvatarFallback className="bg-blue-600 text-[11px] font-black text-white">
-                      {getPersonInitials(patientName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{patientName}</p>
+          <div className="space-y-6 bg-white px-5 pb-7 sm:px-9">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="grid sm:grid-cols-2">
+                <DetailCell
+                  label="Patient"
+                  className="border-b border-slate-200 sm:border-r"
+                  icon={
+                    <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
+                      {patientAvatar && <AvatarImage src={patientAvatar} alt={patientName} className="object-cover" />}
+                      <AvatarFallback className="bg-blue-600 text-base font-black text-white">
+                        {getPersonInitials(patientName)}
+                      </AvatarFallback>
+                    </Avatar>
+                  }
+                >
+                  <span className="block truncate">{patientName}</span>
+                </DetailCell>
+
+                <DetailCell
+                  label="Doctor"
+                  className="border-b border-slate-200"
+                  icon={
+                    <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
+                      {doctorAvatar && <AvatarImage src={doctorAvatar} alt={doctorName} className="object-cover" />}
+                      <AvatarFallback className="bg-emerald-500 text-base font-black text-white">
+                        {getDoctorInitials(doctorName)}
+                      </AvatarFallback>
+                    </Avatar>
+                  }
+                >
+                  <span className="block truncate">{doctorName}</span>
+                </DetailCell>
+
+                <DetailCell
+                  label="Service"
+                  className="border-b border-slate-200 sm:border-r"
+                  icon={
+                    <DetailIcon>
+                      <CircleDot className="h-7 w-7" />
+                    </DetailIcon>
+                  }
+                >
+                  <span className="block truncate">{treatmentName}</span>
+                </DetailCell>
+
+                <DetailCell label="Tooth No./s" className="border-b border-slate-200">
+                  <span className={toothNumbersText ? "block truncate" : "block truncate text-slate-400"}>
+                    {toothNumbersText || "No tooth numbers added."}
+                  </span>
+                </DetailCell>
+
+                <DetailCell
+                  label="Schedule"
+                  className="border-b border-slate-200 sm:border-r"
+                  icon={
+                    <DetailIcon>
+                      <CalendarIcon className="h-7 w-7" />
+                    </DetailIcon>
+                  }
+                >
+                  <span className="block truncate">
+                    {formatWordyDate(selectedDate)} at {selectedTime ? formatTimeTo12h(selectedTime) : "-"}
+                  </span>
+                </DetailCell>
+
+                <DetailCell
+                  label="Duration"
+                  className="border-b border-slate-200"
+                  icon={
+                    <DetailIcon>
+                      <Clock className="h-7 w-7" />
+                    </DetailIcon>
+                  }
+                >
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <span className="truncate">{duration} mins</span>
+                    {durationConflict && (
+                      <span
+                        title={bookingConflictWarnings.find((warning) => warning.type === "duration")?.message || durationConflict}
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"
+                      >
+                        <AlertCircle className="h-4 w-4" />
+                      </span>
+                    )}
+                  </span>
+                </DetailCell>
+
+                <DetailCell
+                  label="Status"
+                  className="border-b border-slate-200 sm:border-r"
+                  icon={
+                    <DetailIcon tone="green">
+                      <CheckCircle2 className="h-7 w-7" />
+                    </DetailIcon>
+                  }
+                >
+                  {canEditAppointmentStatus ? (
+                    <Select value={appointmentStatus} onValueChange={onAppointmentStatusChange} disabled={appointmentStatusOptions.length === 0}>
+                      <SelectTrigger
+                        className={`h-11 min-w-[150px] rounded-full border-0 px-4 text-sm font-black uppercase tracking-wide shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${getAppointmentStatusOption(appointmentStatus)?.bgColor || "bg-emerald-100"} ${getAppointmentStatusOption(appointmentStatus)?.textColor || "text-emerald-700"}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        {appointmentStatusOptions.map((status) => (
+                          <SelectItem key={status.value} value={status.value} className="mx-2 my-1 rounded-xl">
+                            {status.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span
+                      className={`inline-flex h-11 items-center rounded-full px-5 text-sm font-black uppercase tracking-wide shadow-sm ${getAppointmentStatusOption(appointmentStatus)?.bgColor || "bg-emerald-100"} ${getAppointmentStatusOption(appointmentStatus)?.textColor || "text-emerald-700"}`}
+                    >
+                      {getBookingStatusLabel(appointmentStatus, appointmentStatusOptions)}
+                    </span>
+                  )}
+                </DetailCell>
+
+                <DetailCell
+                  label="Repeat this appointment"
+                  className="border-b border-slate-200"
+                  icon={
+                    <DetailIcon>
+                      <RotateCcw className="h-7 w-7" />
+                    </DetailIcon>
+                  }
+                >
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Select value={repeatOption} onValueChange={handleRepeatOptionChange}>
+                        <SelectTrigger className="h-11 min-w-[190px] rounded-full border-0 bg-slate-100 px-4 text-sm font-black text-slate-900 shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl border-none shadow-2xl">
+                          <SelectItem value={REPEAT_NONE_OPTION} className="mx-2 my-1 rounded-xl">
+                            Do not repeat
+                          </SelectItem>
+                          {REPEAT_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value} className="mx-2 my-1 rounded-xl">
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {repeatOption === "custom" && (
+                        <Button
+                          variant="outline"
+                          className="h-11 rounded-full border-0 bg-blue-50 px-4 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-100"
+                          onClick={() => setCustomRepeatDatePickerOpen(true)}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {customRepeatDate
+                            ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
+                            : "Pick date"}
+                        </Button>
+                      )}
+                    </div>
+
+                    {repeatOption !== REPEAT_NONE_OPTION && (
+                      <p className="text-sm font-semibold leading-snug text-slate-500">
+                        {repeatOption === "custom"
+                          ? customRepeatDate
+                            ? `This appointment will be cloned to ${repeatDateLabel}.`
+                            : "Choose a custom clone date to schedule the follow-up."
+                          : `This appointment will be cloned to ${repeatDateLabel}.`}
+                      </p>
+                    )}
+                  </div>
+                </DetailCell>
+
+                <div className="flex min-w-0 gap-4 border-b border-slate-200 p-5 sm:col-span-2 sm:p-6">
+                  <DetailIcon>
+                    <ClipboardList className="h-7 w-7" />
+                  </DetailIcon>
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Treatment Notes</p>
+                    <p className={`line-clamp-3 text-lg font-semibold leading-snug ${treatmentNotesText ? "text-slate-700" : "text-slate-500"}`}>
+                      {treatmentNotesText || "No treatment notes added."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex min-w-0 gap-4 p-5 sm:col-span-2 sm:p-6">
+                  <DetailIcon>
+                    <Pencil className="h-7 w-7" />
+                  </DetailIcon>
+                  <CompactNotesField
+                    id="confirm-summary-notes"
+                    label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
+                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
+                    value={notes}
+                    onChange={onNotesChange}
+                    disabled={isPatientReadonly && isCancelled}
+                    className="min-w-0 flex-1 space-y-0 [&_button]:h-auto [&_button]:border-transparent [&_button]:pb-0 [&_button]:text-lg"
+                    labelClassName="mb-2 block text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80"
+                    textareaClassName="min-h-[72px] resize-none rounded-xl border-slate-200 bg-white p-3 text-base font-semibold text-slate-700 transition-all focus:border-blue-500 focus:bg-white"
+                  />
                 </div>
               </div>
+            </div>
 
-              {/* Doctor */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Doctor</p>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
-                    {doctorAvatar && <AvatarImage src={doctorAvatar} alt={doctorName} className="object-cover" />}
-                    <AvatarFallback className="bg-emerald-500 text-[11px] font-black text-white">
-                      {getDoctorInitials(doctorName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{doctorName}</p>
+            <DatePickerModal
+              open={customRepeatDatePickerOpen}
+              onOpenChange={setCustomRepeatDatePickerOpen}
+              selectedDate={customRepeatDate || selectedDate}
+              onDateSelect={(date) => {
+                const formatted = formatDateToYYYYMMDD(date);
+                handleCustomRepeatDateChange(formatted);
+              }}
+              doctorName={getBookingDoctorValue(doctorName)}
+              patientId={patientId}
+              selectedTime={selectedTime}
+              duration={duration}
+              minDate={selectedDate}
+              title="Choose follow-up date"
+              subtitle="Pick a date for the cloned appointment."
+              disableDatesWithTimeConflict={true}
+              timeConflictMessage="This doctor already has an appointment at the selected time on this day."
+              disableDatesOnOrBeforeMinDate={true}
+            />
+
+            {bookingConflictWarnings.length > 0 && (
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+                <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+                <p>This appointment has a scheduling conflict. Hover the warning icon for details.</p>
+              </div>
+            )}
+
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 sm:p-7">
+              <div className="mb-4 grid gap-5 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-start">
+                <div className="min-w-0">
+                  <p className="mb-4 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Financial Summary</p>
+                  <p className="mb-1 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Final Price</p>
+                  <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                    {discount > 0 && (
+                      <span className="text-xl font-black text-slate-400 line-through decoration-slate-400/60">
+                        ₱{finalPrice.toLocaleString()}
+                      </span>
+                    )}
+                    <p className="text-5xl font-black tracking-tight text-blue-600 sm:text-6xl">₱{discountedPrice.toLocaleString()}</p>
+                    {discount > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-widest text-emerald-700 shadow-sm">
+                        Saved ₱{discount.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Service */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Service</p>
-                <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
-                  {treatmentName}
-                </p>
-              </div>
-
-              {/* Tooth Numbers */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Tooth No./s</p>
-                <p className={`line-clamp-2 text-sm font-bold leading-snug ${toothNumbersText ? "text-gray-900" : "text-gray-400"}`}>
-                  {toothNumbersText || "No tooth numbers added."}
-                </p>
-              </div>
-
-              {/* Treatment Notes */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-3">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Treatment Notes</p>
-                <p className={`line-clamp-3 text-sm font-bold leading-snug ${treatmentNotesText ? "text-gray-900" : "text-gray-400"}`}>
-                  {treatmentNotesText || "No treatment notes added."}
-                </p>
-              </div>
-
-              {/* Schedule */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Schedule</p>
-                <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
-                  {formatWordyDate(selectedDate)} at {selectedTime ? formatTimeTo12h(selectedTime) : "—"}
-                </p>
-              </div>
-
-              {/* Duration */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Duration</p>
-                <div className="flex items-center gap-2">
-                  <p className="text-base font-black text-gray-900 tracking-tight">{duration} mins</p>
-                  {durationConflict && (
-                    <span title={bookingConflictWarnings.find((w) => w.type === "duration")?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                      <AlertCircle className="h-3.5 w-3.5" />
+                <div className="min-w-0 sm:justify-self-end sm:text-right">
+                  <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Payment Status</p>
+                  {canManagePaymentStatuses ? (
+                    <Select value={paymentStatus} onValueChange={onPaymentStatusChange}>
+                      <SelectTrigger
+                        className={`h-14 w-full rounded-full border border-slate-200 px-6 text-base font-black uppercase tracking-wide shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:w-[190px] ${getPaymentStatusOption(paymentStatus)?.bgColor || "bg-white"} ${getPaymentStatusOption(paymentStatus)?.textColor || "text-slate-900"}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        {paymentStatusOptions.map((status) => (
+                          <SelectItem key={status.value} value={status.value} className="mx-2 my-1 rounded-xl">
+                            {status.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span
+                      className={`inline-flex h-14 items-center rounded-full border border-slate-200 px-6 text-base font-black uppercase tracking-wide shadow-sm ${getPaymentStatusOption(paymentStatus)?.bgColor || "bg-white"} ${getPaymentStatusOption(paymentStatus)?.textColor || "text-slate-900"}`}
+                    >
+                      {getBookingStatusLabel(paymentStatus, paymentStatusOptions)}
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* Status */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-2">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Status</p>
-                {canEditAppointmentStatus ? (
-                  <Select value={appointmentStatus} onValueChange={onAppointmentStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                    <SelectTrigger
-                      className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:max-w-[180px] ${getAppointmentStatusOption(appointmentStatus)?.bgColor || "bg-gray-100"} ${getAppointmentStatusOption(appointmentStatus)?.textColor || "text-gray-700"}`}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-2xl border-none shadow-2xl">
-                      {appointmentStatusOptions.map((status) => (
-                        <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                          {status.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <span
-                    className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${getAppointmentStatusOption(appointmentStatus)?.bgColor || "bg-gray-100"} ${getAppointmentStatusOption(appointmentStatus)?.textColor || "text-gray-700"}`}
-                  >
-                    {getBookingStatusLabel(appointmentStatus, appointmentStatusOptions)}
-                  </span>
+              <div className={`grid border-t border-slate-200 pt-5 ${paymentDateLabel ? "grid-cols-2 gap-y-5 sm:grid-cols-4" : "grid-cols-3"}`}>
+                <div className="px-2 text-center">
+                  <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Already Paid</p>
+                  <p className="text-2xl font-black tracking-tight text-emerald-600">₱{previouslyPaidAmount.toLocaleString()}</p>
+                </div>
+                <div className="border-l border-slate-200 px-2 text-center">
+                  <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Paying Now</p>
+                  <p className="text-2xl font-black tracking-tight text-blue-600">₱{paymentAmountNow.toLocaleString()}</p>
+                </div>
+                {paymentDateLabel && (
+                  <div className="border-l border-slate-200 px-2 text-center">
+                    <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Payment Date</p>
+                    <p className="text-lg font-black tracking-tight text-slate-700">{paymentDateLabel}</p>
+                  </div>
                 )}
-              </div>
-
-              {/* Repeat / Clone */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-4 sm:col-span-6">
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Repeat this appointment</p>
-                  </div>
-
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Select value={repeatOption} onValueChange={handleRepeatOptionChange}>
-                      <SelectTrigger className="h-10 min-w-[200px] rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-gray-100 text-gray-700">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        <SelectItem value={REPEAT_NONE_OPTION} className="rounded-xl my-1 mx-2">
-                          Do not repeat
-                        </SelectItem>
-                        {REPEAT_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value} className="rounded-xl my-1 mx-2">
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    {repeatOption === "custom" && (
-                      <>
-                        <Button
-                          variant="outline"
-                          className="h-10 rounded-full border-0 px-4 bg-gradient-to-r from-blue-50 to-blue-50 text-blue-700 font-black text-xs uppercase tracking-tighter shadow-sm hover:from-blue-100 hover:to-blue-100 flex items-center gap-2 transition-all"
-                          onClick={() => setCustomRepeatDatePickerOpen(true)}
-                        >
-                          <CalendarIcon className="h-4 w-4" />
-                          {customRepeatDate
-                            ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
-                            : "Pick date"}
-                        </Button>
-                        <DatePickerModal
-                          open={customRepeatDatePickerOpen}
-                          onOpenChange={setCustomRepeatDatePickerOpen}
-                          selectedDate={customRepeatDate || selectedDate}
-                          onDateSelect={(date) => {
-                            const formatted = formatDateToYYYYMMDD(date);
-                            handleCustomRepeatDateChange(formatted);
-                          }}
-                          doctorName={getBookingDoctorValue(doctorName)}
-                          patientId={patientId}
-                          selectedTime={selectedTime}
-                          duration={duration}
-                          minDate={selectedDate}
-                          title="Choose follow-up date"
-                          subtitle="Pick a date for the cloned appointment."
-                          disableDatesWithTimeConflict={true}
-                          timeConflictMessage="This doctor already has an appointment at the selected time on this day."
-                          disableDatesOnOrBeforeMinDate={true}
-                        />
-                      </>
-                    )}
-                  </div>
-
-                  {repeatOption !== REPEAT_NONE_OPTION && (
-                    <p className="text-sm text-gray-600">
-                      {repeatOption === "custom"
-                        ? customRepeatDate
-                          ? `This appointment will be cloned to ${repeatDateLabel}.`
-                          : "Choose a custom clone date to schedule the follow-up."
-                        : `This appointment will be cloned to ${repeatDateLabel}.`}
-                    </p>
-                  )}
+                <div className="border-l border-slate-200 px-2 text-center">
+                  <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Remaining</p>
+                  <p className="text-2xl font-black tracking-tight text-slate-950">₱{remainingBalance.toLocaleString()}</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Notes */}
-          <CompactNotesField
-            id="confirm-summary-notes"
-            label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
-            placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
-            value={notes}
-            onChange={onNotesChange}
-            disabled={isPatientReadonly && isCancelled}
-            className="rounded-[1.5rem] border border-gray-100 bg-gray-50/50 p-4"
-            labelClassName="mb-2 text-[9px] font-black uppercase tracking-widest text-gray-400 opacity-70"
-            textareaClassName="min-h-[58px] resize-none rounded-xl border border-gray-100 bg-white p-3 text-sm font-medium transition-all focus:border-blue-500 focus:bg-white"
-          />
-
-          {/* Conflict warnings */}
-          {bookingConflictWarnings.length > 0 && (
-            <div className="rounded-2xl border-2 border-amber-100 bg-amber-50 p-4 text-xs font-bold text-amber-800 flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
-              <p>This appointment has a scheduling conflict. Hover the warning icon for details.</p>
+          {userRole === "patient" && isCartAppointmentStatus(appointmentStatus) && (
+            <div className="px-5 pb-5 sm:px-9">
+              <div className="rounded-xl border border-yellow-100 bg-yellow-50 p-3 text-sm font-semibold text-yellow-800">
+                Note: This booking will be added to your cart. Adding a payment will reserve this schedule.
+              </div>
             </div>
           )}
 
-          {/* Financial Summary */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-4">
-              <div className="h-px flex-1 bg-gray-100"></div>
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Financial Summary</p>
-              <div className="h-px flex-1 bg-gray-100"></div>
-            </div>
-
-            <div className="space-y-5 rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
-              <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_180px] md:items-start">
-                {/* Final Price */}
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Final Price</p>
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-                    {discount > 0 && <span className="text-sm font-bold text-gray-400 line-through decoration-gray-400/50">₱{finalPrice.toLocaleString()}</span>}
-                    <p className="text-3xl font-black text-blue-600 tracking-tighter">₱{discountedPrice.toLocaleString()}</p>
-                    {discount > 0 && <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 shadow-sm">Saved ₱{discount.toLocaleString()}</span>}
-                  </div>
-                </div>
-
-                {/* Payment Status */}
-                <div className="min-w-0 md:justify-self-end md:text-right">
-                  <div>
-                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Payment Status</p>
-                    {canManagePaymentStatuses ? (
-                      <Select value={paymentStatus} onValueChange={onPaymentStatusChange}>
-                        <SelectTrigger
-                          className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 md:w-[160px] ${getPaymentStatusOption(paymentStatus)?.bgColor || "bg-gray-100"} ${getPaymentStatusOption(paymentStatus)?.textColor || "text-gray-700"}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-2xl border-none shadow-2xl">
-                          {paymentStatusOptions.map((status) => (
-                            <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                              {status.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <span
-                        className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${getPaymentStatusOption(paymentStatus)?.bgColor || "bg-gray-100"} ${getPaymentStatusOption(paymentStatus)?.textColor || "text-gray-700"}`}
-                      >
-                        {getBookingStatusLabel(paymentStatus, paymentStatusOptions)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment breakdown */}
-              <div className={`grid gap-3 border-t border-gray-100/70 pt-4 ${paymentDateLabel ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Already Paid</p>
-                  <p className="text-sm font-black text-emerald-600 tracking-tight">₱{previouslyPaidAmount.toLocaleString()}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Paying Now</p>
-                  <p className="text-sm font-black text-blue-600 tracking-tight">₱{paymentAmountNow.toLocaleString()}</p>
-                </div>
-                {paymentDateLabel && (
-                  <div className="text-center">
-                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Payment Date</p>
-                    <p className="text-sm font-black text-gray-700 tracking-tight">{paymentDateLabel}</p>
-                  </div>
-                )}
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Remaining</p>
-                  <p className="text-sm font-black text-gray-400 tracking-tight">₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Patient-facing note for cart bookings */}
-        {userRole === "patient" && isCartAppointmentStatus(appointmentStatus) && (
-          <div className="px-6 pb-5">
-            <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
-              Note: This booking will be added to your cart. Adding a payment will reserve this schedule.
-            </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <DialogFooter className="flex gap-3 border-t bg-gray-50/60 p-6">
-          <Button data-tour-id="booking-summary-back" variant="outline" onClick={() => onOpenChange(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
-            Back to Edit
-          </Button>
-          <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmClick} disabled={isBooking}>
-            {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
-            {isCartAppointmentStatus(appointmentStatus) ? "Add to Cart" : "Confirm & Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter className="flex gap-4 border-t border-slate-200 bg-slate-50/80 p-5 sm:p-6">
+            <Button
+              data-tour-id="booking-summary-back"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isBooking}
+              className="h-16 flex-1 rounded-xl border-2 border-slate-300 bg-white text-lg font-black text-slate-950 hover:bg-slate-50"
+            >
+              Back to Edit
+            </Button>
+            <Button
+              className="h-16 flex-1 rounded-xl bg-blue-600 text-lg font-black uppercase tracking-[0.12em] text-white shadow-lg shadow-blue-200 hover:bg-blue-700"
+              onClick={handleConfirmClick}
+              disabled={isBooking}
+            >
+              {isBooking ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
+              {isCartAppointmentStatus(appointmentStatus) ? "Add to Cart" : "Confirm & Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

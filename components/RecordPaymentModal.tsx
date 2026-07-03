@@ -6,6 +6,7 @@ import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
@@ -23,7 +24,7 @@ import { Textarea } from "./ui/textarea";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
-import { CheckCircle, DollarSign } from "lucide-react";
+import { CheckCircle, CreditCard, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
@@ -119,19 +120,38 @@ export function RecordPaymentModal() {
 
   return (
     <Dialog open={isPaymentModalOpen} onOpenChange={closePaymentModal}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Record Payment for {patientName}</DialogTitle>
+      <DialogContent
+        showCloseButton={false}
+        className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[86dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-lg sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+      >
+        <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 shadow-sm sm:px-6">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <CreditCard className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 text-left">
+                <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Record Payment</DialogTitle>
+                <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
+                  {patientName ? `For ${patientName}` : "Apply a payment to an appointment."}
+                </DialogDescription>
+              </div>
+            </div>
+            <Button type="button" variant="ghost" size="icon" onClick={closePaymentModal} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close record payment modal">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-6">
           {!appointmentId && (
-            <div>
-              <Label className="text-base font-semibold mb-2 block">Select Appointment</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Select Appointment</Label>
               <Select
                 value={selectedAppointment || ""}
                 onValueChange={(v) => setSelectedAppointment(v || null)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                   <SelectValue placeholder="Select appointment" />
                 </SelectTrigger>
                 <SelectContent>
@@ -148,9 +168,9 @@ export function RecordPaymentModal() {
           )}
           
           {(appointmentId || selectedAppointment) && selectedApt && (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
-              <div className="text-sm font-semibold text-blue-900 mb-3">Appointment & Payment Summary</div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 shadow-sm">
+              <div className="mb-3 text-sm font-black text-blue-900">Appointment & Payment Summary</div>
+              <div className="grid grid-cols-2 gap-3 max-[380px]:grid-cols-1">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
                   <div className="text-sm font-semibold text-gray-900">{selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : ''}</div>
@@ -172,13 +192,13 @@ export function RecordPaymentModal() {
           )}
 
           <div className="space-y-4">
-            <div>
-              <Label className="text-sm font-semibold">Payment Method</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment Method</Label>
               <Select
                 value={paymentMethod || ""}
                 onValueChange={(v) => setPaymentMethod(v || null)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
@@ -192,8 +212,8 @@ export function RecordPaymentModal() {
               </Select>
             </div>
             
-            <div>
-              <Label className="text-sm font-semibold">Payment Amount</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment Amount</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₱</span>
                 <Input
@@ -204,7 +224,7 @@ export function RecordPaymentModal() {
                   placeholder="0.00"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="pl-7"
+                  className="h-12 rounded-xl border-slate-200 bg-white pl-7 font-semibold shadow-sm"
                 />
               </div>
               {outstandingBalance > 0 && parseFloat(amount) > outstandingBalance && (
@@ -226,26 +246,28 @@ export function RecordPaymentModal() {
               )}
             </div>
             
-            <div>
-              <Label className="text-sm font-semibold">Payment Date</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment Date</Label>
               <Input
                 type="date"
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
+                className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm"
               />
             </div>
             
-            <div>
-              <Label className="text-sm font-semibold">Transaction Notes (Optional)</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Transaction Notes (Optional)</Label>
               <Textarea
                 placeholder="Additional payment details..."
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
+                className="rounded-xl border-slate-200 bg-white font-medium shadow-sm"
               />
             </div>
             
-            <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
               <div className="flex items-start space-x-2">
                 <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div className="text-xs text-blue-900">
@@ -254,14 +276,15 @@ export function RecordPaymentModal() {
               </div>
             </div>
           </div>
-
-          <div className="flex flex-col-reverse gap-2 border-t pt-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={closePaymentModal}>
+        </div>
+        <div className="shrink-0 border-t border-slate-100 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:px-6">
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" onClick={closePaymentModal} className="h-12 rounded-full font-bold">
               Cancel
             </Button>
             <Button
               onClick={handleSubmit}
-              className="bg-primary hover:bg-primary/90"
+              className="h-12 rounded-full bg-blue-600 font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
               disabled={
                 (!selectedAppointment && !appointmentId) ||
                 !paymentMethod ||
@@ -269,8 +292,8 @@ export function RecordPaymentModal() {
                 parseFloat(amount) <= 0
               }
             >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Record Payment
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Record
             </Button>
           </div>
         </div>

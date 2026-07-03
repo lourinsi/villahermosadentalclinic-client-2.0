@@ -36,6 +36,7 @@ export interface AddStaffModalProps {
   staff?: StaffRecordForModal | null;
   onStaffAdded?: (staff?: unknown) => void;
   onStaffSaved?: (staff?: unknown) => void;
+  showCompensationFields?: boolean;
 }
 
 export const emptyStaffForm: AddStaffForm = {
@@ -212,7 +213,7 @@ export const buildStaffPayload = (staff: AddStaffForm): AddStaffPayload => ({
   status: staff.status || "active",
 });
 
-export const getAddStaffSummaryRows = (staff: AddStaffPayload) => [
+export const getAddStaffSummaryRows = (staff: AddStaffPayload, showCompensationFields = true) => [
   { label: "Full Name", value: staff.name || "Not provided" },
   { label: "Role", value: getStaffRoleLabel(staff.role) },
   { label: "Email", value: staff.email || "Not provided" },
@@ -220,7 +221,9 @@ export const getAddStaffSummaryRows = (staff: AddStaffPayload) => [
   { label: "Department", value: getStaffDepartmentLabel(staff.department) },
   { label: "Employment Type", value: getEmploymentTypeLabel(staff.employmentType) },
   { label: "Hire Date", value: formatStaffDate(staff.hireDate) },
-  { label: "Base Monthly Salary", value: formatStaffCurrency(staff.baseSalary) },
+  ...(showCompensationFields
+    ? [{ label: "Base Monthly Salary", value: formatStaffCurrency(staff.baseSalary) }]
+    : []),
   { label: "Specialization", value: staff.specialization || "Not provided" },
   { label: "License Number", value: staff.licenseNumber || "Not provided" },
   { label: "Status", value: getStaffStatusLabel(staff.status) },
@@ -300,6 +303,7 @@ export function useSharedAddStaffLogic({
   staff,
   onStaffAdded,
   onStaffSaved,
+  showCompensationFields = true,
   toast,
 }: UseSharedAddStaffLogicArgs) {
   const [form, setForm] = useState<AddStaffForm>(() => staffRecordToForm(staff));
@@ -316,7 +320,10 @@ export function useSharedAddStaffLogic({
   const staffProgressWidth =
     staffModalSteps.length > 1 ? `${(activeStaffStepIndex / (staffModalSteps.length - 1)) * 100}%` : "0%";
   const staffToAdd = useMemo(() => buildStaffPayload(form), [form]);
-  const addStaffSummaryRows = useMemo(() => getAddStaffSummaryRows(staffToAdd), [staffToAdd]);
+  const addStaffSummaryRows = useMemo(
+    () => getAddStaffSummaryRows(staffToAdd, showCompensationFields),
+    [showCompensationFields, staffToAdd]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -327,7 +334,10 @@ export function useSharedAddStaffLogic({
 
   const updateForm = (updates: Partial<AddStaffForm>) => {
     if (isReadOnly) return;
-    setForm((current) => ({ ...current, ...updates }));
+    const visibleUpdates = { ...updates };
+    if (!showCompensationFields) delete visibleUpdates.baseSalary;
+    if (Object.keys(visibleUpdates).length === 0) return;
+    setForm((current) => ({ ...current, ...visibleUpdates }));
   };
 
   const resetForm = () => {
@@ -452,13 +462,16 @@ export function useSharedAddStaffLogic({
 
     setIsSaving(true);
     try {
+      const savePayload: Partial<AddStaffPayload> = { ...staffToAdd };
+      if (!showCompensationFields) delete savePayload.baseSalary;
+
       const response = await fetch(apiUrl(isEditMode ? `/api/staff/${staffId}` : "/api/staff"), {
         method: isEditMode ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(staffToAdd),
+        body: JSON.stringify(savePayload),
       });
 
       const result = await response.json().catch(() => null);

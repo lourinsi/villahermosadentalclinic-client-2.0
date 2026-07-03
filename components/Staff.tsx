@@ -75,6 +75,7 @@ type StaffFinancialFieldErrors = Partial<Record<keyof StaffFinancialRecordForm, 
 
 const FINANCIAL_RECORDS_DISABLED = true;
 const ATTENDANCE_DISABLED = true;
+const STAFF_COMPENSATION_DISABLED = true;
 const activeDropdownItemClass = (isActive: boolean) =>
   isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
@@ -786,7 +787,7 @@ export function StaffView() {
         Email: staff.email || "",
         Phone: staff.phone || "",
         "Hire Date": staff.hireDate || "",
-        "Monthly Salary": Number(staff.baseSalary) || 0,
+        ...(!STAFF_COMPENSATION_DISABLED ? { "Monthly Salary": Number(staff.baseSalary) || 0 } : {}),
         Status: staff.status || "",
         "Employment Type": staff.employmentType || "",
         Specialization: staff.specialization || "",
@@ -814,7 +815,6 @@ export function StaffView() {
     );
   };
 
-  // NOTE: Calculate total monthly payroll
   const totalMonthlyPayroll = staffData.reduce((sum, staff) => sum + (Number(staff.baseSalary) || 0), 0);
   const activeStaffCount = staffData.filter(staff => normalizeFilterValue(staff.status) === "active").length;
     return (
@@ -822,7 +822,7 @@ export function StaffView() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Staff Management</h1>
-          <p className="text-sm text-muted-foreground sm:text-base">Manage employees, salaries, and cash advances</p>
+          <p className="text-sm text-muted-foreground sm:text-base">Manage employees, schedules, and staff records</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleExportStaff} disabled={filteredStaffData.length === 0}>
@@ -839,6 +839,7 @@ export function StaffView() {
             open={isAddStaffDialogOpen}
             onOpenChange={setIsAddStaffDialogOpen}
             onStaffAdded={refreshLoadedStaffData}
+            showCompensationFields={!STAFF_COMPENSATION_DISABLED}
           />
         </div>
       </div>
@@ -858,18 +859,20 @@ export function StaffView() {
           </CardContent>
         </Card>
 
-        <Card className="hidden md:block">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Payroll</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(totalMonthlyPayroll)}</div>
-            <p className="text-xs text-muted-foreground">
-              Total salary expenses
-            </p>
-          </CardContent>
-        </Card>
+        {!STAFF_COMPENSATION_DISABLED && (
+          <Card className="hidden md:block">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Payroll</CardTitle>
+              <DollarSign className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(totalMonthlyPayroll)}</div>
+              <p className="text-xs text-muted-foreground">
+                Total salary expenses
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {!FINANCIAL_RECORDS_DISABLED && (
           <Card>
@@ -888,20 +891,22 @@ export function StaffView() {
           </Card>
         )}
 
-        <Card className="hidden md:block">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Average Salary</CardTitle>
-            <TrendingUp className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(activeStaffCount > 0 ? Math.round(totalMonthlyPayroll / activeStaffCount) : 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Per employee
-            </p>
-          </CardContent>
-        </Card>
+        {!STAFF_COMPENSATION_DISABLED && (
+          <Card className="hidden md:block">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Average Salary</CardTitle>
+              <TrendingUp className="h-4 w-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatCurrency(activeStaffCount > 0 ? Math.round(totalMonthlyPayroll / activeStaffCount) : 0)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Per employee
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <Tabs
@@ -1076,7 +1081,9 @@ export function StaffView() {
                       <TableHead className="hidden md:table-cell">Department</TableHead>
                       <TableHead className="hidden lg:table-cell">Contact</TableHead>
                       <TableHead className="hidden lg:table-cell">Hire Date</TableHead>
-                      <TableHead className="hidden md:table-cell">Monthly Salary</TableHead>
+                      {!STAFF_COMPENSATION_DISABLED && (
+                        <TableHead className="hidden md:table-cell">Monthly Salary</TableHead>
+                      )}
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -1084,7 +1091,7 @@ export function StaffView() {
                   <TableBody>
                     {filteredStaffData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={STAFF_COMPENSATION_DISABLED ? 7 : 8} className="text-center py-8 text-muted-foreground">
                           No staff members found.
                         </TableCell>
                       </TableRow>
@@ -1129,7 +1136,9 @@ export function StaffView() {
                               {staff.hireDate}
                             </div>
                           </TableCell>
-                          <TableCell className="hidden font-medium md:table-cell">{formatCurrency(staff.baseSalary)}</TableCell>
+                          {!STAFF_COMPENSATION_DISABLED && (
+                            <TableCell className="hidden font-medium md:table-cell">{formatCurrency(staff.baseSalary)}</TableCell>
+                          )}
                           <TableCell>
                             <Badge className={
                               staff.status === "active" ? "bg-green-100 text-green-800" :
@@ -1430,6 +1439,7 @@ export function StaffView() {
         onOpenChange={setIsStaffDetailsDialogOpen}
         staffMode="view"
         staff={selectedStaff}
+        showCompensationFields={!STAFF_COMPENSATION_DISABLED}
       />
 
       <AddStaffModalWrapper
@@ -1438,6 +1448,7 @@ export function StaffView() {
         staffMode="edit"
         staff={selectedStaff}
         onStaffSaved={refreshLoadedStaffData}
+        showCompensationFields={!STAFF_COMPENSATION_DISABLED}
       />
 
       <StaffDeleteModal

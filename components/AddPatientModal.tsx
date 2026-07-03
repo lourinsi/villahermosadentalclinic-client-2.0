@@ -9,6 +9,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { CheckCircle2, UserPlus, X } from "lucide-react";
 import {
   createCachedPublicBookingPatient,
   getCachedPublicBookingPatients,
@@ -311,13 +312,33 @@ export function AddPatientModal() {
 
   return (
     <Dialog open={isAddPatientModalOpen} onOpenChange={handleCancel}>
-      <DialogContent data-tour-id="add-patient-modal" className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add New Patient</DialogTitle>
+      <DialogContent
+        data-tour-id="add-patient-modal"
+        showCloseButton={false}
+        className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[72dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-md sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+      >
+        <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 shadow-sm">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <UserPlus className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 text-left">
+                <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">
+                  Add New Patient
+                </DialogTitle>
+                <p className="mt-0.5 text-xs font-bold text-slate-500">Create a quick patient record.</p>
+              </div>
+            </div>
+            <Button type="button" variant="ghost" size="icon" onClick={handleCancel} disabled={isLoading} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close add patient modal">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </DialogHeader>
 
         {/* Form View with Popover Overlay */}
-        <div className="relative">
+        <div className="relative min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar">
           <form 
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -328,7 +349,7 @@ export function AddPatientModal() {
             className={`space-y-4 transition-all ${showSummary ? 'opacity-30 pointer-events-none' : ''}`}
           >
             <div className="space-y-2">
-              <Label>First Name *</Label>
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">First Name *</Label>
               <Input 
                 ref={firstNameRef}
                 data-tour-id="add-patient-first-name"
@@ -336,22 +357,24 @@ export function AddPatientModal() {
                 onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))} 
                 placeholder="Enter first name"
                 required 
+                className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Last Name *</Label>
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Last Name *</Label>
               <Input 
                 data-tour-id="add-patient-last-name"
                 value={formData.lastName} 
                 onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))} 
                 placeholder="Enter last name"
                 required 
+                className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Phone Number *</Label>
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Phone Number *</Label>
               <Input 
                 type="tel"
                 data-tour-id="add-patient-phone"
@@ -359,15 +382,17 @@ export function AddPatientModal() {
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} 
                 placeholder="Enter phone number"
                 required 
+                className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm"
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-4 border-t">
+            <div className="sticky bottom-0 -mx-5 mt-5 flex gap-3 border-t border-slate-100 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur-sm">
               <Button 
                 variant="outline" 
                 type="button" 
                 onClick={handleCancel} 
                 disabled={isLoading}
+                className="h-11 flex-1 rounded-full font-bold"
               >
                 Cancel
               </Button>
@@ -376,6 +401,7 @@ export function AddPatientModal() {
                 data-tour-id="add-patient-review"
                 onClick={handleReview} 
                 disabled={isLoading}
+                className="h-11 flex-1 rounded-full bg-blue-600 font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
               >
                 Review
               </Button>
@@ -384,21 +410,26 @@ export function AddPatientModal() {
 
           {/* Summary Popover Overlay */}
           {showSummary && (
-            <div className="absolute inset-0 z-50 flex flex-col overflow-y-auto rounded-lg border border-blue-200 bg-white p-6 shadow-xl">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Confirm Patient Information</h3>
-              
-              <div className="space-y-3 mb-6 flex-1">
-                <div>
-                  <div className="text-xs text-muted-foreground font-semibold">Full Name</div>
-                  <div className="font-medium text-gray-900">{formData.firstName} {formData.lastName}</div>
+            <div className="absolute inset-0 z-50 flex flex-col overflow-y-auto rounded-2xl border border-blue-100 bg-white p-5 shadow-xl">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                  <CheckCircle2 className="h-5 w-5" />
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground font-semibold">Phone</div>
-                  <div className="font-medium text-gray-900">{formData.phone}</div>
+                <h3 className="text-lg font-black text-gray-900">Confirm Patient Information</h3>
+              </div>
+              
+              <div className="mb-5 grid gap-3">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Full Name</div>
+                  <div className="mt-1 font-black text-gray-900">{formData.firstName} {formData.lastName}</div>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <div className="text-xs font-black uppercase tracking-widest text-slate-400">Phone</div>
+                  <div className="mt-1 font-black text-gray-900">{formData.phone}</div>
                 </div>
               </div>
 
-              <div className="mb-6 space-y-3 border-b pb-4">
+              <div className="mb-5 flex-1 space-y-3 border-b border-slate-100 pb-4">
                 <p className="text-sm text-muted-foreground">
                   Additional patient information can be updated later after creation.
                 </p>
@@ -420,13 +451,14 @@ export function AddPatientModal() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <Button 
                   variant="outline"
                   type="button" 
                   data-tour-id="add-patient-summary-back"
                   onClick={() => setShowSummary(false)} 
                   disabled={isLoading}
+                  className="h-11 rounded-full font-bold"
                 >
                   Back
                 </Button>
@@ -435,6 +467,7 @@ export function AddPatientModal() {
                   data-tour-id="add-patient-confirm"
                   onClick={handleSubmit} 
                   disabled={isLoading}
+                  className="h-11 rounded-full bg-blue-600 font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
                 >
                   {isLoading ? "Adding..." : "Confirm & Add"}
                 </Button>

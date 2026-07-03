@@ -31,6 +31,7 @@ import {
 export default function ImprovedAddStaffModal(props: AddStaffModalProps) {
   const staffLogic = useSharedAddStaffLogic({ ...props, toast });
   const { form, staffModalStep } = staffLogic;
+  const showCompensationFields = props.showCompensationFields ?? true;
   const title = staffLogic.isViewMode
     ? "Staff Details"
     : staffLogic.isEditMode
@@ -271,19 +272,21 @@ export default function ImprovedAddStaffModal(props: AddStaffModalProps) {
                       className="h-11"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="simple-staff-salary">Base Monthly Salary (PHP)</Label>
-                    <Input
-                      id="simple-staff-salary"
-                      type="number"
-                      placeholder="5000"
-                      {...staffPasswordManagerIgnoreProps}
-                      value={form.baseSalary}
-                      disabled={staffLogic.isReadOnly}
-                      onChange={(event) => staffLogic.updateForm({ baseSalary: Number(event.target.value) })}
-                      className="h-11"
-                    />
-                  </div>
+                  {showCompensationFields ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="simple-staff-salary">Base Monthly Salary (PHP)</Label>
+                      <Input
+                        id="simple-staff-salary"
+                        type="number"
+                        placeholder="5000"
+                        {...staffPasswordManagerIgnoreProps}
+                        value={form.baseSalary}
+                        disabled={staffLogic.isReadOnly}
+                        onChange={(event) => staffLogic.updateForm({ baseSalary: Number(event.target.value) })}
+                        className="h-11"
+                      />
+                    </div>
+                  ) : null}
                   {!staffLogic.isCreateMode ? (
                     <div className="space-y-2">
                       <Label htmlFor="simple-staff-status">Status</Label>

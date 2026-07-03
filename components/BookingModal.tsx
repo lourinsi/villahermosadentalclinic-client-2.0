@@ -16,7 +16,7 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, X } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, X, ShieldCheck } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -81,6 +81,13 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 
+const sanitizeToothNumberEntry = (value: string) => String(value || "").replace(/\D/g, "");
+
+const preventNonWholeNumberInput = (event: React.FormEvent<HTMLInputElement>) => {
+  const data = (event.nativeEvent as { data?: string }).data;
+  if (data && /\D/.test(data)) event.preventDefault();
+};
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -128,8 +135,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     [toothNumberEntries]
   );
   const handleToothNumberChange = useCallback((index: number, value: string) => {
+    const sanitizedValue = sanitizeToothNumberEntry(value);
     setToothNumberEntries((current) =>
-      current.map((entry, entryIndex) => (entryIndex === index ? value : entry))
+      current.map((entry, entryIndex) => (entryIndex === index ? sanitizedValue : entry))
     );
   }, []);
   const handleAddToothNumber = useCallback(() => {
@@ -2005,6 +2013,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentDate(getDefaultBookingPaymentDate());
     } catch (err) {
       console.error('Booking payment error:', err);
+      const errorMessage = err instanceof Error ? err.message : "Please try again.";
+      toast.error(`Could not save appointment. ${errorMessage}`);
     } finally {
       setIsBooking(false);
     }
@@ -2109,74 +2119,97 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-h-[90dvh] max-w-4xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between mb-4">
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[92dvh] max-h-[92dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[92dvh] sm:w-[min(56rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-2xl"
+        >
+          <DialogHeader className="shrink-0 border-b bg-white px-4 pb-3 pt-3 shadow-sm sm:p-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" />
+            <div className="relative flex min-h-9 items-center justify-center">
               {/* Calendar icon on step 1, Back button on step 2 */}
               {modalStep === 'details' && (
-                <CalendarIcon className="h-6 w-6 text-blue-600" />
+                <div className="absolute left-0 flex h-9 w-9 items-center justify-center">
+                  <CalendarIcon className="h-5 w-5 text-blue-600" />
+                </div>
               )}
               {modalStep === 'payment' && (
                 <button
                   onClick={() => setModalStep('details')}
                   disabled={isBooking}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="absolute left-0 flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Go back"
                 >
                   <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </button>
               )}
 
-              <DialogTitle className="flex items-center gap-2 text-2xl font-bold flex-1 text-center">
+              <DialogTitle className="px-11 text-center text-lg font-black tracking-tight text-gray-900 sm:text-xl">
                 {title ? title : (
                   modalStep === 'details'
                     ? (appointmentToEdit
                         ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment')
-                        : 'Appointment Details')
-                    : 'Payment Summary'
+                        : 'Book Appointment')
+                    : 'Book Appointment'
                 )}
               </DialogTitle>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={handleClose}
+                disabled={isBooking}
+                aria-label="Close booking modal"
+                className="absolute right-0 h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </Button>
 
-                {/* Step indicators - hidden if cancelled and patient role */}
-                {!(isCancelled && user?.role === 'patient') && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setModalStep('details')}
-                      disabled={isBooking}
-                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
-                        modalStep === "details"
-                          ? "bg-blue-600 text-white hover:bg-blue-700"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      <div className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${modalStep === "details" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>1</div>
-                      Details
-                    </button>
-                    <button
-                      onClick={() => setModalStep('payment')}
-                      disabled={isBooking || !selectedPatient || !appointmentType || !duration}
-                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
-                        modalStep === "payment"
-                          ? "bg-blue-600 text-white hover:bg-blue-700"
-                          : !selectedPatient || !appointmentType || !duration
-                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      <div className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${modalStep === "payment" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>2</div>
-                      Payment
-                    </button>
-                  </div>
-                )}
             </div>
-            <DialogDescription>
+            {!(isCancelled && user?.role === 'patient') && (
+              <p className="mt-1 text-center text-sm font-bold text-slate-500 sm:hidden">
+                Step {modalStep === "details" ? 1 : 2} of 2 <span className="text-slate-400">-</span>{" "}
+                <span className="text-blue-600">{modalStep === "details" ? "Details" : "Payment"}</span>
+              </p>
+            )}
+            {/* Step indicators - hidden on mobile and when cancelled for patient role */}
+            {!(isCancelled && user?.role === 'patient') && (
+              <div className="mt-4 hidden justify-center gap-2 sm:flex">
+                <button
+                  onClick={() => setModalStep('details')}
+                  disabled={isBooking}
+                  className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
+                    modalStep === "details"
+                      ? "bg-blue-600 text-white hover:bg-blue-700"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <div className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${modalStep === "details" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>1</div>
+                  Details
+                </button>
+                <button
+                  onClick={() => setModalStep('payment')}
+                  disabled={isBooking || !selectedPatient || !appointmentType || !duration}
+                  className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
+                    modalStep === "payment"
+                      ? "bg-blue-600 text-white hover:bg-blue-700"
+                      : !selectedPatient || !appointmentType || !duration
+                      ? "cursor-not-allowed bg-gray-100 text-gray-400"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <div className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${modalStep === "payment" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>2</div>
+                  Payment
+                </button>
+              </div>
+            )}
+            <DialogDescription className="hidden text-center sm:block">
               {modalStep === 'details' ? 'Complete the following information to book your appointment' : 'Review and confirm appointment details and payment'}
             </DialogDescription>
           </DialogHeader>
 
           {modalStep === 'details' ? (
             <>
-              <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar py-2">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-gray-50/20 p-4 pb-5 custom-scrollbar sm:space-y-6 sm:p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -2296,10 +2329,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               id={index === 0 ? "booking-tooth-number-0" : undefined}
                               type="text"
                               inputMode="numeric"
+                              pattern="[0-9]*"
                               value={toothNumber}
+                              onBeforeInput={preventNonWholeNumberInput}
                               onChange={(e: any) => handleToothNumberChange(index, e.target.value)}
-                              placeholder={`Tooth ${index + 1}`}
-                              className="h-11 w-24 rounded-lg border-gray-200 text-center font-bold"
+                              placeholder="e.g. 18"
+                              className="h-11 w-24 rounded-lg border-gray-200 text-center font-bold placeholder:font-normal placeholder:text-gray-400"
                               disabled={isPatientReadonly}
                             />
                             {toothNumberEntries.length > 1 && (
@@ -2571,43 +2606,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 )}
               </div>
 
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                {/* destructive cancel for all users when editing an appointment */}
-                {(canCancelAppointment || canDeleteAppointment) && (
-                  <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    {isBooking ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <CalendarIcon className="h-4 w-4 mr-2" />
-                    )}
-                    {isBooking ? 'Processing...' : destructiveAppointmentActionLabel}
-                  </Button>
-                )}
-                
-                {(isCancelled && user?.role === 'patient') ? (
-                  <Button 
-                    onClick={handleClose} 
-                    className="bg-gray-100 hover:bg-gray-200 text-gray-600 h-11 px-8 rounded-lg ml-auto font-bold border border-gray-200"
-                  >
-                    Close
-                  </Button>
-                ) : (
-                  <Button 
-                    onClick={handleConfirmBooking} 
-                    disabled={isBooking || !appointmentType || !selectedPatient} 
-                    title={bookingConflictTitle}
-                    className={`gap-2 h-11 px-8 rounded-lg shadow-lg ${
-                      "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Next: Payment'}
-                  </Button>
-                )}
-              </DialogFooter>
             </>
           ) : (
             <>
-              <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar py-2">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-gray-50/20 p-4 pb-5 custom-scrollbar sm:space-y-6 sm:p-6">
                 <div className="bg-gray-50 p-4 rounded-lg space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Service:</span>
@@ -2814,27 +2816,67 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 )}
               </div>
 
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                {(canCancelAppointment || canDeleteAppointment) && (
-                  <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <CalendarIcon className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Processing...' : destructiveAppointmentActionLabel}
-                  </Button>
-                )}
-                
-                <Button
-                  className="bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100"
-                  onClick={() => {
-                    if (isBooking) return;
-                    handleConfirmPayment();
-                  }}
-                  disabled={isBooking}
-                >
-                  {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Booking'}
-                </Button>
-              </DialogFooter>
             </>
           )}
+          <DialogFooter className="shrink-0 !flex-col gap-2 border-t bg-white/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:!flex-row sm:items-center sm:justify-between sm:p-4">
+            {!(isCancelled && user?.role === 'patient') && (
+              <div className="flex w-full items-center justify-center gap-1.5 text-[11px] font-semibold text-gray-500 sm:w-auto sm:justify-start sm:text-xs">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-blue-600 sm:h-4 sm:w-4" />
+                <span>Your information is secure with industry-standard encryption.</span>
+              </div>
+            )}
+            {(canCancelAppointment || canDeleteAppointment) && (
+              <Button
+                variant="destructive"
+                onClick={() => setIsDeleteDialogOpen(true)}
+                disabled={isBooking}
+                className="h-12 w-full rounded-2xl bg-red-500 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-600 sm:mr-auto sm:w-auto"
+              >
+                {isBooking ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                )}
+                {isBooking ? 'Processing...' : destructiveAppointmentActionLabel}
+              </Button>
+            )}
+
+            {(isCancelled && user?.role === 'patient') ? (
+              <Button
+                onClick={handleClose}
+                className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-8 font-black uppercase tracking-widest text-gray-600 shadow-sm hover:bg-gray-50 sm:ml-auto sm:w-auto"
+              >
+                Close
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  if (modalStep === "payment") {
+                    if (isBooking) return;
+                    handleConfirmPayment();
+                    return;
+                  }
+                  handleConfirmBooking();
+                }}
+                disabled={modalStep === "details" ? isBooking || !appointmentType || !selectedPatient : isBooking}
+                title={modalStep === "details" ? bookingConflictTitle : undefined}
+                className={`h-12 w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
+                  modalStep === "payment"
+                    ? "bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 sm:min-w-[220px]"
+                    : "bg-blue-600 shadow-blue-200 hover:bg-blue-700 sm:min-w-[16rem]"
+                }`}
+              >
+                {isBooking ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {modalStep === "payment" ? "Confirm Booking" : "Next: Payment"}
+                    {modalStep !== "payment" && <ChevronLeft className="h-4 w-4 rotate-180" />}
+                  </span>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

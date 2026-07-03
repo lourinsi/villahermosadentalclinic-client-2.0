@@ -85,6 +85,21 @@ import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 
 type ImprovedBookingStep = "patient" | "schedule" | "doctor" | "treatment" | "payment";
+type BookingSheetSize = "compact" | "medium" | "full";
+
+const BOOKING_STEP_SHEET_SIZE: Record<ImprovedBookingStep, BookingSheetSize> = {
+  patient: "compact",
+  schedule: "full",
+  doctor: "medium",
+  treatment: "full",
+  payment: "full",
+};
+
+const BOOKING_SHEET_SIZE_CLASS: Record<BookingSheetSize, string> = {
+  compact: "h-auto max-h-[72dvh]",
+  medium: "h-auto max-h-[82dvh]",
+  full: "h-[92dvh] max-h-[92dvh]",
+};
 
 const pickAvatarSource = (...sources: unknown[]) => {
   for (const source of sources) {
@@ -254,6 +269,13 @@ const normalizeTreatmentInput = (value: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
+const sanitizeToothNumberEntry = (value: string) => String(value || "").replace(/\D/g, "");
+
+const preventNonWholeNumberInput = (event: React.FormEvent<HTMLInputElement>) => {
+  const data = (event.nativeEvent as { data?: string }).data;
+  if (data && /\D/.test(data)) event.preventDefault();
+};
+
 const getTreatmentAliases = (treatment: string) => {
   const normalized = normalizeTreatmentInput(treatment);
   const aliases = new Set([normalized]);
@@ -412,8 +434,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     [toothNumberEntries]
   );
   const handleToothNumberChange = useCallback((index: number, value: string) => {
+    const sanitizedValue = sanitizeToothNumberEntry(value);
     setToothNumberEntries((current) =>
-      current.map((entry, entryIndex) => (entryIndex === index ? value : entry))
+      current.map((entry, entryIndex) => (entryIndex === index ? sanitizedValue : entry))
     );
   }, []);
   const handleAddToothNumber = useCallback(() => {
@@ -2753,6 +2776,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentDate(getDefaultBookingPaymentDate());
     } catch (err) {
       console.error('Booking payment error:', err);
+      const errorMessage = err instanceof Error ? err.message : "Please try again.";
+      toast.error(`Could not save appointment. ${errorMessage}`);
     } finally {
       setIsBooking(false);
     }
@@ -2911,29 +2936,49 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  const sheetSize = BOOKING_STEP_SHEET_SIZE[modalStep] || "full";
+  const isFullSheet = sheetSize === "full";
+  const sheetSizeClass = BOOKING_SHEET_SIZE_CLASS[sheetSize];
+  const sheetBodyClass = modalStep === 'treatment'
+    ? "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-3 pb-3 custom-scrollbar sm:p-5 lg:p-6"
+    : isFullSheet
+      ? "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-6 sm:p-8 lg:p-10 custom-scrollbar"
+      : "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-4 sm:p-8 lg:p-10 custom-scrollbar";
+  const sheetFooterClass = modalStep === 'treatment'
+    ? "shrink-0 !flex-col gap-2 border-t bg-white/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:!flex-row sm:items-center sm:justify-between sm:p-4"
+    : isFullSheet
+      ? "shrink-0 !flex-col gap-3 border-t bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:!flex-row sm:items-center sm:justify-between sm:p-6"
+      : "shrink-0 !flex-col gap-3 border-t border-gray-100 bg-white/95 p-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:!flex-row sm:items-center sm:justify-between sm:p-6";
+
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => {
           if (!v) handleClose(); else onOpenChange(true);
         }}>
-        <DialogContent data-tour-id="booking-modal-shell" className="flex max-h-[96dvh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] flex-col gap-0 overflow-hidden rounded-[1.5rem] border-none p-0 shadow-2xl sm:max-h-[95vh] sm:w-[min(64rem,calc(100vw-3rem))] sm:max-w-5xl sm:rounded-[2rem]">
-          <DialogHeader className="shrink-0 border-b bg-white p-4 shadow-sm sm:p-6">
-            <div className="flex items-center justify-between mb-2">
+        <DialogContent
+          data-tour-id="booking-modal-shell"
+          showCloseButton={false}
+          className={`!fixed !bottom-0 !left-0 !top-auto !flex ${sheetSizeClass} w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[95vh] sm:w-[min(64rem,calc(100vw-3rem))] sm:max-w-5xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[2rem]`}
+        >
+          <DialogHeader className="shrink-0 border-b bg-white px-4 pb-3 pt-3 shadow-sm sm:p-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" />
+            <div className="relative flex min-h-9 items-center justify-center">
               {modalStep !== 'patient' ? (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={handlePrevStep}
                   disabled={isBooking}
-                  className="rounded-full hover:bg-gray-100 h-9 w-9 transition-all"
+                  aria-label="Go back"
+                  className="absolute left-0 rounded-full hover:bg-gray-100 h-9 w-9 transition-all"
                 >
                   <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </Button>
               ) : (
-                <div className="w-9" />
+                <div className="absolute left-0 h-9 w-9" />
               )}
 
-              <DialogTitle className="flex-1 text-center text-lg font-black tracking-tight text-gray-900 sm:text-xl">
+              <DialogTitle className="px-11 text-center text-lg font-black tracking-tight text-gray-900 sm:text-xl">
                 {title ? title : (
                   (() => {
                     const isPastAppointment = isPastAppointmentSchedule(selectedDate, selectedTime);
@@ -2951,27 +2996,47 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   })()
                 )}
               </DialogTitle>
-              <div className="flex w-9 justify-end">
+              <div className="absolute right-0 flex items-center gap-1">
                 {isEditMode ? (
-                  <BookingAppointmentHistory
-                    appointmentLogs={appointmentLogs}
-                    paymentLogs={paymentLogs}
-                    appointmentToEdit={appointmentToEdit}
-                    triggerVariant="icon"
-                    userRole={effectiveRole}
-                    onViewSnapshot={(snapshot, isHistorical) => {
-                      setSnapshotToView(snapshot);
-                      setSnapshotIsHistorical(isHistorical);
-                      setIsSnapshotModalOpen(true);
-                    }}
-                  />
+                  <div className="hidden sm:block">
+                    <BookingAppointmentHistory
+                      appointmentLogs={appointmentLogs}
+                      paymentLogs={paymentLogs}
+                      appointmentToEdit={appointmentToEdit}
+                      triggerVariant="icon"
+                      userRole={effectiveRole}
+                      onViewSnapshot={(snapshot, isHistorical) => {
+                        setSnapshotToView(snapshot);
+                        setSnapshotIsHistorical(isHistorical);
+                        setIsSnapshotModalOpen(true);
+                      }}
+                    />
+                  </div>
                 ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleClose}
+                  disabled={isBooking}
+                  aria-label="Close booking modal"
+                  className="h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
             </div>
 
+            {!(isCancelled && user?.role === 'patient') && (
+              <p className="mt-1 text-center text-sm font-bold text-slate-500 sm:hidden">
+                Step {activeStepIndex + 1} of {visibleBookingSteps.length} <span className="text-slate-400">&mdash;</span>{" "}
+                <span className="text-blue-600">{visibleBookingSteps[activeStepIndex]?.label}</span>
+              </p>
+            )}
+
             {/* STEP INDICATOR */}
             {!(isCancelled && user?.role === 'patient') && (
-              <div className="relative flex items-center justify-between w-full mt-3 mb-4 px-2 sm:mt-4 sm:mb-6 sm:px-12">
+              <div className="relative mt-4 mb-6 hidden w-full items-center justify-between px-12 sm:flex">
                 <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 z-0 rounded-full" />
                 <div
                   className="absolute top-1/2 left-0 h-1 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0 rounded-full"
@@ -3015,10 +3080,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             )}
           </DialogHeader>
 
-          <div className={modalStep === 'treatment'
-            ? "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-3 pb-4 custom-scrollbar sm:p-5 lg:p-6"
-            : "min-h-0 flex-1 overflow-y-auto bg-gray-50/20 p-4 pb-6 sm:p-8 lg:p-10 custom-scrollbar"
-          }>
+          <div className={sheetBodyClass}>
             <div className="w-full mx-auto">
               
               {/* STEP 1: PATIENT */}
@@ -3250,8 +3312,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div data-tour-id="booking-treatment-step" className="mx-auto max-w-5xl space-y-3 animate-in fade-in slide-in-from-bottom-4 sm:space-y-4">
-                  <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-5">
+                <div data-tour-id="booking-treatment-step" className="mx-auto max-w-5xl space-y-2.5 animate-in fade-in slide-in-from-bottom-4 sm:space-y-4">
+                  <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
                     <Label htmlFor="improved-booking-treatment-select" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
                         Treatment Service
                       </Label>
@@ -3259,11 +3321,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <SelectTrigger
                           id="improved-booking-treatment-select"
                           data-tour-id="booking-treatment-select"
-                          className="mt-3 h-auto min-h-[4.75rem] rounded-xl border border-blue-100 bg-blue-50/30 px-3 py-3 text-left shadow-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-0 sm:min-h-[5.25rem] sm:rounded-2xl sm:px-4"
+                          className="mt-2.5 h-auto min-h-[4.25rem] rounded-xl border border-blue-100 bg-blue-50/30 px-3 py-2.5 text-left shadow-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-0 sm:mt-3 sm:min-h-[5.25rem] sm:rounded-2xl sm:px-4 sm:py-3"
                         >
                           {selectedTreatmentOption ? (
                             <div className="flex min-w-0 items-center gap-3 pr-2">
-                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xl text-blue-600 shadow-inner sm:h-12 sm:w-12">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-lg text-blue-600 shadow-inner sm:h-12 sm:w-12 sm:text-xl">
                                 {selectedTreatmentOption.icon}
                               </div>
                               <div className="min-w-0 flex-1">
@@ -3352,7 +3414,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     )}
 
-                  <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-5">
+                  <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
                     <div className="flex items-center justify-between gap-4">
                       <Label htmlFor="improved-booking-tooth-number-0" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
                         Tooth No./s
@@ -3361,17 +3423,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         🦷
                       </div>
                     </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                    <div className="mt-3 flex flex-wrap items-center gap-2.5 sm:mt-4">
                       {toothNumberEntries.map((toothNumber, index) => (
                         <div key={index} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2.5 shadow-sm">
                           <Input
                             id={index === 0 ? "improved-booking-tooth-number-0" : undefined}
                             value={toothNumber}
                             inputMode="numeric"
+                            pattern="[0-9]*"
+                            onBeforeInput={preventNonWholeNumberInput}
                             onChange={(event) => handleToothNumberChange(index, event.target.value)}
-                            placeholder={`Tooth ${index + 1}`}
+                            placeholder="e.g. 18"
                             disabled={isPatientReadonly}
-                            className="h-8 w-[4.75rem] border-0 bg-transparent px-0 text-center text-sm font-black text-blue-700 shadow-none placeholder:text-blue-700 focus-visible:ring-0 focus-visible:ring-offset-0"
+                            className="h-8 w-[4.75rem] border-0 bg-transparent px-0 text-center text-sm font-black text-blue-700 shadow-none placeholder:font-medium placeholder:text-blue-300 focus-visible:ring-0 focus-visible:ring-offset-0"
                           />
                           <button
                             type="button"
@@ -3400,11 +3464,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <Plus className="h-5 w-5" />
                       </button>
                     </div>
-                    <p className="mt-3 text-xs font-medium text-gray-500 sm:text-sm">Select one or more teeth for this treatment.</p>
+                    <p className="mt-2.5 text-xs font-medium text-gray-500 sm:mt-3 sm:text-sm">Select one or more teeth for this treatment.</p>
                   </div>
 
                   <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
-                    <div className="relative overflow-hidden border-b border-gray-200/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
+                    <div className="relative overflow-hidden border-b border-gray-200/80 p-3.5 sm:p-5 lg:border-b-0 lg:border-r">
                       <div className="relative z-10 flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
                           <ClipboardList className="h-[18px] w-[18px]" />
@@ -3412,7 +3476,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <h3 className="text-base font-black text-gray-900">Treatment Summary</h3>
                       </div>
 
-                      <div className="relative z-10 mt-4 grid gap-4 border-t border-gray-200 pt-4 sm:grid-cols-2 lg:grid-cols-1">
+                      <div className="relative z-10 mt-3 grid gap-3 border-t border-gray-200 pt-3 sm:mt-4 sm:grid-cols-2 sm:gap-4 sm:pt-4 lg:grid-cols-1">
                         <div>
                           <p className="text-xs font-semibold text-gray-500">Service</p>
                           <p className="mt-1 text-sm font-black text-gray-900">{selectedTreatmentName}</p>
@@ -3438,7 +3502,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         onClick={() => {
                           if (canManagePricing && !isPriceEditable) setIsPriceEditable(true);
                         }}
-                        className={`relative z-10 mt-4 border-t border-dashed border-gray-200 pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
+                        className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
                       >
                         <p className="text-sm font-semibold text-gray-700">Estimated Cost</p>
                         {hasDiscount && !isPriceEditable && (
@@ -3473,7 +3537,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     </div>
 
-                    <div className="space-y-3 p-4 sm:p-5">
+                    <div className="space-y-2.5 p-3.5 sm:space-y-3 sm:p-5">
                       <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -3696,10 +3760,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             </div>
           </div>
 
-          <DialogFooter className={modalStep === 'treatment'
-            ? "mx-3 mb-3 shrink-0 flex-col gap-3 rounded-xl border border-gray-100 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-sm sm:mx-5 sm:mb-5 sm:flex-row sm:items-center sm:justify-between sm:rounded-2xl sm:p-4"
-            : "shrink-0 flex-col gap-3 border-t bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:p-6"
-          }>
+          <DialogFooter className={sheetFooterClass}>
             {isCancelled && user?.role === 'patient' ? (
               <Button
                 onClick={handleClose}
@@ -3710,14 +3771,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             ) : (
               <>
                 {modalStep === 'treatment' && (
-                  <div className="flex w-full items-center gap-2.5 sm:w-auto">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 sm:h-11 sm:w-11">
-                      <ShieldCheck className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 text-left">
-                      <p className="text-xs font-black text-gray-900 sm:text-sm">Your information is secure</p>
-                      <p className="mt-0.5 text-[11px] font-semibold text-gray-500 sm:text-xs">Industry-standard encryption</p>
-                    </div>
+                  <div className="flex w-full items-center justify-center gap-1.5 text-[11px] font-semibold text-gray-500 sm:w-auto sm:justify-start sm:text-xs">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-blue-600 sm:h-4 sm:w-4" />
+                    <span>Your information is secure with industry-standard encryption.</span>
                   </div>
                 )}
                 {(canCancelAppointment || canDeleteAppointment) && (
@@ -3740,7 +3796,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   className={`w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
                     modalStep === 'payment'
                       ? 'h-12 bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:min-w-[260px]'
-                      : modalStep === 'treatment'
+                    : modalStep === 'treatment'
                       ? 'h-12 bg-blue-600 text-sm normal-case tracking-normal shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[16rem] sm:text-base'
                       : 'h-12 bg-blue-600 uppercase tracking-widest shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'
                   }`}

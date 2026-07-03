@@ -168,8 +168,8 @@ export const useAppointments = (
         credentials: "include",
         body: JSON.stringify(appointment),
       });
-      const result = await response.json();
-      if (result.success && result.data) {
+      const result = await response.json().catch(() => null);
+      if (result?.success && result.data) {
         const newAppointment = {
           ...result.data,
           status: normalizeAppointmentStatus(result.data.status),
@@ -177,7 +177,9 @@ export const useAppointments = (
         setAppointments([...appointments, newAppointment]);
         return newAppointment;
       }
-      throw new Error(result.message || "Failed to add appointment");
+      throw new Error(
+        `${result?.message || "Failed to add appointment"} [${response.status}]`
+      );
     } catch (error) {
       console.error("Error adding appointment:", error);
       throw error;

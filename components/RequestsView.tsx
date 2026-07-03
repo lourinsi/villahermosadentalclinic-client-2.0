@@ -870,29 +870,47 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requestDoctorOptions = useMemo(() => {
     return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
   }, [appointments, requests, history]);
-  const pendingRequestColumnCount = 4;
-  const historyColumnCount = 4;
+  const pendingRequestColumnCount = 9;
+  const historyColumnCount = pendingRequestColumnCount;
   const activeDropdownItemClass = (isActive: boolean) =>
     isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
+  const actionRequiredCount = sortedRequests.filter((request) => isActionableStatus(request.status)).length;
+  const completedRequestCount = sortedRequests.filter((request) => canonicalStatus(request.status) === "completed").length;
+  const paidRequestCount = sortedRequests.filter((request) => canonicalPaymentStatus(request.paymentStatus) === "paid").length;
+  const completedHistoryCount = sortedHistory.filter((item) => canonicalStatus(item.status) === "completed").length;
+  const paidHistoryCount = sortedHistory.filter((item) => canonicalPaymentStatus(item.paymentStatus) === "paid").length;
+  const unpaidHistoryCount = sortedHistory.filter((item) => canonicalPaymentStatus(item.paymentStatus) !== "paid").length;
+  const formatAuditDate = (value?: string) => {
+    if (!value) return "N/A";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "N/A";
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+  const formatAuditTime = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  };
+  const getAppointmentIdLabel = (appointment: Appointment) => `ID: ${appointment.id || "N/A"}`;
 
   return (
-    <div data-tour-id="requests-page" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">
+    <div data-tour-id="requests-page" className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-black tracking-tight text-gray-900 md:uppercase md:italic">
             {doctorFilter ? "Patient Requests" : "Appointment Management"}
           </h1>
-          <p className="text-gray-500 font-medium">Review and manage appointment requests</p>
+          <p className="mt-1 text-lg font-medium text-gray-500 md:text-base">Review and manage requests</p>
         </div>
         {(effectiveRole === "admin" || effectiveRole === "doctor") && (
           <Button
             type="button"
-            variant="outline"
             onClick={() => openCreateModal()}
-            className="gap-2 font-semibold rounded-xl"
+            className="h-14 shrink-0 gap-2 rounded-2xl bg-violet-600 px-4 font-bold text-white shadow-lg shadow-violet-200 hover:bg-violet-700 sm:px-5"
           >
-            <Plus className="h-4 w-4" />
-            <span>New Appointment</span>
+            <Plus className="h-5 w-5" />
+            <span className="hidden min-[420px]:inline">New Appointment</span>
           </Button>
         )}
       </div>
@@ -905,116 +923,145 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         }}
         className="space-y-6"
       >
-        <TabsList className="h-auto w-full rounded-xl border bg-white p-1 shadow-sm sm:w-fit">
-          <TabsTrigger value="requests" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
+        <TabsList className="h-auto w-full rounded-[1.35rem] border bg-white p-1 shadow-sm sm:w-fit">
+          <TabsTrigger value="requests" className="flex-1 rounded-2xl px-4 py-3 text-base font-black transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-violet-200 sm:flex-none sm:px-6">
             Requests
             <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requestTotal}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="history" className="rounded-lg px-4 py-2.5 font-bold transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white sm:px-6">
+          <TabsTrigger value="history" className="flex-1 rounded-2xl px-4 py-3 text-base font-black transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-violet-200 sm:flex-none sm:px-6">
             History
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="requests" className="space-y-4">
-          <Card className="border-none shadow-xl shadow-gray-200/50 bg-white/80 backdrop-blur-xl rounded-2xl overflow-hidden">
-            <CardHeader className="border-b border-gray-100 pb-6 bg-white">
-              <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
-                <div className="flex flex-col items-start gap-3 lg:flex-row lg:items-center">
-                  <div className="p-2.5 bg-amber-50 rounded-xl">
-                    <AlertCircle className="h-6 w-6 text-amber-600" />
+          <Card className="overflow-hidden border-none bg-transparent shadow-none md:rounded-[1.35rem] md:border md:border-gray-100 md:bg-white/90 md:shadow-xl md:shadow-gray-200/50 md:backdrop-blur-xl">
+            <CardHeader className="space-y-5 border-0 bg-transparent p-0 md:border-b md:border-gray-100 md:bg-white md:p-6">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex items-center gap-4 rounded-3xl border border-amber-50 bg-white p-5 shadow-lg shadow-gray-200/50 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.7rem] bg-amber-50 text-amber-600 md:h-16 md:w-16">
+                    <AlertCircle className="h-9 w-9 md:h-7 md:w-7" />
                   </div>
-                  <div>
-                    <CardTitle className="text-xl font-black text-gray-900 uppercase">Action Required</CardTitle>
-                    <p className="text-sm text-gray-500 font-medium">Please review appointments that need action</p>
+                  <div className="min-w-0">
+                    <CardTitle className="text-2xl font-black tracking-tight text-gray-900 md:text-xl">Action Required</CardTitle>
+                    <p className="mt-1 text-base font-medium text-gray-500 md:text-sm">Please review appointments that need action</p>
                     {sortedRequests.some(canPromptPayment) ? (
-                      <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-100 px-3 py-1 text-xs font-semibold uppercase text-amber-700">
+                      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase text-amber-700">
                         <DollarSign className="h-3.5 w-3.5" />
                         Payment due for {sortedRequests.filter(canPromptPayment).length} appointment{sortedRequests.filter(canPromptPayment).length !== 1 ? "s" : ""}
                       </div>
                     ) : null}
-                    <div className="mt-4 flex w-full items-center gap-2 md:mt-0 lg:w-auto">
-                      <div className="relative min-w-0 flex-1 sm:flex-none">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                        <Input
-                          placeholder="Search patient or service..."
-                          className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
-                          value={pendingSearchTerm}
-                          onChange={(e) => {
-                            setPendingSearchTerm(e.target.value);
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:min-w-[620px]">
+                  {[
+                    { label: "Total Requests", value: requestTotal, icon: CalendarCheck2, accent: "text-violet-600", bg: "bg-violet-50" },
+                    { label: "Action Required", value: actionRequiredCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                    { label: "Completed", value: completedRequestCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
+                    { label: "Paid", value: paidRequestCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                  ].map((stat) => {
+                    const Icon = stat.icon;
+                    return (
+                      <div key={stat.label} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-md shadow-gray-200/40 md:rounded-2xl md:shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${stat.bg} ${stat.accent} md:h-11 md:w-11 md:rounded-xl`}>
+                            <Icon className="h-6 w-6 md:h-5 md:w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-2xl font-black leading-none text-gray-900">{stat.value}</p>
+                            <p className={`mt-1 text-sm font-bold leading-tight ${stat.accent}`}>{stat.label}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex w-full items-center gap-2 lg:max-w-[32rem]">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      placeholder="Search patient or service..."
+                      className="h-14 w-full rounded-3xl border-gray-100 bg-white pl-12 text-base shadow-md shadow-gray-200/40 md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm"
+                      value={pendingSearchTerm}
+                      onChange={(e) => {
+                        setPendingSearchTerm(e.target.value);
+                        setRequestCurrentPage(1);
+                      }}
+                    />
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="hidden h-12 w-12 rounded-2xl border border-gray-100 sm:hidden" title="More filters">
+                        <Filter className="h-5 w-5 text-gray-500" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem
+                        className={activeDropdownItemClass(pendingStatusFilter === "all")}
+                        onSelect={() => {
+                          setPendingStatusFilter("all");
+                          setRequestCurrentPage(1);
+                        }}
+                      >
+                        All Status
+                      </DropdownMenuItem>
+                      {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
+                        <DropdownMenuItem
+                          key={status.value}
+                          className={activeDropdownItemClass(canonicalStatus(pendingStatusFilter) === canonicalStatus(status.value))}
+                          onSelect={() => {
+                            setPendingStatusFilter(status.value);
                             setRequestCurrentPage(1);
                           }}
-                        />
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100 sm:hidden" title="More filters">
-                            <MoreVertical className="h-4 w-4 text-gray-500" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
+                        >
+                          Status: {status.label}
+                        </DropdownMenuItem>
+                      ))}
+                      {!doctorFilter && (
+                        <>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            className={activeDropdownItemClass(pendingStatusFilter === "all")}
+                            className={activeDropdownItemClass(pendingDoctorFilter === "all")}
                             onSelect={() => {
-                              setPendingStatusFilter("all");
+                              setPendingDoctorFilter("all");
                               setRequestCurrentPage(1);
                             }}
                           >
-                            All Status
+                            All Doctors
                           </DropdownMenuItem>
-                          {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
+                          {requestDoctorOptions.map((doc: any) => (
                             <DropdownMenuItem
-                              key={status.value}
-                              className={activeDropdownItemClass(canonicalStatus(pendingStatusFilter) === canonicalStatus(status.value))}
+                              key={doc}
+                              className={activeDropdownItemClass(pendingDoctorFilter === doc)}
                               onSelect={() => {
-                                setPendingStatusFilter(status.value);
+                                setPendingDoctorFilter(doc);
                                 setRequestCurrentPage(1);
                               }}
                             >
-                              Status: {status.label}
+                              Dr. {doc}
                             </DropdownMenuItem>
                           ))}
-                          {!doctorFilter && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className={activeDropdownItemClass(pendingDoctorFilter === "all")}
-                                onSelect={() => {
-                                  setPendingDoctorFilter("all");
-                                  setRequestCurrentPage(1);
-                                }}
-                              >
-                                All Doctors
-                              </DropdownMenuItem>
-                              {requestDoctorOptions.map((doc: any) => (
-                                <DropdownMenuItem
-                                  key={doc}
-                                  className={activeDropdownItemClass(pendingDoctorFilter === doc)}
-                                  onSelect={() => {
-                                    setPendingDoctorFilter(doc);
-                                    setRequestCurrentPage(1);
-                                  }}
-                                >
-                                  Dr. {doc}
-                                </DropdownMenuItem>
-                              ))}
-                            </>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={() => {
-                            setPendingSearchTerm("");
-                            setPendingStatusFilter("all");
-                            setPendingDoctorFilter("all");
-                            setPendingDateFilter("");
-                            setRequestCurrentPage(1);
-                          }}>
-                            Reset filters
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                  
-                  <div className="hidden sm:block">
+                        </>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => {
+                        setPendingSearchTerm("");
+                        setPendingStatusFilter("all");
+                        setPendingDoctorFilter("all");
+                        setPendingDateFilter("");
+                        setRequestCurrentPage(1);
+                      }}>
+                        Reset filters
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+                  <div className="min-w-0 flex-1 sm:flex-none">
                     <Select
                       value={pendingStatusFilter}
                       onValueChange={(value) => {
@@ -1022,9 +1069,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setRequestCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
+                      <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
                         <div className="flex items-center gap-2">
-                          <Filter className="h-3.5 w-3.5 text-gray-400" />
+                          <Filter className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
                           <SelectValue placeholder="All Status" />
                         </div>
                       </SelectTrigger>
@@ -1038,7 +1085,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
 
                   {!doctorFilter && (
-                    <div className="hidden sm:block">
+                    <div className="min-w-0 flex-1 sm:flex-none">
                       <Select
                         value={pendingDoctorFilter}
                         onValueChange={(value) => {
@@ -1046,9 +1093,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           setRequestCurrentPage(1);
                         }}
                       >
-                        <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
+                        <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
                           <div className="flex items-center gap-2">
-                            <User className="h-3.5 w-3.5 text-gray-400" />
+                            <User className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
                             <SelectValue placeholder="All Doctors" />
                           </div>
                         </SelectTrigger>
@@ -1062,39 +1109,262 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </div>
                   )}
 
-                  <Button variant="ghost" size="icon" className="hidden rounded-xl border border-gray-100 sm:inline-flex" onClick={() => {
+                  <Button variant="ghost" size="icon" className="inline-flex h-14 w-14 shrink-0 rounded-3xl border border-gray-100 bg-white shadow-md shadow-gray-200/40 md:h-12 md:w-12 md:rounded-2xl md:bg-transparent md:shadow-none" onClick={() => {
                     setPendingSearchTerm("");
                     setPendingStatusFilter("all");
                     setPendingDoctorFilter("all");
                     setPendingDateFilter("");
                     setRequestCurrentPage(1);
                   }}>
-                    <RotateCcw className="h-4 w-4 text-gray-500" />
+                    <RotateCcw className="h-5 w-5 text-gray-500" />
                   </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <Table className="table-fixed sm:table-auto">
+              <div className="space-y-4 p-4 md:hidden">
+                {isRequestsLoading ? (
+                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center text-sm font-semibold text-gray-500 shadow-sm">
+                    Loading requests...
+                  </div>
+                ) : sortedRequests.length === 0 ? (
+                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
+                      <ClipboardList className="h-7 w-7 text-gray-300" />
+                    </div>
+                    <h3 className="text-lg font-black text-gray-900">All Caught Up!</h3>
+                    <p className="mx-auto mt-2 max-w-xs text-sm text-gray-500">There are no appointment requests matching your filters.</p>
+                  </div>
+                ) : (
+                  sortedRequests.map((request) => {
+                    const patientName = getCurrentPatientName(request);
+                    const serviceName = getAppointmentTypeName(request.type, request.customType);
+                    return (
+                      <div key={request.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
+                        <div className="flex items-start gap-3">
+                          <div className="relative shrink-0">
+                            <PatientAvatar
+                              src={resolveImageSource(getPatientImage(request))}
+                              name={patientName}
+                              dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday}
+                              className="h-16 w-16 border-2 border-white shadow-sm"
+                              sizeClass="h-16 w-16"
+                            />
+                            <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
+                              <CalendarCheck2 className="h-4 w-4" />
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="truncate text-lg font-black leading-tight text-gray-900">{patientName}</h3>
+                                <p className="mt-1 text-sm font-medium text-gray-500">{getAppointmentIdLabel(request)}</p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-gray-500">
+                                      <MoreVertical className="h-5 w-5" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    {isActionableStatus(request.status) ? (
+                                      <>
+                                        <DropdownMenuItem onSelect={() => handleApprove(request)}>
+                                          <CheckCircle className="h-4 w-4 text-emerald-600" />
+                                          {request.status === "tbd" ? "Mark completed" : "Approve"}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onSelect={() => handleReject(request)}>
+                                          <XCircle className="h-4 w-4 text-rose-600" />
+                                          {request.status === "tbd" ? "Cancel" : "Reject"}
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                    {canPromptPayment(request) ? (
+                                      <DropdownMenuItem onSelect={() => handleOpenPayment(request)}>
+                                        <DollarSign className="h-4 w-4 text-emerald-600" />
+                                        Pay now
+                                      </DropdownMenuItem>
+                                    ) : null}
+                                    {(isActionableStatus(request.status) || canPromptPayment(request)) && <DropdownMenuSeparator />}
+                                    <DropdownMenuItem onSelect={() => handleViewAppointment(request)}>
+                                      <Eye className="h-4 w-4 text-violet-600" />
+                                      View details
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 border-y border-gray-100 py-4">
+                          <div className="flex gap-3 border-r border-gray-100 pr-3">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                              <CalendarIcon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-black text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</p>
+                              <p className="mt-1 text-sm font-medium text-gray-500">{formatTimeTo12h(request.time)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-3 pl-4">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                              <ClipboardList className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-black text-gray-900">{serviceName}</p>
+                              <p className="mt-1 truncate text-sm font-medium text-gray-500">
+                                <span className="mr-1 text-violet-600">-</span>
+                                {request.doctor || "Unassigned"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span className="h-3 w-3 shrink-0 rounded-full bg-violet-500" />
+                            <span className="truncate text-base font-semibold text-gray-900">{request.doctor || "Unassigned"}</span>
+                          </div>
+                          <Select
+                            value={request.status}
+                            onValueChange={(newStatus) => handleStatusChangeRequest(request, newStatus)}
+                          >
+                            <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                              {getStatusBadge(request.status)}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
+                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="flex items-center gap-3 border-b border-gray-100 py-3">
+                          {canManagePaymentStatuses ? (
+                            <Select
+                              value={request.paymentStatus || "unpaid"}
+                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
+                            >
+                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                                {getPaymentStatusBadge(request.paymentStatus)}
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            getPaymentStatusBadge(request.paymentStatus)
+                          )}
+                          <span className="text-sm font-medium text-gray-500">Payment Status</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 border-b border-gray-100 py-4">
+                          <div className="flex gap-3 border-r border-gray-100 pr-3">
+                            <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                            <div>
+                              <p className="text-sm font-semibold text-gray-500">Booked</p>
+                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.createdAt)} {formatAuditTime(request.createdAt)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-3 pl-4">
+                            <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+                            <div>
+                              <p className="text-sm font-semibold text-gray-500">Last Updated</p>
+                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.updatedAt || request.createdAt)} {formatAuditTime(request.updatedAt || request.createdAt)}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-3 divide-x divide-gray-100 rounded-3xl border border-gray-100 bg-white py-3 text-center shadow-sm">
+                          <button
+                            type="button"
+                            onClick={() => handleApprove(request)}
+                            disabled={!isActionableStatus(request.status)}
+                            className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900 disabled:opacity-40"
+                          >
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600">
+                              <CheckCircle className="h-6 w-6" />
+                            </span>
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReject(request)}
+                            disabled={!isActionableStatus(request.status)}
+                            className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900 disabled:opacity-40"
+                          >
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-rose-100 bg-rose-50 text-rose-600">
+                              <XCircle className="h-6 w-6" />
+                            </span>
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleViewAppointment(request)}
+                            className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900"
+                          >
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-violet-100 bg-violet-50 text-violet-600">
+                              <Eye className="h-6 w-6" />
+                            </span>
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="hidden overflow-x-auto md:block">
+                <Table className="min-w-[1320px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
-                      <TableHead className="w-[38%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
+                      <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[27%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
+                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Service {getSortIcon("service", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Schedule {getSortIcon("date", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[25%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("payment")}>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Doctor {getSortIcon("doctor", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("status")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Status {getSortIcon("status", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("payment")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Payment {getSortIcon("payment", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("booked")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Booked {getSortIcon("booked", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("updated")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Last Updated {getSortIcon("updated", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1119,28 +1389,55 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     ) : (
                       sortedRequests.map((request) => {
                         const patientName = getCurrentPatientName(request);
+                        const serviceName = getAppointmentTypeName(request.type, request.customType);
                         return (
-                        <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
-                          <TableCell className="py-4 pr-2 whitespace-normal">
-                            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                              <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="hidden h-10 w-10 border-2 border-white shadow-sm sm:block" sizeClass="h-10 w-10" />
+                        <TableRow key={request.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
+                          <TableCell className="py-5 pr-3 whitespace-normal">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
-                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-medium uppercase tracking-tight text-gray-500">
-                                  <span className="truncate">{getAppointmentTypeName(request.type, request.customType)}</span>
-                                  {getStatusBadge(request.status)}
-                                </div>
+                                <div className="mt-1 truncate text-xs font-medium text-gray-500">{getAppointmentIdLabel(request)}</div>
                               </div>
                             </div>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
-                              {!doctorFilter && (
-                                <span className="mt-1 truncate text-[11px] font-semibold text-violet-600">Dr. {request.doctor}</span>
-                              )}
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                                <ClipboardList className="h-5 w-5" />
+                              </div>
+                              <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
                             </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
+                              <div className="min-w-0">
+                              <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
+                                <span className="block text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
+                              <span className="font-semibold leading-snug text-gray-900">{request.doctor || "Unassigned"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <Select
+                              value={request.status}
+                              onValueChange={(newStatus) => handleStatusChangeRequest(request, newStatus)}
+                            >
+                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                                {getStatusBadge(request.status)}
+                              </SelectTrigger>
+                              <SelectContent>
+                                {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             {canManagePaymentStatuses ? (
@@ -1163,39 +1460,56 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               getPaymentStatusBadge(request.paymentStatus)
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="sm" variant="ghost" className="h-9 w-9 rounded-xl p-0 text-gray-600 hover:bg-violet-50 hover:text-violet-600" title="Request actions">
-                                  <MoreVertical className="h-5 w-5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-48">
-                                {isActionableStatus(request.status) ? (
-                                  <>
-                                    <DropdownMenuItem onSelect={() => handleApprove(request)}>
-                                      <CheckCircle className="h-4 w-4 text-emerald-600" />
-                                      {request.status === "tbd" ? "Mark completed" : "Approve"}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onSelect={() => handleReject(request)}>
-                                      <XCircle className="h-4 w-4 text-rose-600" />
-                                      {request.status === "tbd" ? "Cancel" : "Reject"}
-                                    </DropdownMenuItem>
-                                  </>
-                                ) : null}
-                                {canPromptPayment(request) ? (
-                                  <DropdownMenuItem onSelect={() => handleOpenPayment(request)}>
-                                    <DollarSign className="h-4 w-4 text-emerald-600" />
-                                    Pay now
-                                  </DropdownMenuItem>
-                                ) : null}
-                                {(isActionableStatus(request.status) || canPromptPayment(request)) && <DropdownMenuSeparator />}
-                                <DropdownMenuItem onSelect={() => handleViewAppointment(request)}>
-                                  <Eye className="h-4 w-4 text-violet-600" />
-                                  View details
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                              <div>
+                                <p className="font-bold text-gray-900">{formatAuditDate(request.createdAt)}</p>
+                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.createdAt)}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <Clock className="h-5 w-5 shrink-0 text-blue-600" />
+                              <div>
+                                <p className="font-bold text-gray-900">{formatAuditDate(request.updatedAt || request.createdAt)}</p>
+                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.updatedAt || request.createdAt)}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleApprove(request)}
+                                disabled={!isActionableStatus(request.status)}
+                                className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50 disabled:opacity-40"
+                                title={request.status === "tbd" ? "Mark completed" : "Approve"}
+                              >
+                                <CheckCircle className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleReject(request)}
+                                disabled={!isActionableStatus(request.status)}
+                                className="h-10 w-10 rounded-full border border-rose-100 bg-white text-rose-600 shadow-sm hover:bg-rose-50 disabled:opacity-40"
+                                title={request.status === "tbd" ? "Cancel" : "Reject"}
+                              >
+                                <XCircle className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleViewAppointment(request)}
+                                className="h-10 w-10 rounded-full border border-violet-100 bg-white text-violet-600 shadow-sm hover:bg-violet-50"
+                                title="View details"
+                              >
+                                <Eye className="h-5 w-5" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                         );
@@ -1234,26 +1548,51 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         </TabsContent>
 
         <TabsContent value="history" className="space-y-4">
-          <Card className="border-none shadow-xl shadow-gray-200/50 bg-white rounded-2xl overflow-hidden">
-            <CardHeader className="border-b border-gray-100 pb-6">
-              <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-violet-50 rounded-xl">
-                    <History className="h-6 w-6 text-violet-600" />
+          <Card className="overflow-hidden border-none bg-transparent shadow-none md:rounded-[1.35rem] md:border md:border-gray-100 md:bg-white/90 md:shadow-xl md:shadow-gray-200/50 md:backdrop-blur-xl">
+            <CardHeader className="space-y-5 border-0 bg-transparent p-0 md:border-b md:border-gray-100 md:bg-white md:p-6">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex items-center gap-4 rounded-3xl border border-violet-50 bg-white p-5 shadow-lg shadow-gray-200/50 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.7rem] bg-violet-50 text-violet-600 md:h-16 md:w-16">
+                    <History className="h-9 w-9 md:h-7 md:w-7" />
                   </div>
-                  <div>
-                    <CardTitle className="text-xl font-black text-gray-900 uppercase">Recent Activity</CardTitle>
-                    <p className="text-sm text-gray-500 font-medium">History of processed appointments</p>
+                  <div className="min-w-0">
+                    <CardTitle className="text-2xl font-black tracking-tight text-gray-900 md:text-xl">Recent Activity</CardTitle>
+                    <p className="mt-1 text-base font-medium text-gray-500 md:text-sm">History of processed appointments</p>
                   </div>
                 </div>
 
-                <div className="flex w-full flex-wrap gap-2 md:w-auto">
-                  <div className="flex w-full items-center gap-2 sm:w-auto">
-                  <div className="relative min-w-0 flex-1 sm:flex-none">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    <Input 
-                      placeholder="Search patient or service..." 
-                      className="w-full rounded-xl border-gray-100 bg-gray-50 pl-10 text-sm sm:w-64"
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:min-w-[620px]">
+                  {[
+                    { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
+                    { label: "Completed", value: completedHistoryCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
+                    { label: "Paid", value: paidHistoryCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                    { label: "Unpaid", value: unpaidHistoryCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                  ].map((stat) => {
+                    const Icon = stat.icon;
+                    return (
+                      <div key={stat.label} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-md shadow-gray-200/40 md:rounded-2xl md:shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${stat.bg} ${stat.accent} md:h-11 md:w-11 md:rounded-xl`}>
+                            <Icon className="h-6 w-6 md:h-5 md:w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-2xl font-black leading-none text-gray-900">{stat.value}</p>
+                            <p className={`mt-1 text-sm font-bold leading-tight ${stat.accent}`}>{stat.label}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex w-full items-center gap-2 lg:max-w-[32rem]">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      placeholder="Search patient or service..."
+                      className="h-14 w-full rounded-3xl border-gray-100 bg-white pl-12 text-base shadow-md shadow-gray-200/40 md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm"
                       value={historySearchTerm}
                       onChange={(e) => {
                         setHistorySearchTerm(e.target.value);
@@ -1263,7 +1602,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100 sm:hidden" title="More filters">
+                        <Button variant="ghost" size="icon" className="hidden rounded-xl border border-gray-100 sm:hidden" title="More filters">
                           <MoreVertical className="h-4 w-4 text-gray-500" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -1329,7 +1668,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </DropdownMenu>
                   </div>
                   
-                  <div className="hidden sm:block">
+                <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+                  <div className="min-w-0 flex-1 sm:flex-none">
                     <Select
                       value={historyStatusFilter}
                       onValueChange={(value) => {
@@ -1337,9 +1677,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         setHistoryCurrentPage(1);
                       }}
                     >
-                      <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
+                      <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
                         <div className="flex items-center gap-2">
-                          <Filter className="h-3.5 w-3.5 text-gray-400" />
+                          <Filter className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
                           <SelectValue placeholder="All Status" />
                         </div>
                       </SelectTrigger>
@@ -1353,7 +1693,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
 
                   {!doctorFilter && (
-                    <div className="hidden sm:block">
+                    <div className="min-w-0 flex-1 sm:flex-none">
                       <Select
                         value={historyDoctorFilter}
                         onValueChange={(value) => {
@@ -1361,9 +1701,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           setHistoryCurrentPage(1);
                         }}
                       >
-                        <SelectTrigger className="w-full rounded-xl border-gray-100 bg-gray-50 text-sm sm:w-[160px]">
+                        <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
                           <div className="flex items-center gap-2">
-                            <User className="h-3.5 w-3.5 text-gray-400" />
+                            <User className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
                             <SelectValue placeholder="All Doctors" />
                           </div>
                         </SelectTrigger>
@@ -1377,39 +1717,235 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </div>
                   )}
 
-                  <Button variant="ghost" size="icon" className="hidden rounded-xl border border-gray-100 sm:inline-flex" onClick={() => {
+                  <Button variant="ghost" size="icon" className="inline-flex h-14 w-14 shrink-0 rounded-3xl border border-gray-100 bg-white shadow-md shadow-gray-200/40 md:h-12 md:w-12 md:rounded-2xl md:bg-transparent md:shadow-none" onClick={() => {
                     setHistorySearchTerm("");
                     setHistoryStatusFilter("all");
                     setHistoryDateFilter("");
                     setHistoryDoctorFilter("all");
                     setHistoryCurrentPage(1);
                   }}>
-                    <RotateCcw className="h-4 w-4 text-gray-500" />
+                    <RotateCcw className="h-5 w-5 text-gray-500" />
                   </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <Table className="table-fixed sm:table-auto">
+              <div className="space-y-4 p-4 md:hidden">
+                {isHistoryLoading ? (
+                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center text-sm font-semibold text-gray-500 shadow-sm">
+                    Loading history...
+                  </div>
+                ) : sortedHistory.length === 0 ? (
+                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
+                      <History className="h-7 w-7 text-gray-300" />
+                    </div>
+                    <h3 className="text-lg font-black text-gray-900">No History Found</h3>
+                    <p className="mx-auto mt-2 max-w-xs text-sm text-gray-500">No appointment history matches your filters.</p>
+                  </div>
+                ) : (
+                  sortedHistory.map((item) => {
+                    const patientName = getCurrentPatientName(item);
+                    const serviceName = getAppointmentTypeName(item.type, item.customType);
+                    return (
+                      <div key={item.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
+                        <div className="flex items-start gap-3">
+                          <div className="relative shrink-0">
+                            <PatientAvatar
+                              src={resolveImageSource(getPatientImage(item))}
+                              name={patientName}
+                              dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday}
+                              className="h-16 w-16 border-2 border-white shadow-sm"
+                              sizeClass="h-16 w-16"
+                            />
+                            <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-violet-500 text-white shadow-sm">
+                              <History className="h-4 w-4" />
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="truncate text-lg font-black leading-tight text-gray-900">{patientName}</h3>
+                                <p className="mt-1 text-sm font-medium text-gray-500">{getAppointmentIdLabel(item)}</p>
+                              </div>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-gray-500">
+                                    <MoreVertical className="h-5 w-5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  {canPromptPayment(item) ? (
+                                    <DropdownMenuItem onSelect={() => handleOpenPayment(item)}>
+                                      <DollarSign className="h-4 w-4 text-emerald-600" />
+                                      Pay now
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  {canPromptPayment(item) ? <DropdownMenuSeparator /> : null}
+                                  <DropdownMenuItem onSelect={() => handleViewAppointment(item)}>
+                                    <Eye className="h-4 w-4 text-violet-600" />
+                                    View details
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 border-y border-gray-100 py-4">
+                          <div className="flex gap-3 border-r border-gray-100 pr-3">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                              <CalendarIcon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-black text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</p>
+                              <p className="mt-1 text-sm font-medium text-gray-500">{formatTimeTo12h(item.time)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-3 pl-4">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                              <ClipboardList className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-black text-gray-900">{serviceName}</p>
+                              <p className="mt-1 truncate text-sm font-medium text-gray-500">{item.doctor || "Unassigned"}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span className="h-3 w-3 shrink-0 rounded-full bg-violet-500" />
+                            <span className="truncate text-base font-semibold text-gray-900">{item.doctor || "Unassigned"}</span>
+                          </div>
+                          <Select
+                            value={item.status}
+                            onValueChange={(newStatus) => handleHistoryStatusChange(item.id, newStatus)}
+                          >
+                            <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                              {getStatusBadge(item.status)}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
+                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="flex items-center gap-3 border-b border-gray-100 py-3">
+                          {canManagePaymentStatuses ? (
+                            <Select
+                              value={item.paymentStatus || "unpaid"}
+                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
+                            >
+                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                                {getPaymentStatusBadge(item.paymentStatus)}
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            getPaymentStatusBadge(item.paymentStatus)
+                          )}
+                          <span className="text-sm font-medium text-gray-500">Payment Status</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 border-b border-gray-100 py-4">
+                          <div className="flex gap-3 border-r border-gray-100 pr-3">
+                            <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                            <div>
+                              <p className="text-sm font-semibold text-gray-500">Booked</p>
+                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.createdAt)} {formatAuditTime(item.createdAt)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-3 pl-4">
+                            <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+                            <div>
+                              <p className="text-sm font-semibold text-gray-500">Last Updated</p>
+                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.updatedAt || item.createdAt)} {formatAuditTime(item.updatedAt || item.createdAt)}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className={`mt-4 grid ${canPromptPayment(item) ? "grid-cols-2" : "grid-cols-1"} divide-x divide-gray-100 rounded-3xl border border-gray-100 bg-white py-3 text-center shadow-sm`}>
+                          {canPromptPayment(item) ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPayment(item)}
+                              className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900"
+                            >
+                              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600">
+                                <DollarSign className="h-6 w-6" />
+                              </span>
+                              Pay
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => handleViewAppointment(item)}
+                            className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900"
+                          >
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-violet-100 bg-violet-50 text-violet-600">
+                              <Eye className="h-6 w-6" />
+                            </span>
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="hidden overflow-x-auto md:block">
+                <Table className="min-w-[1320px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
-                      <TableHead className="w-[38%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
+                      <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[27%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
+                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Service {getSortIcon("service", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Schedule {getSortIcon("date", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[25%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("payment")}>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Doctor {getSortIcon("doctor", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Status {getSortIcon("status", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("payment")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Payment {getSortIcon("payment", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Booked {getSortIcon("booked", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("updated")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Last Updated {getSortIcon("updated", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1434,28 +1970,55 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     ) : (
                       sortedHistory.map((item) => {
                         const patientName = getCurrentPatientName(item);
+                        const serviceName = getAppointmentTypeName(item.type, item.customType);
                         return (
-                        <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
-                          <TableCell className="py-4 pr-2 whitespace-normal">
-                            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                              <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="hidden h-10 w-10 border-2 border-white shadow-sm sm:block" sizeClass="h-10 w-10" />
+                        <TableRow key={item.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
+                          <TableCell className="py-5 pr-3 whitespace-normal">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
-                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-medium uppercase tracking-tight text-gray-500">
-                                  <span className="truncate">{getAppointmentTypeName(item.type, item.customType)}</span>
-                                  {getStatusBadge(item.status)}
-                                </div>
+                                <div className="mt-1 truncate text-xs font-medium text-gray-500">{getAppointmentIdLabel(item)}</div>
                               </div>
                             </div>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex flex-col">
-                              <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
-                              <span className="text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
-                              {!doctorFilter && (
-                                <span className="mt-1 truncate text-[11px] font-semibold text-violet-600">Dr. {item.doctor}</span>
-                              )}
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                                <ClipboardList className="h-5 w-5" />
+                              </div>
+                              <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
                             </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
+                              <div className="min-w-0">
+                                <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
+                                <span className="block text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
+                              <span className="font-semibold leading-snug text-gray-900">{item.doctor || "Unassigned"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <Select
+                              value={item.status}
+                              onValueChange={(newStatus) => handleHistoryStatusChange(item.id, newStatus)}
+                            >
+                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
+                                {getStatusBadge(item.status)}
+                              </SelectTrigger>
+                              <SelectContent>
+                                {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             {canManagePaymentStatuses ? (
@@ -1478,35 +2041,47 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               getPaymentStatusBadge(item.paymentStatus)
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="sm" variant="ghost" className="h-9 w-9 rounded-xl p-0 text-gray-600 hover:bg-violet-50 hover:text-violet-600" title="History actions">
-                                  <MoreVertical className="h-5 w-5" />
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                              <div>
+                                <p className="font-bold text-gray-900">{formatAuditDate(item.createdAt)}</p>
+                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.createdAt)}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex items-center gap-3">
+                              <Clock className="h-5 w-5 shrink-0 text-blue-600" />
+                              <div>
+                                <p className="font-bold text-gray-900">{formatAuditDate(item.updatedAt || item.createdAt)}</p>
+                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.updatedAt || item.createdAt)}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleViewAppointment(item)}
+                                className="h-10 w-10 rounded-full border border-violet-100 bg-white text-violet-600 shadow-sm hover:bg-violet-50"
+                                title="View details"
+                              >
+                                <Eye className="h-5 w-5" />
+                              </Button>
+                              {canPromptPayment(item) ? (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleOpenPayment(item)}
+                                  className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50"
+                                  title="Pay now"
+                                >
+                                  <DollarSign className="h-5 w-5" />
                                 </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-52">
-                                {canPromptPayment(item) ? (
-                                  <DropdownMenuItem onSelect={() => handleOpenPayment(item)}>
-                                    <DollarSign className="h-4 w-4 text-emerald-600" />
-                                    Pay now
-                                  </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem onSelect={() => handleViewAppointment(item)}>
-                                  <Eye className="h-4 w-4 text-violet-600" />
-                                  View details
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                {staffVisibleStatusOptions.map((status: any) => (
-                                  <DropdownMenuItem
-                                    key={status.value}
-                                    onSelect={() => handleHistoryStatusChange(item.id, status.value)}
-                                  >
-                                    {status.label}
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                              ) : null}
+                            </div>
                           </TableCell>
                         </TableRow>
                         );

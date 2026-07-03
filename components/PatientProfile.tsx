@@ -501,10 +501,58 @@ export function PatientProfile({
   return (
     <div
       data-tour-id="patient-profile-page"
-        title={`Patient Details - ${patientDisplayName}`}
-      className="flex min-h-screen flex-col gap-0 bg-slate-50"
+      title={`Patient Details - ${patientDisplayName}`}
+      className="flex min-h-screen flex-col gap-0 bg-slate-50 md:bg-slate-50"
       >
-        <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 text-left shadow-sm sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
+          <div className="grid grid-cols-[44px_minmax(0,1fr)_44px] items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onBackToPatients}
+              className="h-11 w-11 rounded-full text-slate-900 hover:bg-slate-100"
+              aria-label="Back to patients"
+            >
+              <ArrowLeft className="h-6 w-6" />
+            </Button>
+            <h1 className="truncate text-center text-2xl font-black tracking-tight text-slate-950">
+              Patient Details
+            </h1>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-11 w-11 rounded-full text-slate-900 hover:bg-slate-100"
+                  aria-label="More patient actions"
+                >
+                  <MoreVertical className="h-6 w-6" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={handleSave}
+                  disabled={!patient || !isModified || isHeaderSaving}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {isHeaderSaving ? "Saving..." : "Update Patient"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => patient && onDeletePatient(patient)}
+                  disabled={!patient || isHeaderSaving}
+                  className="text-red-600 focus:text-red-600"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        <header className="hidden shrink-0 border-b border-slate-200 bg-white px-4 py-4 text-left shadow-sm sm:px-6 md:block lg:px-8">
           <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               <div className="relative group">
@@ -587,31 +635,105 @@ export function PatientProfile({
         {patient ? (
           <div className="flex flex-1 flex-col">
             {/* Quick Summary Bar - High Visibility Redesign */}
-            <div data-tour-id="patient-details-summary" className="border-b border-slate-100 bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
-              <div className="mx-auto grid w-full max-w-[1920px] gap-4 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
-                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                    <CheckCircle className="h-6 w-6" />
+            <div data-tour-id="patient-details-summary" className="border-b border-slate-100 bg-slate-50 px-4 py-4 sm:px-6 md:py-5 lg:px-8">
+              <div className="mx-auto w-full max-w-[1920px] space-y-4 md:space-y-0">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:hidden">
+                  <div className="grid grid-cols-[minmax(88px,0.34fr)_minmax(0,1fr)] gap-4">
+                    <div className="relative">
+                      <PatientAvatar
+                        src={resolveImageSource((serverPatient || patient)?.profilePicture)}
+                        name={patientDisplayName}
+                        dob={patient?.dateOfBirth || patient?.dob || patient?.birthday}
+                        className="aspect-square h-auto w-full rounded-lg border border-slate-200 bg-white shadow-sm"
+                        sizeClass="h-full w-full rounded-lg"
+                      />
+                      <div className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-white bg-violet-600 text-white shadow-lg">
+                        <Camera className="h-5 w-5" />
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <h2 className="truncate text-2xl font-black leading-tight text-slate-950">
+                            {patientDisplayName}
+                          </h2>
+                          {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
+                        </div>
+                        <div className="mt-3 space-y-2 text-sm font-semibold text-slate-500">
+                          {patient?.email ? (
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Mail className="h-4 w-4 shrink-0 text-slate-500" />
+                              <span className="truncate">{patient.email}</span>
+                            </span>
+                          ) : null}
+                          {patient?.phone ? (
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Phone className="h-4 w-4 shrink-0 text-slate-500" />
+                              <span className="truncate">{patient.phone}</span>
+                            </span>
+                          ) : null}
+                          <span className="block truncate text-xs font-bold text-slate-500">
+                            PID: {patient.id || "Unregistered"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (isModified) {
+                              handleSave();
+                              return;
+                            }
+                            document.querySelector('[data-tour-id="patient-details-info-content"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }}
+                          disabled={!patient || isHeaderSaving}
+                          className="h-12 rounded-lg border-violet-300 font-black text-violet-700 hover:bg-violet-50"
+                        >
+                          {isHeaderSaving ? <Clock className="mr-2 h-4 w-4 animate-spin" /> : <Edit className="mr-2 h-4 w-4" />}
+                          {isModified ? "Save" : "Edit"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => patient && onDeletePatient(patient)}
+                          disabled={!patient || isHeaderSaving}
+                          className="h-12 rounded-lg border-red-200 font-black text-red-600 hover:bg-red-50 hover:text-red-700"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:gap-4 [grid-template-columns:repeat(2,minmax(0,1fr))] md:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 md:h-12 md:w-12">
+                    <CheckCircle className="h-5 w-5 md:h-6 md:w-6" />
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
                     <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-                    <CreditCard className="h-6 w-6" />
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 md:h-12 md:w-12">
+                    <CreditCard className="h-5 w-5 md:h-6 md:w-6" />
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
-                    <span className={`block truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
+                    <span className={`block truncate text-lg font-black leading-tight md:text-xl ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
                       PHP {Number(displayedBalance || 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                    <Calendar className="h-6 w-6" />
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 md:h-12 md:w-12">
+                    <Calendar className="h-5 w-5 md:h-6 md:w-6" />
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
@@ -620,9 +742,9 @@ export function PatientProfile({
                     </span>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                    <FileText className="h-6 w-6" />
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 md:h-12 md:w-12">
+                    <FileText className="h-5 w-5 md:h-6 md:w-6" />
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Record Reference</span>
@@ -630,6 +752,7 @@ export function PatientProfile({
                       {patient.id}
                     </span>
                   </div>
+                </div>
                 </div>
               </div>
             </div>
@@ -2690,9 +2813,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       <div className="h-full flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
-          <div className="shrink-0 bg-slate-50 px-4 pb-4 pt-5 sm:px-6 lg:px-8">
-            <div className="mx-auto w-full max-w-[1920px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-0 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
+          <div className="shrink-0 bg-slate-50 px-4 pb-3 pt-3 sm:px-6 md:pb-4 md:pt-5 lg:px-8">
+            <div className="mx-auto w-full max-w-[1920px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:rounded-lg">
+            <TabsList className="flex h-auto min-h-14 w-full justify-start gap-0 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-1 md:p-0">
               {[
                 { value: "info", label: "Personal Info", icon: UserIcon },
                 // { value: "family", label: "Family & Relations", icon: Users },
@@ -2707,7 +2830,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   key={tab.value}
                   value={tab.value}
                   data-tour-id={`patient-details-${tab.value}-tab`}
-                  className="group relative h-14 min-w-[165px] flex-1 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-violet-50/30 data-[state=active]:text-violet-600 hover:bg-slate-50 hover:text-slate-800 sm:px-4"
+                  className="group relative h-12 min-w-[150px] flex-1 shrink-0 rounded-lg border border-transparent bg-transparent px-3 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-500 data-[state=active]:bg-white data-[state=active]:text-violet-600 data-[state=active]:shadow-sm hover:bg-slate-50 hover:text-slate-800 md:h-14 md:min-w-[165px] md:rounded-none md:border-x-0 md:border-t-0 md:border-b-2 md:data-[state=active]:bg-violet-50/30 md:data-[state=active]:shadow-none sm:px-4"
                 >
                   <div className="flex items-center gap-2">
                     <tab.icon className="h-4 w-4" />
@@ -2721,9 +2844,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
           <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-8 sm:px-6 lg:px-8">
             <TabsContent value="info" data-tour-id="patient-details-info-content" className="mt-0 outline-none">
-                <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
+                <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
                 {/* Left Column: Profile Insight Card */}
-                <div className="min-w-0 space-y-6 xl:space-y-8">
+                <div className="hidden min-w-0 space-y-6 xl:block xl:space-y-8">
                   <Card className="border-none shadow-xl ring-1 ring-slate-200 overflow-hidden bg-white">
                     <div className="h-32 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500" />
                     <CardContent className="-mt-16 px-5 pb-7 pt-0 text-center sm:px-8 sm:pb-10">
@@ -2831,17 +2954,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 </div>
 
                   {/* Right Column: Detailed Forms */}
-                  <div className="min-w-0 space-y-6 pb-10 xl:space-y-8 xl:pb-12">
+                  <div className="min-w-0 space-y-4 pb-10 md:space-y-6 xl:space-y-8 xl:pb-12">
                   {/* Identity Section */}
-                  <section className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-2 rounded-full bg-violet-600 shadow-lg shadow-violet-200" />
+                  <section className="space-y-3 md:space-y-6">
+                    <div className="flex items-center gap-3 md:gap-4">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 md:h-10 md:w-2 md:bg-violet-600 md:text-transparent md:shadow-lg md:shadow-violet-200">
+                        <UserIcon className="h-5 w-5 md:hidden" />
+                      </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Identity & Account</h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Personal Identification Details</p>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900 md:text-xl">Identity & Account</h2>
+                        <p className="hidden text-xs font-bold uppercase tracking-widest text-slate-400 md:block">Personal Identification Details</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-5 rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 sm:gap-6 sm:p-6 2xl:grid-cols-3 2xl:p-7">
+                    <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 md:gap-5 md:rounded-lg sm:p-6 2xl:grid-cols-3 2xl:p-7">
                       <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">First Name</Label>
                         <Input
@@ -2914,15 +3039,17 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </section>
 
                   {/* Communication & Location Section */}
-                  <section className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-2 rounded-full bg-blue-600 shadow-lg shadow-blue-200" />
+                  <section className="space-y-3 md:space-y-6">
+                    <div className="flex items-center gap-3 md:gap-4">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 md:h-10 md:w-2 md:bg-blue-600 md:text-transparent md:shadow-lg md:shadow-blue-200">
+                        <MapPin className="h-5 w-5 md:hidden" />
+                      </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Contact & Location</h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Reachability & Residence Information</p>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900 md:text-xl">Contact & Location</h2>
+                        <p className="hidden text-xs font-bold uppercase tracking-widest text-slate-400 md:block">Reachability & Residence Information</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-5 rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 sm:gap-6 sm:p-6 2xl:p-7">
+                    <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 md:gap-5 md:rounded-lg sm:p-6 2xl:p-7">
                       <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Primary Email</Label>
                         <div className="relative">
@@ -2976,16 +3103,70 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     </div>
                   </section>
 
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:hidden">
+                    <section className="rounded-xl border border-red-100 bg-white p-4 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-500">
+                          <HeartPulse className="h-5 w-5" />
+                        </div>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900">Clinical Alert</h2>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Allergies</Label>
+                          <Textarea
+                            placeholder="List known allergies (e.g., Penicillin, Latex)..."
+                            value={formData.allergies}
+                            onChange={(e) => { setFormData(prev => ({ ...prev, allergies: e.target.value })); setIsModified(true); }}
+                            className="min-h-[46px] resize-none rounded-lg border-slate-200 bg-slate-50/40 text-sm font-medium focus:ring-violet-200"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Medical Backdrop</Label>
+                          <Textarea
+                            placeholder="Chronic conditions, surgeries, medications..."
+                            value={formData.medicalHistory}
+                            onChange={(e) => { setFormData(prev => ({ ...prev, medicalHistory: e.target.value })); setIsModified(true); }}
+                            className="min-h-[46px] resize-none rounded-lg border-slate-200 bg-slate-50/40 text-sm font-medium focus:ring-violet-200"
+                          />
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                          <Activity className="h-5 w-5" />
+                        </div>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900">Encounters & Schedule</h2>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50/40 p-4 text-center">
+                          <span className="block text-[11px] font-black uppercase tracking-wide text-slate-400">Total Encounters</span>
+                          <span className="mt-3 block text-2xl font-black text-slate-950">{patientAppointments.length}</span>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50/40 p-4 text-center">
+                          <span className="block text-[11px] font-black uppercase tracking-wide text-slate-400">Upcoming</span>
+                          <span className="mt-3 block truncate text-base font-black text-violet-600">
+                            {patient.nextAppointment ? formatPatientLogDate(patient.nextAppointment, "No Schedule") : "No Schedule"}
+                          </span>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+
                   {/* Emergency Section */}
-                  <section className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-2 rounded-full bg-red-600 shadow-lg shadow-red-200" />
+                  <section className="space-y-3 md:space-y-6">
+                    <div className="flex items-center gap-3 md:gap-4">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-500 md:h-10 md:w-2 md:bg-red-600 md:text-transparent md:shadow-lg md:shadow-red-200">
+                        <Phone className="h-5 w-5 md:hidden" />
+                      </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Emergency Contact</h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Crisis Contact Information</p>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900 md:text-xl">Emergency Contact</h2>
+                        <p className="hidden text-xs font-bold uppercase tracking-widest text-slate-400 md:block">Crisis Contact Information</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-5 rounded-lg border border-red-100 bg-red-50/30 p-5 shadow-sm md:grid-cols-2 sm:gap-6 sm:p-6 2xl:p-7">
+                    <div className="grid grid-cols-1 gap-3 rounded-xl border border-red-100 bg-red-50/30 p-4 shadow-sm md:grid-cols-2 md:gap-5 md:rounded-lg sm:p-6 2xl:p-7">
                       <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-red-600 uppercase tracking-wider">Contact Person</Label>
                         <Input
@@ -3006,12 +3187,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </section>
 
                   {/* Additional Notes Section */}
-                  <section className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-2 rounded-full bg-slate-400 shadow-lg shadow-slate-100" />
+                  <section className="space-y-3 md:space-y-6">
+                    <div className="flex items-center gap-3 md:gap-4">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 md:h-10 md:w-2 md:bg-slate-400 md:text-transparent md:shadow-lg md:shadow-slate-100">
+                        <FileText className="h-5 w-5 md:hidden" />
+                      </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight">Internal Notes</h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Supplemental Administrative Notes</p>
+                        <h2 className="text-lg font-black tracking-tight text-slate-900 md:text-xl">Internal Notes</h2>
+                        <p className="hidden text-xs font-bold uppercase tracking-widest text-slate-400 md:block">Supplemental Administrative Notes</p>
                       </div>
                     </div>
                     <Textarea

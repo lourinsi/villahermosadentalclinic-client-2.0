@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -69,6 +69,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const { mode, toggleMode } = useBookingModalMode();
   const { isReceptionistView, canSwitchAdminView, toggleViewMode } = useAdminViewMode();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const managementBasePath = user?.role === "receptionist" ? "/receptionist" : "/admin";
   const {
     notifications,
@@ -113,6 +114,20 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
   const visibleNavItems = navItems.filter((item) => !item.hideForReceptionist || !isReceptionistView);
+  const mobilePrimaryNavItems = visibleNavItems.filter((item) =>
+    ["Dashboard", "Requests", "Calendar", "Settings"].includes(item.label)
+  );
+  const activeNavItem = visibleNavItems.find((item) => {
+    const itemHref = `${managementBasePath}${item.path}`;
+    return pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+  }) || visibleNavItems[0];
+  const userInitials = String(user?.username || portalTitle || "AD")
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "AD";
   const {
     approvalDialogAppointment,
     approvalDialogMode,
@@ -171,11 +186,133 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
     router.replace(pathname.replace(/^\/admin/, "/receptionist"));
   }, [pathname, router, user?.role]);
 
+  React.useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
+
   return (
-    <div className="flex min-h-dvh flex-col bg-gray-100 md:h-screen md:flex-row">
+    <div className="flex min-h-dvh flex-col bg-gray-50 md:h-screen md:flex-row">
+      <header className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
+        <div className="flex items-center gap-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Open navigation"
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="h-11 w-11 rounded-2xl text-gray-900 hover:bg-gray-100"
+          >
+            <Menu className="h-7 w-7" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-2xl font-black tracking-tight text-gray-950">{activeNavItem?.label || portalTitle}</h1>
+            <p className="truncate text-sm font-bold text-slate-500">
+              Welcome back, <span className="text-violet-600">{user?.username || portalTitle}</span>
+            </p>
+          </div>
+          <div className="relative" data-tour-id="admin-notifications-mobile">
+            <NotificationsOpened
+              notifications={notifications}
+              unreadCount={unreadCount}
+              portal="admin"
+              notificationsPath={`${managementBasePath}/notifications`}
+              onUpdateAppointmentStatus={openApprovalDialog}
+              onMarkAsRead={markAsRead}
+              onMarkAsUnread={markAsUnread}
+              onDelete={deleteNotification}
+              onDeleteWithResult={deleteNotificationWithResult}
+              onMarkAllAsRead={markAllAsRead}
+              onDeleteAll={deleteAllNotifications}
+              onRefresh={refreshNotifications}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={loadMoreNotifications}
+              onEditAppointment={handleEditAppointment}
+              onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
+            />
+          </div>
+          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-base font-black text-white shadow-lg shadow-violet-200">
+            {userInitials}
+            <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-white bg-emerald-500" />
+          </div>
+        </div>
+      </header>
+
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation overlay"
+            className="absolute inset-0 bg-slate-950/45"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+          <div className="relative flex h-full w-[82vw] max-w-sm flex-col rounded-r-[2rem] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 p-5">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-violet-600">{portalTitle}</p>
+                <p className="mt-1 text-xl font-black text-gray-950">Navigation</p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Close navigation"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="h-10 w-10 rounded-full"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            <nav className="min-h-0 flex-1 overflow-y-auto p-4">
+              <ul className="space-y-2">
+                {visibleNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const itemHref = `${managementBasePath}${item.path}`;
+                  const isActive = pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+                  return (
+                    <li key={itemHref}>
+                      <Link
+                        href={itemHref}
+                        prefetch={false}
+                        data-tour-id={getNavTourId(item.label)}
+                        className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-black transition-colors ${
+                          isActive
+                            ? "bg-violet-600 text-white shadow-lg shadow-violet-100"
+                            : "text-slate-600 hover:bg-violet-50 hover:text-violet-700"
+                        }`}
+                      >
+                        <Icon className="h-5 w-5 shrink-0" />
+                        <span>{item.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+            <div className="space-y-3 border-t border-gray-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              {canSwitchAdminView && (
+                <Button onClick={toggleViewMode} variant="outline" className="h-11 w-full justify-start gap-2 rounded-2xl font-bold">
+                  {isReceptionistView ? <User className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                  {isReceptionistView ? "Receptionist view" : "Admin view"}
+                </Button>
+              )}
+              {!isReceptionistView && (
+                <Button onClick={toggleMode} variant="outline" className="h-11 w-full justify-start rounded-2xl font-bold">
+                  {mode === "simple" ? "Simple booking mode" : "Pro booking mode"}
+                </Button>
+              )}
+              <Button onClick={handleLogout} variant="outline" className="h-11 w-full justify-start gap-2 rounded-2xl font-bold text-rose-600 hover:bg-rose-50 hover:text-rose-700">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <aside
         data-tour-id="admin-sidebar"
-        className={`${theme.sidebar} transition-[width] duration-300 ${isSidebarCollapsed ? "md:!w-20" : ""}`}
+        className={`${theme.sidebar} hidden transition-[width] duration-300 md:flex ${isSidebarCollapsed ? "md:!w-20" : ""}`}
       >
         <div className={`${theme.title} flex items-center justify-between gap-2 ${isSidebarCollapsed ? "md:px-3" : ""}`}>
           <span className={`truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{portalTitle}</span>
@@ -198,7 +335,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const itemHref = `${managementBasePath}${item.path}`;
-              const isActive = pathname === itemHref;
+              const isActive = pathname === itemHref || pathname.startsWith(`${itemHref}/`);
               return (
                 <li key={itemHref} className="shrink-0">
                   <Link
@@ -239,7 +376,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
         </div>
       </aside>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 md:h-16 md:px-6">
+        <header className="hidden min-h-14 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 md:flex md:h-16 md:px-6">
           <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-3">
             {canSwitchAdminView && (
               <Button
@@ -293,7 +430,38 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
             />
           </div>
         </header>
-        <main className="flex-1 overflow-auto bg-gray-50 p-3 sm:p-4 md:p-6">{children}</main>
+        <main className="flex-1 overflow-auto bg-gray-50 p-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:p-6">{children}</main>
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-100 bg-white/95 px-3 pb-[calc(0.45rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+          <ul className="grid grid-cols-4 gap-1">
+            {mobilePrimaryNavItems.map((item) => {
+              const Icon = item.icon;
+              const itemHref = `${managementBasePath}${item.path}`;
+              const isActive = pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+              const showBadge = item.label === "Requests" && unreadCount > 0;
+              return (
+                <li key={itemHref}>
+                  <Link
+                    href={itemHref}
+                    prefetch={false}
+                    className={`relative flex h-16 flex-col items-center justify-center gap-1 rounded-2xl text-[11px] font-bold transition-colors ${
+                      isActive ? "text-violet-600" : "text-slate-500 hover:bg-violet-50 hover:text-violet-600"
+                    }`}
+                  >
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isActive ? "bg-violet-50" : ""}`}>
+                      <Icon className="h-6 w-6" />
+                    </span>
+                    <span>{item.label}</span>
+                    {showBadge && (
+                      <span className="absolute right-4 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
         <AppointmentHistoryView
           open={isAppointmentHistoryOpen}
           onOpenChange={(open) => {

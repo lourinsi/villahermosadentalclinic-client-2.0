@@ -9,6 +9,9 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { Calendar, DollarSign, AlertCircle, Users, Clock, ChevronRight } from "lucide-react";
+import { getAppointmentTypeName } from "../lib/appointment-types";
+import { formatTimeTo12h } from "@/lib/time-slots";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { DashboardStats } from "./DashboardStats";
 import { RevenueOverview } from "./RevenueOverview";
@@ -360,10 +363,112 @@ export function Dashboard({ portal }: DashboardProps) {
     selectedAppointment?.id &&
     String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
+  const managementBasePath = portal === "admin" && user?.role === "receptionist" ? "/receptionist" : `/${portal}`;
+  const mobileStats = portal === "admin"
+    ? [
+        {
+          title: `${dashboardPeriodRange.title} Expenses`,
+          value: `\u20b1${periodExpenses.toLocaleString()}`,
+          helper: "Paid expenses",
+          icon: DollarSign,
+          iconClass: "bg-rose-50 text-rose-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
+        },
+        {
+          title: `${dashboardPeriodRange.title} Appointments`,
+          value: filteredAppointments.length.toString(),
+          helper: "Scheduled",
+          icon: Calendar,
+          iconClass: "bg-emerald-50 text-emerald-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
+        },
+        {
+          title: "Appointment Requests",
+          value: pendingAppointmentsCount.toString(),
+          helper: "Action required",
+          icon: Clock,
+          iconClass: "bg-amber-50 text-amber-600",
+          pillClass: "bg-amber-50 text-amber-700",
+        },
+        {
+          title: `${dashboardPeriodRange.title} Revenue`,
+          value: `\u20b1${periodRevenue.toLocaleString()}`,
+          helper: "Recorded payments",
+          icon: DollarSign,
+          iconClass: "bg-violet-50 text-violet-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
+        },
+      ]
+    : [
+        {
+          title: "Appointments",
+          value: filteredAppointments.length.toString(),
+          helper: "Current view",
+          icon: Calendar,
+          iconClass: "bg-violet-50 text-violet-600",
+          pillClass: "bg-violet-50 text-violet-700",
+        },
+        {
+          title: "Requests",
+          value: pendingAppointmentsCount.toString(),
+          helper: "Action required",
+          icon: AlertCircle,
+          iconClass: "bg-amber-50 text-amber-600",
+          pillClass: "bg-amber-50 text-amber-700",
+        },
+      ];
+  const mobileVisitWeeks = [0.2, 0.47, 0.93, 0.58, 0.47, 0.32];
+  const monthlyVisitTotal = currentMonthAppointments.length;
+  const monthlyVisitAverage = Math.round((monthlyVisitTotal / Math.max(1, new Date().getDate())) * 10) / 10;
 
   return (
-    <div data-tour-id={`${portal}-dashboard-page`} className="min-h-screen space-y-6 bg-[#f8fafc] p-4 sm:p-6 md:space-y-10 lg:p-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div data-tour-id={`${portal}-dashboard-page`} className="min-h-screen space-y-5 bg-[#f8fafc] p-1 sm:p-3 md:space-y-10 md:p-0">
+      {portal !== "patient" && (
+        <div className="md:hidden">
+          <div className="grid grid-cols-3 rounded-[1.35rem] border border-gray-100 bg-white p-1.5 shadow-sm">
+            {(["day", "week", "month"] as const).map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant="ghost"
+                className={`h-12 rounded-2xl text-sm font-black transition-all ${
+                  viewMode === mode
+                    ? "bg-violet-600 text-white shadow-lg shadow-violet-200 hover:bg-violet-600 hover:text-white"
+                    : "text-slate-500 hover:bg-gray-50 hover:text-slate-700"
+                }`}
+                onClick={() => setViewMode(mode)}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 md:hidden">
+        {mobileStats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.title} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-slate-500">{stat.title}</p>
+                  <p className="mt-3 text-2xl font-black tracking-tight text-gray-950">{stat.value}</p>
+                </div>
+                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${stat.iconClass}`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-black ${stat.pillClass}`}>{stat.helper}</span>
+                <span className="text-xs font-semibold text-slate-500">Current view</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden flex-col gap-4 md:flex md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
           <h1 className="text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">{headerText.title}</h1>
           <p className="text-sm font-medium text-gray-500 sm:text-base">{headerText.subtitle}</p>
@@ -406,32 +511,80 @@ export function Dashboard({ portal }: DashboardProps) {
         />
       </div>
 
-      {/* Next Appointment Section (Full Width) */}
-      <NextAppointmentCard
-        appointment={nextAppointment}
-        role={portal}
-        sameDayAppointments={nextAppointmentDayAppointments}
-        onViewDetails={(apt: Appointment) => {
-          handleViewAppointment(apt);
-        }}
-        onViewAll={handleViewAll}
-        showHeader={true}
-      />
+      <div className="md:hidden">
+        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-gray-950">Next Appointment</h2>
+              <p className="text-sm font-semibold text-slate-500">Don't miss your upcoming visit</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={handleViewAll} className="rounded-xl text-sm font-black text-violet-600 hover:bg-violet-50">
+              View All
+            </Button>
+          </div>
+          {nextAppointment ? (
+            <button
+              type="button"
+              onClick={() => handleViewAppointment(nextAppointment)}
+              className="flex w-full items-center gap-4 rounded-2xl border border-violet-100 bg-violet-50/50 p-4 text-left"
+            >
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-violet-600 shadow-sm">
+                <Calendar className="h-7 w-7" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-black text-gray-950">
+                  {portal === "patient" ? `Dr. ${nextAppointment.doctor}` : nextAppointment.patientName}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  {formatWordyDate(nextAppointment.date, { fallback: nextAppointment.date || "N/A" })} at {nextAppointment.time ? formatTimeTo12h(nextAppointment.time) : "N/A"}
+                </p>
+              </div>
+              <ChevronRight className="h-6 w-6 shrink-0 text-slate-400" />
+            </button>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+                <Calendar className="h-7 w-7" />
+              </div>
+              <p className="font-black text-gray-950">No appointments yet</p>
+              <p className="mt-1 text-sm font-semibold text-slate-500">Schedule your first visit today.</p>
+              <Button onClick={() => openCreateModal()} className="mt-4 rounded-xl bg-violet-600 px-8 font-black text-white hover:bg-violet-700">
+                Book Now
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
 
-      {/* Bottom Grid: Schedule, Stats, and Quick Actions */}
-      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3 lg:gap-8">
-        <RecentSchedule
-          portal={portal}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          appointments={recentScheduleAppointments}
-          isLoadingView={isLoadingView}
-          viewTitle={getViewTitle()}
-          onAppointmentClick={(apt: Appointment) => {
+      <div className="hidden md:block">
+        <NextAppointmentCard
+          appointment={nextAppointment}
+          role={portal}
+          sameDayAppointments={nextAppointmentDayAppointments}
+          onViewDetails={(apt: Appointment) => {
             handleViewAppointment(apt);
           }}
           onViewAll={handleViewAll}
+          showHeader={true}
         />
+      </div>
+
+      {/* Bottom Grid: Schedule, Stats, and Quick Actions */}
+      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3 lg:gap-8">
+        <div className="hidden md:block">
+          <RecentSchedule
+            portal={portal}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            appointments={recentScheduleAppointments}
+            isLoadingView={isLoadingView}
+            viewTitle={getViewTitle()}
+            onAppointmentClick={(apt: Appointment) => {
+              handleViewAppointment(apt);
+            }}
+            onViewAll={handleViewAll}
+          />
+        </div>
 
         <div className="hidden md:block">
           <VisitStatistics
@@ -446,6 +599,111 @@ export function Dashboard({ portal }: DashboardProps) {
             openCreateModal={openCreateModal}
             openAddPatientModal={openAddPatientModal}
           />
+        </div>
+      </div>
+
+      <div className="space-y-4 md:hidden">
+        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-black text-gray-950">{portal === "admin" ? "Recent Schedule" : "My Schedule"}</h2>
+              <p className="text-sm font-semibold text-slate-500">{getViewTitle()}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={handleViewAll} className="rounded-xl text-sm font-black text-violet-600 hover:bg-violet-50">
+              View All
+            </Button>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {recentScheduleAppointments.length > 0 ? (
+              recentScheduleAppointments.slice(0, 3).map((appointment) => (
+                <button
+                  key={appointment.id}
+                  type="button"
+                  onClick={() => handleViewAppointment(appointment)}
+                  className="flex w-full items-center gap-4 py-3 text-left"
+                >
+                  <div className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                    <span className="text-sm font-black">{formatTimeTo12h(appointment.time).split(" ")[0]}</span>
+                    <span className="text-[10px] font-black uppercase">{formatTimeTo12h(appointment.time).split(" ")[1] || ""}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-black text-gray-950">{portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}</p>
+                    <p className="mt-0.5 truncate text-sm font-semibold text-slate-500">{getAppointmentTypeName(appointment.type, appointment.customType)}</p>
+                  </div>
+                  <span className="rounded-xl bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                    {normalizeAppointmentStatus(appointment.status)}
+                  </span>
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
+                </button>
+              ))
+            ) : (
+              <div className="py-8 text-center text-sm font-bold text-slate-400">No schedule found</div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <h2 className="text-xl font-black text-gray-950">Visit Statistics</h2>
+              <p className="text-sm font-semibold text-slate-500">This Month</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={handleViewAll} className="rounded-xl text-sm font-black text-violet-600 hover:bg-violet-50">
+              View All
+            </Button>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_8.5rem] gap-4">
+            <div className="flex h-32 items-end justify-between gap-2 border-b border-gray-100 px-2">
+              {mobileVisitWeeks.map((height, index) => (
+                <div key={index} className="flex flex-1 flex-col items-center justify-end gap-2">
+                  <div
+                    className="w-full max-w-7 rounded-t-xl bg-violet-500/80"
+                    style={{ height: `${Math.max(14, height * 100)}%` }}
+                  />
+                  <span className="text-[10px] font-semibold text-slate-500">Jun {index * 7 + 1}</span>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+              <p className="text-sm font-bold text-slate-500">Total Visits</p>
+              <p className="mt-1 text-3xl font-black text-violet-600">{monthlyVisitTotal}</p>
+              <p className="mt-4 text-sm font-bold text-slate-500">Avg. per day</p>
+              <p className="mt-1 text-2xl font-black text-violet-600">{monthlyVisitAverage}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <h2 className="text-xl font-black text-gray-950">Quick Actions</h2>
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            {[
+              { label: "Schedule", helper: "Book visit", icon: Calendar, action: () => openCreateModal() },
+              { label: "Patients", helper: "Manage", icon: Users, action: () => router.push(`${managementBasePath}/patients`) },
+              { label: "Requests", helper: "Review", icon: AlertCircle, action: () => router.push(`${managementBasePath}/requests`) },
+              { label: "Finance", helper: "View", icon: DollarSign, action: () => router.push(`${managementBasePath}/finance`) },
+            ].map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={action.action}
+                  className="relative flex min-h-[7rem] flex-col items-center justify-center rounded-2xl border border-gray-100 bg-white px-2 text-center shadow-sm"
+                >
+                  {action.label === "Requests" && pendingAppointmentsCount > 0 && (
+                    <span className="absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white">
+                      {pendingAppointmentsCount > 9 ? "9+" : pendingAppointmentsCount}
+                    </span>
+                  )}
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+                    <Icon className="h-6 w-6" />
+                  </span>
+                  <span className="mt-2 text-xs font-black text-gray-950">{action.label}</span>
+                  <span className="mt-0.5 text-[10px] font-semibold text-slate-500">{action.helper}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

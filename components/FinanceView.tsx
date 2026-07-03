@@ -69,7 +69,8 @@ import {
   Wallet,
   Gift,
   CreditCard,
-  CheckCircle2
+  CheckCircle2,
+  Menu
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -1852,14 +1853,25 @@ export function FinanceView() {
   };
 
   return (
-    <div data-tour-id="finance-page" className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Financial Overview</h1>
-          <p className="text-muted-foreground">Track revenue, expenses, and clinic profitability</p>
+    <div data-tour-id="finance-page" className="space-y-6 p-4 sm:p-6">
+      <div className="space-y-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
+            <Button variant="ghost" size="icon" className="mt-1 h-11 w-11 shrink-0 rounded-2xl text-slate-900 md:hidden" aria-label="Finance menu">
+              <Menu className="h-7 w-7" />
+            </Button>
+            <div className="min-w-0">
+              <h1 className="text-3xl font-black tracking-tight text-slate-950 md:text-2xl md:font-semibold">Financial Overview</h1>
+              <p className="mt-1 text-lg font-medium leading-snug text-slate-500 md:text-base">Track revenue, expenses, and clinic profitability</p>
+            </div>
+          </div>
+          <Button variant="outline" size="icon" className="h-14 w-14 shrink-0 rounded-2xl border-gray-100 bg-white text-violet-600 shadow-md shadow-gray-200/50 md:hidden" aria-label="Finance trend overview">
+            <TrendingUp className="h-6 w-6" />
+          </Button>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="flex rounded-xl border border-gray-200 bg-white p-1">
+
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+          <div className="flex h-14 min-w-0 flex-1 basis-[170px] rounded-[1.35rem] border border-gray-100 bg-white p-1 shadow-sm sm:flex-none md:h-auto md:min-w-0 md:rounded-xl md:border-gray-200">
             {(["day", "week", "month"] as const).map((period) => (
               <Button
                 key={period}
@@ -1867,9 +1879,9 @@ export function FinanceView() {
                 size="sm"
                 variant="ghost"
                 onClick={() => setMetricPeriod(period)}
-                className={`h-8 rounded-lg px-3 text-xs font-bold uppercase ${
+                className={`h-full flex-1 rounded-2xl px-4 text-base font-black capitalize md:h-8 md:rounded-lg md:px-3 md:text-xs md:font-bold md:uppercase ${
                   metricPeriod === period
-                    ? "bg-violet-600 text-white hover:bg-violet-700 hover:text-white"
+                    ? "bg-violet-600 text-white shadow-lg shadow-violet-200 hover:bg-violet-700 hover:text-white"
                     : "text-gray-500 hover:text-gray-900"
                 }`}
               >
@@ -1877,85 +1889,116 @@ export function FinanceView() {
               </Button>
             ))}
           </div>
-          <Button variant="outline" onClick={handleExportReport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export Report
-          </Button>
-          <Button variant="brand" onClick={handleGenerateInvoices}>
-            <FileText className="h-4 w-4 mr-2" />
-            Generate Invoices
-          </Button>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Button variant="outline" onClick={handleExportReport} className="h-14 rounded-2xl border-gray-100 bg-white px-4 font-black text-slate-900 shadow-md shadow-gray-200/40 md:h-10 md:rounded-xl md:px-4">
+              <Download className="mr-2 h-5 w-5 md:h-4 md:w-4" />
+              Export
+            </Button>
+            <Button variant="brand" onClick={handleGenerateInvoices} className="h-14 rounded-2xl bg-violet-600 px-4 font-black text-white shadow-lg shadow-violet-200 hover:bg-violet-700 md:h-10 md:rounded-xl md:px-4">
+              <FileText className="mr-2 h-5 w-5 md:h-4 md:w-4" />
+              Invoices
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Key Financial Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
+            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Revenue</CardTitle>
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+              <DollarSign className="h-6 w-6" />
+            </span>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(metricRevenue)}</div>
-            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
+          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
+            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricRevenue)}</div>
+            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Expenses</CardTitle>
-            <TrendingDown className="h-4 w-4 text-red-600" />
+        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
+            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Expenses</CardTitle>
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500">
+              <TrendingDown className="h-6 w-6" />
+            </span>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(metricExpenses)}</div>
-            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
+          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
+            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricExpenses)}</div>
+            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">{metricPeriodRange.title} Net Profit</CardTitle>
-            <TrendingUp className="h-4 w-4 text-blue-600" />
+        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
+            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Net Profit</CardTitle>
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <TrendingUp className="h-6 w-6" />
+            </span>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(metricProfit)}</div>
-            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
+          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
+            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricProfit)}</div>
+            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Profit Margin</CardTitle>
-            <Package className="h-4 w-4 text-purple-600" />
+        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
+            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">Profit Margin</CardTitle>
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+              <Package className="h-6 w-6" />
+            </span>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
+            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
               {metricMargin.toFixed(1)}%
             </div>
-            <div className="text-xs text-muted-foreground">{metricPeriodRange.label}</div>
+            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
           </CardContent>
         </Card>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6" onValueChange={() => fetchData()}>
-        <TabsList>
-          <TabsTrigger value="overview" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Financial Overview</TabsTrigger>
-          <TabsTrigger value="expenses" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Expenses</TabsTrigger>
-          <TabsTrigger value="inventory" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Inventory</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-4 gap-2 overflow-x-auto rounded-none border-b border-gray-100 bg-transparent p-0">
+          <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent bg-transparent px-1 pb-4 pt-2 text-base font-black text-slate-500 shadow-none data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 data-[state=active]:shadow-none md:rounded-lg md:border-b-0 md:px-3 md:py-2 md:text-sm md:data-[state=active]:bg-violet-600 md:data-[state=active]:text-white">Overview</TabsTrigger>
+          <TabsTrigger value="expenses" className="rounded-none border-b-2 border-transparent bg-transparent px-1 pb-4 pt-2 text-base font-black text-slate-500 shadow-none data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 data-[state=active]:shadow-none md:rounded-lg md:border-b-0 md:px-3 md:py-2 md:text-sm md:data-[state=active]:bg-violet-600 md:data-[state=active]:text-white">Expenses</TabsTrigger>
+          <TabsTrigger value="inventory" className="rounded-none border-b-2 border-transparent bg-transparent px-1 pb-4 pt-2 text-base font-black text-slate-500 shadow-none data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 data-[state=active]:shadow-none md:rounded-lg md:border-b-0 md:px-3 md:py-2 md:text-sm md:data-[state=active]:bg-violet-600 md:data-[state=active]:text-white">Inventory</TabsTrigger>
           {!PAYROLL_DISABLED && (
             <TabsTrigger value="payroll" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Payroll</TabsTrigger>
           )}
-          <TabsTrigger value="transactions" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Transactions</TabsTrigger>
+          <TabsTrigger value="transactions" className="rounded-none border-b-2 border-transparent bg-transparent px-1 pb-4 pt-2 text-base font-black text-slate-500 shadow-none data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 data-[state=active]:shadow-none md:rounded-lg md:border-b-0 md:px-3 md:py-2 md:text-sm md:data-[state=active]:bg-violet-600 md:data-[state=active]:text-white">Transactions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid lg:grid-cols-3 gap-6">
+          <div className="grid gap-6 lg:grid-cols-3">
             {/* Revenue Chart */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>Revenue vs Expenses</CardTitle>
+            <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40 lg:col-span-2">
+              <CardHeader className="gap-4 p-5 md:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-2xl font-black tracking-tight text-slate-950 md:text-xl">Revenue vs Expenses</CardTitle>
+                  <Select defaultValue="6-months">
+                    <SelectTrigger className="h-12 w-[132px] rounded-2xl border-gray-100 bg-white text-base font-bold shadow-sm md:h-10 md:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="6-months">6 Months</SelectItem>
+                      <SelectItem value="12-months">12 Months</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-5 text-base font-medium text-slate-500 md:text-sm">
+                  <span className="flex items-center gap-2">
+                    <span className="h-3.5 w-3.5 rounded-full bg-red-500" />
+                    Expenses
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-3.5 w-3.5 rounded-full bg-emerald-600" />
+                    Revenue
+                  </span>
+                </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
                 {isLoading ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <div className="inline-block">
@@ -1964,14 +2007,14 @@ export function FinanceView() {
                     </div>
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={260}>
                     <AreaChart data={revenueData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                      <YAxis tickLine={false} axisLine={false} />
                       <Tooltip formatter={(value) => [formatCurrency(Number(value)), ""]} />
-                      <Area type="monotone" dataKey="revenue" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.8} />
-                      <Area type="monotone" dataKey="expenses" stackId="2" stroke="#ef4444" fill="#ef4444" fillOpacity={0.8} />
+                      <Area type="monotone" dataKey="revenue" stackId="1" stroke="#16a34a" fill="#16a34a" fillOpacity={0.2} />
+                      <Area type="monotone" dataKey="expenses" stackId="2" stroke="#ef4444" fill="#ef4444" fillOpacity={0.72} />
                     </AreaChart>
                   </ResponsiveContainer>
                 )}
@@ -1979,11 +2022,11 @@ export function FinanceView() {
             </Card>
 
             {/* Expense Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Expense Breakdown</CardTitle>
+            <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
+              <CardHeader className="p-5 md:p-6">
+                <CardTitle className="text-2xl font-black tracking-tight text-slate-950 md:text-xl">Expense Breakdown</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-5 pt-0 md:p-6 md:pt-0">
                 {isLoading ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <div className="inline-block">
@@ -1993,7 +2036,7 @@ export function FinanceView() {
                   </div>
                 ) : (
                   <>
-                    <ResponsiveContainer width="100%" height={300}>
+                    <ResponsiveContainer width="100%" height={280}>
                       {expenseBreakdown.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground">No expense breakdown data available.</div>
                       ) : (
@@ -2015,17 +2058,17 @@ export function FinanceView() {
                         </PieChart>
                       )}
                     </ResponsiveContainer>
-                    <div className="space-y-2 mt-4">
+                    <div className="mt-4 space-y-3">
                       {expenseBreakdown.length === 0 ? null : ( // Hide legend if no data
                         expenseBreakdown.map((expense) => (
-                          <div key={expense.category} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center space-x-2">
-                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: expense.color }} />
-                              <span>{expense.category}</span>
+                          <div key={expense.category} className="flex items-center justify-between text-base">
+                            <div className="flex items-center space-x-3">
+                              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: expense.color }} />
+                              <span className="font-medium text-slate-900">{expense.category}</span>
                             </div>
                             <div className="text-right">
-                              <div className="font-medium">{formatCurrency(expense.amount)}</div>
-                              <div className="text-xs text-muted-foreground">{expense.percentage}%</div>
+                              <div className="font-black text-slate-950">{formatCurrency(expense.amount)}</div>
+                              <div className="text-sm text-muted-foreground">{expense.percentage}%</div>
                             </div>
                           </div>
                         ))
@@ -2035,6 +2078,19 @@ export function FinanceView() {
                 )}
               </CardContent>
             </Card>
+          </div>
+          <div className="rounded-3xl border border-violet-100 bg-violet-50/70 p-5 shadow-md shadow-violet-100/50">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xl font-black text-violet-600">
+                i
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-violet-600">Insights</h3>
+                <p className="mt-1 text-base font-medium text-slate-900">
+                  {metricExpenses > metricRevenue ? "Expenses are the main driver of costs this period." : "Revenue is covering expenses for this period."}
+                </p>
+              </div>
+            </div>
           </div>
         </TabsContent>
 

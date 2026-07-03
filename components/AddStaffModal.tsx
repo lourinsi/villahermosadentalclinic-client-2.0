@@ -27,6 +27,7 @@ import {
 export default function AddStaffModal(props: AddStaffModalProps) {
   const staffLogic = useSharedAddStaffLogic({ ...props, toast });
   const { form } = staffLogic;
+  const showCompensationFields = props.showCompensationFields ?? true;
   const title = staffLogic.isViewMode
     ? "Staff Details"
     : staffLogic.isEditMode
@@ -149,18 +150,20 @@ export default function AddStaffModal(props: AddStaffModalProps) {
                   onChange={(event) => staffLogic.updateForm({ hireDate: event.target.value })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="staff-base-salary">Base Monthly Salary (PHP)</Label>
-                <Input
-                  id="staff-base-salary"
-                  type="number"
-                  placeholder="5000"
-                  {...staffPasswordManagerIgnoreProps}
-                  value={form.baseSalary}
-                  disabled={staffLogic.isReadOnly}
-                  onChange={(event) => staffLogic.updateForm({ baseSalary: Number(event.target.value) })}
-                />
-              </div>
+              {showCompensationFields ? (
+                <div className="space-y-2">
+                  <Label htmlFor="staff-base-salary">Base Monthly Salary (PHP)</Label>
+                  <Input
+                    id="staff-base-salary"
+                    type="number"
+                    placeholder="5000"
+                    {...staffPasswordManagerIgnoreProps}
+                    value={form.baseSalary}
+                    disabled={staffLogic.isReadOnly}
+                    onChange={(event) => staffLogic.updateForm({ baseSalary: Number(event.target.value) })}
+                  />
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label htmlFor="staff-specialization">Specialization</Label>
                 <Input
