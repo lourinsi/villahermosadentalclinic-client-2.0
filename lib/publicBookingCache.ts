@@ -272,6 +272,7 @@ export async function createPublicBookingAppointment({
   doctor,
   notes,
   treatmentNotes,
+  toothNumbers,
   price,
   discount = 0,
   status = CART_APPOINTMENT_STATUS,
@@ -291,6 +292,7 @@ export async function createPublicBookingAppointment({
   doctor: string;
   notes?: string;
   treatmentNotes?: string;
+  toothNumbers?: string;
   price?: number;
   discount?: number;
   status?: string;
@@ -328,6 +330,7 @@ export async function createPublicBookingAppointment({
     doctor,
     notes: notes || "",
     treatmentNotes: treatmentNotes || "",
+    toothNumbers: String(toothNumbers || "").trim(),
     status,
     paymentStatus,
     paymentMethod,

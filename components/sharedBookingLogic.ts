@@ -1135,6 +1135,34 @@ export function normalizeBookingTreatmentNotes(notes?: unknown) {
   return String(notes ?? '').trim();
 }
 
+export function normalizeBookingToothNumbers(toothNumbers?: unknown) {
+  if (Array.isArray(toothNumbers)) {
+    return toothNumbers
+      .map((toothNumber) => String(toothNumber ?? '').trim())
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  return String(toothNumbers ?? '')
+    .replace(/[\n;]+/g, ',')
+    .split(',')
+    .map((toothNumber) => toothNumber.trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
+export function getBookingToothNumberEntries(toothNumbers?: unknown) {
+  const normalized = normalizeBookingToothNumbers(toothNumbers);
+  if (!normalized) return [''];
+
+  const entries = normalized
+    .split(',')
+    .map((toothNumber) => toothNumber.trim())
+    .filter(Boolean);
+
+  return entries.length > 0 ? entries : [''];
+}
+
 export function getBookingTreatmentNotesValue(appointment?: any) {
   const sources = [
     appointment,
@@ -1159,9 +1187,38 @@ export function getBookingTreatmentNotesValue(appointment?: any) {
   return "";
 }
 
-export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown) {
+export function getBookingToothNumbersValue(appointment?: any) {
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+
+    if (source.toothNumbers !== undefined && source.toothNumbers !== null) {
+      return normalizeBookingToothNumbers(source.toothNumbers);
+    }
+
+    if (source.tooth_numbers !== undefined && source.tooth_numbers !== null) {
+      return normalizeBookingToothNumbers(source.tooth_numbers);
+    }
+
+    if (source.teethNumbers !== undefined && source.teethNumbers !== null) {
+      return normalizeBookingToothNumbers(source.teethNumbers);
+    }
+  }
+
+  return "";
+}
+
+export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toothNumbers?: unknown) {
   return {
     treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),
+    toothNumbers: normalizeBookingToothNumbers(toothNumbers),
   };
 }
 

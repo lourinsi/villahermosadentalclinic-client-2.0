@@ -16,7 +16,7 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, X } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -50,6 +50,8 @@ import useSharedBookingLogic, {
   isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
   getBookingTreatmentNotesValue,
+  getBookingToothNumberEntries,
+  getBookingToothNumbersValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
@@ -61,6 +63,7 @@ import useSharedBookingLogic, {
   isPastAppointmentSchedule,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
+  normalizeBookingToothNumbers,
   normalizePastAppointmentStatus,
   parseLocalDateOnly,
   toBookingPatientOption as toPatientOption,
@@ -112,12 +115,32 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
   const [treatmentNotes, setTreatmentNotes] = useState<string>("");
+  const [toothNumberEntries, setToothNumberEntries] = useState<string[]>([""]);
   const [selectedDate, setSelectedDate] = useState<Date>(getBookingDefaultDate(defaultDate));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
   const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
   const [durationConflict, setDurationConflict] = useState<string>("");
+
+  const toothNumbers = useMemo(
+    () => normalizeBookingToothNumbers(toothNumberEntries),
+    [toothNumberEntries]
+  );
+  const handleToothNumberChange = useCallback((index: number, value: string) => {
+    setToothNumberEntries((current) =>
+      current.map((entry, entryIndex) => (entryIndex === index ? value : entry))
+    );
+  }, []);
+  const handleAddToothNumber = useCallback(() => {
+    setToothNumberEntries((current) => [...current, ""]);
+  }, []);
+  const handleRemoveToothNumber = useCallback((index: number) => {
+    setToothNumberEntries((current) => {
+      if (current.length <= 1) return [""];
+      return current.filter((_, entryIndex) => entryIndex !== index);
+    });
+  }, []);
 
   // New states for two-step flow
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
@@ -1167,12 +1190,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDuration(String(normalizeBookingDuration(appointmentToEdit.duration)));
       // Prefill discount if it exists in the appointment (from discount field)
       setDiscount(String(appointmentToEdit.discount || 0));
-  // For both editing and creating via the BookingModal we intentionally
-  // clear the notes field so the modal opens with an empty notes input.
-  // Notes from history remain visible in the AppointmentHistoryView below,
-  // but they are not auto-copied into the editable notes field.
-  setNotes('');
+      // For both editing and creating via the BookingModal we intentionally
+      // clear the notes field so the modal opens with an empty notes input.
+      // Notes from history remain visible in the AppointmentHistoryView below,
+      // but they are not auto-copied into the editable notes field.
+      setNotes('');
       setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
+      setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
       setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
@@ -1204,6 +1228,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setCustomPrice('0');
       setNotes('');
       setTreatmentNotes('');
+      setToothNumberEntries(['']);
       setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setAmountToPay('0');
@@ -1527,6 +1552,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       appointmentId: appointmentToEdit?.id,
       patientId: selectedPatient,
       type: appointmentType,
+      toothNumbers,
       date: formatDateToYYYYMMDD(selectedDate),
       time: selectedTime,
       price: finalPrice,
@@ -1546,7 +1572,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
-      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes);
+      const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes, toothNumbers);
       const originalAppointmentNotes = repeatTargetDate
         ? buildRepeatAppointmentNotes(notes, selectedDate, repeatTargetDate)
         : notes;
@@ -2248,6 +2274,52 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     )}
 
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="booking-tooth-number-0" className="text-sm font-bold text-gray-700">Tooth No./s</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handleAddToothNumber}
+                          disabled={isPatientReadonly}
+                          aria-label="Add tooth number"
+                          className="h-8 w-8 rounded-full border-blue-100 text-blue-600 hover:border-blue-200 hover:bg-blue-50"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {toothNumberEntries.map((toothNumber, index) => (
+                          <div key={index} className="flex items-center gap-1">
+                            <Input
+                              id={index === 0 ? "booking-tooth-number-0" : undefined}
+                              type="text"
+                              inputMode="numeric"
+                              value={toothNumber}
+                              onChange={(e: any) => handleToothNumberChange(index, e.target.value)}
+                              placeholder={`Tooth ${index + 1}`}
+                              className="h-11 w-24 rounded-lg border-gray-200 text-center font-bold"
+                              disabled={isPatientReadonly}
+                            />
+                            {toothNumberEntries.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRemoveToothNumber(index)}
+                                disabled={isPatientReadonly}
+                                aria-label={`Remove tooth number ${index + 1}`}
+                                className="h-8 w-8 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Price - Moved here with appointment type styling */}
                     <div className="space-y-2">
                       <Label className="text-sm font-bold text-gray-700">Price</Label>
@@ -2542,6 +2614,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     <span className="font-medium">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType || 'Other'}</span>
                   </div>
                   <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Tooth No./s:</span>
+                    <span className="font-medium">{toothNumbers || 'None specified'}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Date:</span>
                     <span className="font-medium">{formatWordyDate(selectedDate)}</span>
                   </div>
@@ -2797,6 +2873,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         selectedDate={selectedDate}
         selectedTime={selectedTime}
         duration={duration}
+        toothNumbers={toothNumbers}
         treatmentNotes={treatmentNotes}
         notes={notes}
         onNotesChange={setNotes}

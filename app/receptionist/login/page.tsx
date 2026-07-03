@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getManagementDashboardPath } from "@/lib/management-routes";
 
 export default function ReceptionistLoginPage() {
   const { login, logout, isLoading, user } = useAuth();
@@ -26,8 +27,11 @@ export default function ReceptionistLoginPage() {
   };
 
   useEffect(() => {
-    if (!isLoading && (user?.role === "receptionist" || user?.role === "admin")) {
-      router.replace("/receptionist/dashboard");
+    if (!isLoading) {
+      const dashboardPath = getManagementDashboardPath(user?.role);
+      if (dashboardPath) {
+        router.replace(dashboardPath);
+      }
     }
   }, [isLoading, router, user]);
 

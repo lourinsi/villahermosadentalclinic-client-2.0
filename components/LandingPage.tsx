@@ -3,6 +3,8 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
+import { getManagementDashboardPath } from "@/lib/management-routes";
 import {
   Card,
   CardContent,
@@ -20,6 +22,17 @@ import { Footer } from "@/components/Footer";
 
 export default function LandingPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  const handleLoginClick = () => {
+    if (isLoading) return;
+
+    const dashboardPath = isAuthenticated
+      ? getManagementDashboardPath(user?.role)
+      : null;
+
+    router.push(dashboardPath || "/receptionist/login");
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -44,11 +57,12 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
-                onClick={() => router.push("/receptionist/login")}
+                onClick={handleLoginClick}
                 size="lg"
+                disabled={isLoading}
                 className="h-12 rounded-full bg-primary px-8 text-base font-bold hover:bg-primary/90"
               >
-                Login
+                {isAuthenticated ? "Dashboard" : "Login"}
               </Button>
             </div>
           </div>

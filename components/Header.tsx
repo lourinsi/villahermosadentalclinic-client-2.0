@@ -9,6 +9,7 @@ import {
   User,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { getManagementDashboardPath } from "@/lib/management-routes";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -29,7 +30,7 @@ export function Header(_props: HeaderProps) {
   const router = useRouter();
 
   const handleDashboard = () => {
-    router.push(user?.role === "receptionist" ? "/receptionist/dashboard" : "/admin/dashboard");
+    router.push(getManagementDashboardPath(user?.role) || "/admin/dashboard");
   };
 
   const navLinks = [
