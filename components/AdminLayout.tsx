@@ -2,6 +2,8 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { apiUrl } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
@@ -137,7 +139,6 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
     closeApprovalDialog,
     confirmApprovalAction,
   } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
-
   const handleEditAppointment = async (appointmentId: string) => {
     console.log(`[AdminLayout] Attempting to edit appointment: ${appointmentId}`);
     try {
@@ -185,6 +186,44 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
     if (user?.role !== "receptionist" || !pathname.startsWith("/admin/")) return;
     router.replace(pathname.replace(/^\/admin/, "/receptionist"));
   }, [pathname, router, user?.role]);
+
+  React.useEffect(() => {
+    if (!user?.username || !user?.role || user.role === "patient") return;
+
+    let cancelled = false;
+
+    const showIncompletePatientToast = async () => {
+      try {
+        const response = await fetch(apiUrl("/api/patients?page=1&limit=1&status=all"), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success || cancelled) return;
+
+        const count = Number(payload?.meta?.incompletePatientCount || 0);
+        const patientLabel = count === 1 ? "patient" : "patients";
+        const message =
+          count > 0
+            ? `You have ${count} incomplete ${patientLabel}. Please tend to ${count === 1 ? "this patient" : "them"}.`
+            : "You have 0 incomplete patients to tend to.";
+
+        if (count > 0) {
+          toast.warning(message, { duration: 8000 });
+        } else {
+          toast.success(message, { duration: 5000 });
+        }
+      } catch (error) {
+        console.warn("[AdminLayout] Failed to fetch incomplete patient count:", error);
+      }
+    };
+
+    showIncompletePatientToast();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role, user?.username]);
 
   React.useEffect(() => {
     setIsMobileMenuOpen(false);

@@ -95,6 +95,7 @@ import {
   type QuestionnaireQuestion,
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
+import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
 
 export interface Patient {
   id?: string;
@@ -113,6 +114,8 @@ export interface Patient {
   nextAppointment?: string | null;
   status?: string;
   overdueAppointmentCount?: number;
+  profileCompletion?: "complete" | "incomplete" | string;
+  profileCompletionMissing?: string[];
   insurance?: string;
   balance?: number;
   createdAt?: string;
@@ -286,6 +289,15 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
   }
 };
 
+const formatMissingProfileSections = (missing?: string[] | null) => {
+  const sections = Array.isArray(missing) ? missing.filter(Boolean) : [];
+  if (sections.some((section) => section.toLowerCase() === "consent form")) {
+    return "Incomplete: consent form is not finished.";
+  }
+  if (sections.length === 0) return "Some required profile details are missing.";
+  return `Missing ${sections.join(", ")}.`;
+};
+
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
   discardDraft: () => void;
@@ -341,6 +353,9 @@ export function PatientProfile({
     modalAppointmentSummary && modalPatientAppointmentsAreFresh
       ? modalAppointmentSummary.status
       : serverPatient?.status ?? patient?.status ?? "active";
+  const displayedProfileCompletion = serverPatient?.profileCompletion ?? patient?.profileCompletion ?? "incomplete";
+  const displayedProfileCompletionMissing =
+    serverPatient?.profileCompletionMissing ?? patient?.profileCompletionMissing ?? ["consent form"];
   const [modalOverdueAppointmentCount, setModalOverdueAppointmentCount] = useState<number | null>(patient?.overdueAppointmentCount ?? null);
   const displayedOverdueAppointmentCount =
     modalAppointmentSummary && modalPatientAppointmentsAreFresh
@@ -498,6 +513,37 @@ export function PatientProfile({
     );
   };
 
+  const getProfileCompletionBadge = (profileCompletion?: string, missing?: string[] | null) => {
+    const completion = profileCompletion?.toLowerCase() === "incomplete" ? "incomplete" : "complete";
+    const badge =
+      completion === "complete" ? (
+        <Badge className="gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-emerald-700 hover:bg-emerald-50 shadow-none">
+          <CheckCircle className="h-3.5 w-3.5" />
+          Complete
+        </Badge>
+      ) : (
+        <Badge className="gap-1.5 border-orange-200 bg-orange-50 px-2.5 py-0.5 text-orange-700 hover:bg-orange-50 shadow-none">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Incomplete
+        </Badge>
+      );
+
+    const tooltip = completion === "complete" ? "Complete: consent form is finished." : formatMissingProfileSections(missing);
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex cursor-help" title={tooltip} aria-label={tooltip} tabIndex={0}>
+            {badge}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[280px] text-center">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
   return (
     <div
       data-tour-id="patient-profile-page"
@@ -565,6 +611,7 @@ export function PatientProfile({
                     {patientDisplayName}
                   </h1>
                   {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
+                  {getProfileCompletionBadge(displayedProfileCompletion, displayedProfileCompletionMissing)}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
@@ -658,6 +705,7 @@ export function PatientProfile({
                             {patientDisplayName}
                           </h2>
                           {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
+                          {getProfileCompletionBadge(displayedProfileCompletion, displayedProfileCompletionMissing)}
                         </div>
                         <div className="mt-3 space-y-2 text-sm font-semibold text-slate-500">
                           {patient?.email ? (
@@ -717,7 +765,10 @@ export function PatientProfile({
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
-                    <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
+                      {getProfileCompletionBadge(displayedProfileCompletion, displayedProfileCompletionMissing)}
+                    </div>
                   </div>
                 </div>
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
@@ -854,6 +905,39 @@ const toDateOnly = (value?: string | Date) => {
 
 const formatPatientLogDate = (value?: string | Date | null, fallback = "N/A") =>
   formatWordyDate(value, { fallback: value ? String(value) : fallback });
+
+const formatPatientHistoryCurrency = (value?: number | string | null) => {
+  const amount = Number(value || 0);
+  return `₱${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "0"}`;
+};
+
+const getPatientHistoryDateParts = (value?: string | Date | null) => {
+  const fallback = { month: "---", day: "--", year: "", weekday: "" };
+  if (!value) return fallback;
+
+  const rawValue = value instanceof Date ? value : String(value);
+  const normalizedValue =
+    typeof rawValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+      ? `${rawValue}T00:00:00`
+      : rawValue;
+  const parsed = normalizedValue instanceof Date ? normalizedValue : new Date(normalizedValue);
+
+  if (Number.isNaN(parsed.getTime())) return fallback;
+
+  return {
+    month: parsed.toLocaleDateString("en-US", { month: "short" }).toUpperCase(),
+    day: parsed.toLocaleDateString("en-US", { day: "2-digit" }),
+    year: parsed.toLocaleDateString("en-US", { year: "numeric" }),
+    weekday: parsed.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
+  };
+};
+
+const formatPatientHistoryTime = (date?: string | Date | null, time?: string | null) => {
+  const rawTime = String(time || (typeof date === "string" ? date.split(" ")[1] : "") || "").trim();
+  if (!rawTime) return "No time";
+
+  return formatTimeTo12h(rawTime);
+};
 
 const getPaymentTransactionKey = (txn: RecentTransaction) =>
   String(txn.id || txn.transactionId || `${txn.appointmentId || "none"}-${txn.date || "no-date"}-${txn.method || "method"}-${txn.amount || 0}`);
@@ -1307,6 +1391,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     allConsentAcknowledgementsAccepted &&
     Boolean(consentForm.patientSignatureName.trim()) &&
     Boolean(consentForm.signedDate) &&
+    Boolean(consentForm.dentistSignatureName.trim()) &&
     hasConsentSignature;
 
   const handleQuestionnaireAnswerChange = (questionId: string, checked: boolean) => {
@@ -1408,6 +1493,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         allConsentAcknowledgementsAccepted &&
         Boolean(consentForm.patientSignatureName.trim()) &&
         Boolean(consentForm.signedDate) &&
+        Boolean(consentForm.dentistSignatureName.trim()) &&
         Boolean(signatureImage);
       const nextConsentForm: ConsentFormState = {
         ...consentForm,
@@ -1515,7 +1601,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       description: `Recorded payment total for ${appointmentType}`,
       amount: totalPaid,
       type: "payment",
-      method: "Recorded Total",
+      method: normalizeBookingPaymentMethod((apt as any).paymentMethod),
       transactionId: `LEGACY-${apt.id}`,
       notes: "Imported from appointment total paid because no individual payment record exists.",
       status: apt.paymentStatus === "unpaid" ? "pending" : "completed",
@@ -1542,7 +1628,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           description: payment.description || `Payment for ${appointmentType}`,
           amount: Number(payment.amount || 0),
           type: payment.type || "payment",
-          method: payment.method || "Unknown",
+          method: normalizeBookingPaymentMethod(payment.method),
           source: (payment as any).source || "payment",
           appointmentId: payment.appointmentId,
           appointmentType,
@@ -1569,7 +1655,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           description: rawTxn.description || rawTxn.notes || `Payment for ${appointmentType}`,
           amount: Number(rawTxn.amount || 0),
           type: rawTxn.type || "payment",
-          method: rawTxn.method || rawTxn.paymentMethod || "Recorded",
+          method: normalizeBookingPaymentMethod(rawTxn.method || rawTxn.paymentMethod),
           source: (rawTxn as any).source || "appointment-transaction",
           appointmentId: apt.id,
           appointmentType,
@@ -1617,7 +1703,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               amount: Number(log.amount || 0),
               paymentAmount: Number(log.amount || 0),
               paymentDate: paymentDisplayDate,
-              paymentMethod: log.paymentMethod,
+              paymentMethod: normalizeBookingPaymentMethod(log.paymentMethod),
               paymentStatus: log.paymentStatus,
               previousBalance: log.previousBalance,
               newBalance: log.newBalance,
@@ -1646,7 +1732,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           description: `Payment for ${appointmentType}`,
           amount: Number(log.amount || 0),
           type: "payment",
-          method: log.paymentMethod || "Payment log",
+          method: normalizeBookingPaymentMethod(log.paymentMethod),
           transactionId: log.id || `LOG-${log.appointmentId}`,
           notes: log.changedByName ? `Recorded by ${log.changedByName}` : undefined,
           status: log.paymentStatus || "completed",
@@ -2148,6 +2234,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const getPaymentMethodIcon = (method: string) => {
     switch ((method || '').toLowerCase()) {
+      case NO_PAYMENT_METHOD_LABEL.toLowerCase():
+        return <CreditCard className="h-4 w-4" />;
       case 'cash':
         return <DollarSign className="h-4 w-4" />;
       case 'card':
@@ -3586,194 +3674,299 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
 
         <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-          <Card className={cardClass}>
-            <CardHeader>
-                <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-                    <CardTitle>Appointment History</CardTitle>
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                      onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
-                      className="gap-2 font-semibold"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>New Appointment</span>
-                    </Button>
+          <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <CardHeader className="border-b border-slate-100 px-4 py-4 sm:px-6">
+              <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+                <div>
+                  <CardTitle className="text-2xl font-black text-slate-950">Visit History</CardTitle>
+                  <p className="mt-1 text-sm font-medium text-slate-500">All patient appointments and visits</p>
                 </div>
-                <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2 lg:grid-cols-5 xl:flex xl:items-center">
-                    <div className="relative w-full xl:w-[250px]">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <Input
-                            placeholder="Search history..."
-                            value={historySearchFilter}
-                            onChange={(e) => setHistorySearchFilter(e.target.value)}
-                            className="pl-9 h-10 border-gray-300 bg-white"
-                        />
-                    </div>
-                    <Select value={historyAppointmentStatusFilter} onValueChange={setHistoryAppointmentStatusFilter}>
-                        <SelectTrigger className="w-full xl:w-[150px]">
-                            <SelectValue placeholder="Appointment Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Statuses</SelectItem>
-                            {APPOINTMENT_STATUSES.map(status => (
-                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                            ))}
-                        </SelectContent>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(240px,1fr)_150px_150px_150px_150px_44px_170px] 2xl:w-[1040px]">
+                  <div className="relative sm:col-span-2 lg:col-span-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <Input
+                      placeholder="Search visits..."
+                      value={historySearchFilter}
+                      onChange={(e) => setHistorySearchFilter(e.target.value)}
+                      className="h-10 rounded-xl border-slate-200 bg-white pl-9 text-sm shadow-sm"
+                    />
+                  </div>
+                  <Select value={historyAppointmentStatusFilter} onValueChange={setHistoryAppointmentStatusFilter}>
+                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      {APPOINTMENT_STATUSES.map(status => (
+                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
+                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
+                      <SelectValue placeholder="All Payments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Payments</SelectItem>
+                      {PAYMENT_STATUSES.map(status => (
+                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!doctorFilter && (
+                    <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
+                      <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
+                        <SelectValue placeholder="All Doctors" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniqueDoctors.map(doctor => (
+                          <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
-                    <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
-                        <SelectTrigger className="w-full xl:w-[150px]">
-                            <SelectValue placeholder="Payment Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Payments</SelectItem>
-                            {PAYMENT_STATUSES.map(status => (
-                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
-                    {!doctorFilter && (
-                      <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
-                          <SelectTrigger className="w-full xl:w-[180px]">
-                              <SelectValue placeholder="Filter by doctor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                              {uniqueDoctors.map(doctor => (
-                                  <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                              ))}
-                          </SelectContent>
-                      </Select>
-                    )}
-                    <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                        <SelectTrigger className="w-full xl:w-[180px]">
-                            <SelectValue placeholder="Filter by procedure" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {uniqueProcedures.map(proc => (
-                                <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                  )}
+                  <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
+                      <SelectValue placeholder="All Procedures" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uniqueProcedures.map(proc => (
+                        <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-full rounded-xl border-slate-200 bg-white shadow-sm lg:w-11"
+                    onClick={() => {
+                      setHistorySearchFilter("");
+                      setHistoryAppointmentStatusFilter("all");
+                      setHistoryPaymentStatusFilter("all");
+                      setHistoryDoctorFilter("all");
+                      setHistoryProcedureFilter("all");
+                    }}
+                  >
+                    <History className="h-4 w-4" />
+                    <span className="sr-only">Reset visit filters</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
+                    className="h-10 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 font-bold text-white shadow-md shadow-violet-200 hover:from-violet-700 hover:to-blue-700 sm:col-span-2 lg:col-span-1"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Appointment
+                  </Button>
                 </div>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {(filteredHistory.length === 0) ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
-                    </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
-                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
-                        .sort(comparePaymentTransactionsDesc);
-                      const isExpanded = expandedTransactions.has(appointment.id);
-                      const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
-                      const appointmentBalance = Number((appointment as any).balance);
-                      const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
-                      const storedDisplayedBalance = Number.isFinite(appointmentBalance)
-                        ? appointmentBalance
-                        : computedOutstandingBalance;
-                      const isCancelledAppointment = normalizeAppointmentStatus(String(appointment.status || "")) === "cancelled";
-                      const originalDisplayedBalance = isCancelledAppointment
-                        ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
-                        : storedDisplayedBalance;
-                      const displayedBalance = isCancelledAppointment ? 0 : originalDisplayedBalance;
+            <CardContent className="p-4 sm:p-5">
+              {(filteredHistory.length === 0) ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-medium text-slate-500">
+                  {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                    const appointmentId = String(appointment.id || `apt-${index}`);
+                    const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
+                      .sort(comparePaymentTransactionsDesc);
+                    const isExpanded = expandedTransactions.has(appointmentId);
+                    const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
+                    const appointmentBalance = Number((appointment as any).balance);
+                    const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
+                    const storedDisplayedBalance = Number.isFinite(appointmentBalance)
+                      ? appointmentBalance
+                      : computedOutstandingBalance;
+                    const isCancelledAppointment = normalizeAppointmentStatus(String(appointment.status || "")) === "cancelled";
+                    const originalDisplayedBalance = isCancelledAppointment
+                      ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
+                      : storedDisplayedBalance;
+                    const displayedBalance = isCancelledAppointment ? 0 : originalDisplayedBalance;
+                    const dateParts = getPatientHistoryDateParts(appointment.date);
+                    const appointmentTime = formatPatientHistoryTime(appointment.date, (appointment as any).time);
+                    const patientDisplayName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Patient";
+                    const patientImage = resolveImageSource(formData.profilePicture || patient.profilePicture || "");
+                    const patientInitials = getInitials(patientDisplayName);
+                    const notesText = String(appointment.notes || "").trim() || "No notes";
+                    const isPaid = displayedBalance <= 0 && Number(appointment.price || 0) > 0;
 
-                      // Resolve doctor image for this appointment entry (snapshot fields first, then staff list)
-                      const resolveDoctorImageFor = (apt: any) => {
-                        let img = getDoctorImageFromSnapshot(apt);
-                        if (!img && Array.isArray(doctors) && doctors.length) {
-                          const doctorName = String(apt.doctor || '').toLowerCase().trim();
-                          const matched = doctors.find((d) => (d.name || '').toLowerCase().trim() === doctorName) || doctors.find((d) => doctorName && (d.name || '').toLowerCase().includes(doctorName));
-                          if (matched && matched.profilePicture) img = resolveImageSource(matched.profilePicture);
-                        }
-                        return img;
-                      };
+                    const resolveDoctorImageFor = (apt: any) => {
+                      let img = getDoctorImageFromSnapshot(apt);
+                      if (!img && Array.isArray(doctors) && doctors.length) {
+                        const doctorName = String(apt.doctor || '').toLowerCase().trim();
+                        const matched = doctors.find((d) => (d.name || '').toLowerCase().trim() === doctorName) || doctors.find((d) => doctorName && (d.name || '').toLowerCase().includes(doctorName));
+                        if (matched && matched.profilePicture) img = resolveImageSource(matched.profilePicture);
+                      }
+                      return img;
+                    };
 
-                      const doctorImage = resolveDoctorImageFor(appointment as any);
+                    const doctorImage = resolveDoctorImageFor(appointment as any);
+                    const doctorName = String(appointment.doctor || "To assign later");
+                    const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
 
-                      return (
-                        <div key={appointment.id || `apt-${index}`} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-                          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-3">
-                                <div className="text-sm">
-                                  <div className="font-medium text-base">{appointment.type}</div>
-                                  <div className="text-muted-foreground">{formatPatientLogDate(appointment.date)}</div>
-                                </div>
-                                <div className="flex gap-2">
-                                  {getAppointmentStatusBadge(String(appointment.status || ''))}
-                                  {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
+                    return (
+                      <div key={appointmentId} className="grid gap-3 xl:grid-cols-[8.5rem_minmax(0,1fr)]">
+                        <div className="relative hidden xl:flex">
+                          <div className="absolute left-6 top-12 h-[calc(100%+0.75rem)] w-px bg-slate-200" />
+                          <div className="relative z-10 flex w-full items-start gap-3">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600 shadow-sm">
+                              <Calendar className="h-5 w-5" />
+                            </div>
+                            <div className="pt-1 text-slate-900">
+                              <div className="text-xs font-black uppercase tracking-widest text-slate-500">{dateParts.month}</div>
+                              <div className="text-3xl font-black leading-none">{dateParts.day}</div>
+                              <div className="mt-1 text-xs font-bold text-slate-500">{dateParts.year}</div>
+                              <div className="text-xs font-black text-slate-500">{dateParts.weekday}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+                          <div className="mb-3 flex items-center gap-3 xl:hidden">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                              <Calendar className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-black text-slate-900">{formatPatientLogDate(appointment.date)}</div>
+                              <div className="text-xs font-semibold text-slate-500">{dateParts.weekday || "Visit"} at {appointmentTime}</div>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_36px] 2xl:items-start">
+                            <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)]">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <Avatar className="h-12 w-12 flex-none overflow-hidden rounded-full border border-slate-200">
+                                  {patientImage ? (
+                                    <AvatarImage src={patientImage} alt={patientDisplayName} className="object-cover" />
+                                  ) : (
+                                    <AvatarFallback className="bg-slate-100 text-base font-bold text-slate-700">{patientInitials}</AvatarFallback>
+                                  )}
+                                </Avatar>
+                                <div className="min-w-0">
+                                  <div className="truncate text-base font-black text-slate-950">{doctorName}</div>
+                                  <div className="truncate text-sm font-semibold text-slate-500">{appointment.type}</div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+                                    <span className="inline-flex items-center gap-1">
+                                      <Clock className="h-3.5 w-3.5" />
+                                      {appointmentTime}
+                                    </span>
+                                    {getAppointmentStatusBadge(String(appointment.status || ''))}
+                                    {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="text-sm flex items-center gap-3">
-                                <div className="flex-shrink-0">
-                                  <Avatar className="h-8 w-8 rounded-md overflow-hidden">
-                                    {doctorImage ? (
-                                      <AvatarImage src={doctorImage} alt={String(appointment.doctor || '')} className="object-cover" />
-                                    ) : (
-                                      <AvatarFallback className="bg-slate-100 text-slate-700 text-sm">{getInitials(String(appointment.doctor || ''))}</AvatarFallback>
-                                    )}
-                                  </Avatar>
-                                </div>
+
+                              <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                                <Avatar className="h-10 w-10 overflow-hidden rounded-full border border-white shadow-sm">
+                                  {doctorImage ? (
+                                    <AvatarImage src={doctorImage} alt={doctorName} className="object-cover" />
+                                  ) : (
+                                    <AvatarFallback className="bg-violet-100 text-sm font-bold text-violet-700">{getInitials(doctorName)}</AvatarFallback>
+                                  )}
+                                </Avatar>
                                 <div className="min-w-0">
-                                  <div className="font-medium truncate">{appointment.doctor}</div>
-                                  <div className="text-muted-foreground truncate">{appointment.notes}</div>
+                                  <div className="text-xs font-black uppercase tracking-wider text-slate-400">Doctor</div>
+                                  <div className="truncate text-sm font-black text-slate-900">{doctorName}</div>
+                                  <div className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-500">
+                                    <Calendar className="h-3.5 w-3.5" />
+                                    <span className="truncate">{notesText}</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                            <div className="space-y-2 md:text-right">
-                              <div>
-                                <div className="text-sm font-medium">Total: ${appointment.price}</div>
-                                <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
+
+                            <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm 2xl:grid-cols-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-slate-500">Total</span>
+                                <span className="font-black text-slate-900">{formatPatientHistoryCurrency(appointment.price)}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-slate-500">Paid</span>
+                                <span className={isPaid ? "font-black text-emerald-600" : "font-black text-slate-900"}>{formatPatientHistoryCurrency(appointment.totalPaid)}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-slate-500">Balance</span>
                                 {isCancelledAppointment && originalDisplayedBalance > 0 ? (
-                                  <div className="text-sm font-medium">
-                                    <span className="text-red-500 line-through decoration-red-400 decoration-2">
-                                      Balance: ${originalDisplayedBalance}
-                                    </span>
-                                    <span className="ml-2 text-emerald-600">
-                                      Balance: $0
-                                    </span>
-                                  </div>
-                                ) : displayedBalance > 0 && (
-                                  <div className="text-sm font-medium text-red-600">
-                                    Balance: ${displayedBalance}
-                                  </div>
+                                  <span className="font-black">
+                                    <span className="text-red-500 line-through decoration-red-400 decoration-2">{formatPatientHistoryCurrency(originalDisplayedBalance)}</span>
+                                    <span className="ml-2 text-emerald-600">₱0</span>
+                                  </span>
+                                ) : (
+                                  <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}>{formatPatientHistoryCurrency(displayedBalance)}</span>
                                 )}
                               </div>
                             </div>
-                          </div>
-                          <div className="flex items-center justify-between pt-4 mt-4 border-t">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
 
-                                if (original && onOpenBookingModal) {
-                                  onOpenBookingModal(original);
-                                }
-                              }}
-                            >
-                              <DollarSign className="h-3 w-3 mr-1" />
-                              Record Payment
-                            </Button>
+                            <div className="grid grid-cols-2 gap-2 2xl:grid-cols-1">
+                              {displayedBalance > 0 ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-10 rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50"
+                                  onClick={() => openPaymentModal(String(patient.id || ""), patientDisplayName, mockAppointmentHistoryLocal, appointmentId)}
+                                >
+                                  <DollarSign className="mr-2 h-4 w-4" />
+                                  Record Payment
+                                </Button>
+                              ) : (
+                                <div className="flex h-10 items-center justify-center rounded-xl bg-emerald-50 text-sm font-black text-emerald-700">
+                                  <CheckCircle className="mr-2 h-4 w-4" />
+                                  Paid
+                                </div>
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-10 rounded-xl border-slate-200 text-slate-800 hover:bg-slate-50"
+                                onClick={() => handleOpenSnapshot(appointment)}
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Details
+                              </Button>
+                            </div>
+
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-9 w-9 justify-self-end rounded-xl text-slate-500 hover:bg-slate-100">
+                                  <MoreVertical className="h-4 w-4" />
+                                  <span className="sr-only">Visit actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleOpenSnapshot(appointment)}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!originalAppointment || !onOpenBookingModal}
+                                  onClick={() => {
+                                    if (originalAppointment && onOpenBookingModal) onOpenBookingModal(originalAppointment);
+                                  }}
+                                >
+                                  <Calendar className="mr-2 h-4 w-4" />
+                                  Open Appointment
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
+
                           {sortedTransactions.length > 0 && (
-                            <div className="border-t pt-3 mt-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="text-sm font-medium">Payment Transactions</div>
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="text-sm font-black text-slate-900">Payment Details</div>
                                 {sortedTransactions.length > 1 && (
                                   <Button
                                     type="button"
                                     variant="ghost"
                                     size="sm"
-                                    className="h-8 gap-1 px-2 text-sm text-slate-600 hover:text-slate-900"
-                                    onClick={() => toggleExpandTransactions(appointment.id)}
+                                    className="h-8 gap-1 px-2 text-xs font-bold text-slate-600 hover:text-slate-900"
+                                    onClick={() => toggleExpandTransactions(appointmentId)}
                                   >
                                     {isExpanded ? (
                                       <>
@@ -3794,55 +3987,56 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   const isLatestPayment = transactionIndex === 0;
 
                                   return (
-                                  <div key={txn.id} className="flex flex-col gap-2 rounded bg-gray-50 p-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-                                    <div className="flex min-w-0 items-center space-x-2">
-                                      {getPaymentMethodIcon(txn.method)}
-                                      <div>
-                                        <div className="flex items-center gap-2 font-medium">
-                                          <span>{txn.method} - ${txn.amount}</span>
-                                          {isLatestPayment && (
-                                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                              Latest
-                                            </Badge>
-                                          )}
+                                    <div key={txn.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                                      <div className="flex min-w-0 items-center gap-3">
+                                        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                                          {getPaymentMethodIcon(txn.method)}
                                         </div>
-                                        <div className="text-xs text-muted-foreground">{formatPatientLogDate(txn.date)} • {txn.transactionId}</div>
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-2 font-black text-slate-900">
+                                            <span>{txn.method} · {formatPatientHistoryCurrency(txn.amount)}</span>
+                                            {isLatestPayment && (
+                                              <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-700">
+                                                Latest
+                                              </Badge>
+                                            )}
+                                          </div>
+                                          <div className="truncate text-xs font-medium text-slate-500">{formatPatientLogDate(txn.date)} · {txn.transactionId}</div>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 w-8 rounded-lg p-0"
+                                          onClick={() => handleOpenSnapshot(appointment, txn)}
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                          <span className="sr-only">View Appointment Snapshot</span>
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className={`h-8 w-8 rounded-lg p-0 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
+                                          title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                          onClick={() => handleEditPaymentTransaction(txn)}
+                                        >
+                                          <Edit className="h-4 w-4" />
+                                          <span className="sr-only">Edit Payment</span>
+                                        </Button>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0"
-                                        onClick={() => handleOpenSnapshot(appointment, txn)}
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                        <span className="sr-only">View Appointment Snapshot</span>
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className={`h-8 w-8 p-0 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
-                                        title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                        onClick={() => handleEditPaymentTransaction(txn)}
-                                      >
-                                        <Edit className="h-4 w-4" />
-                                        <span className="sr-only">Edit Payment</span>
-                                      </Button>
-                                        {/* Hide edit/delete controls for now — keep view (eye) only */}
-                                    </div>
-                                  </div>
                                   );
                                 })}
                               </div>
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

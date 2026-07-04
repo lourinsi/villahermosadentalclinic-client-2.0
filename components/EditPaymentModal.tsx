@@ -29,6 +29,7 @@ import { CreditCard, DollarSign, Edit, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
+import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
 
 const getPaymentLookupCandidates = (paymentId?: string | null, paymentData?: any) => {
   const rawValues = [
@@ -52,6 +53,38 @@ const getPaymentLookupCandidates = (paymentId?: string | null, paymentData?: any
   return Array.from(candidates);
 };
 
+const getPaymentRecordId = (payment?: any) =>
+  String(payment?.id || payment?.paymentId || payment?.paymentRecordId || "").trim();
+
+const getPaymentMethodValue = (payment?: any) =>
+  normalizeBookingPaymentMethod(
+    payment?.method ||
+    payment?.paymentMethod ||
+    payment?.appointmentSnapshot?.paymentMethod
+  );
+
+const getPaymentOptionLabel = (payment?: any) => {
+  const id = getPaymentRecordId(payment) || "Payment";
+  const amount = payment?.amount != null ? ` - PHP ${Number(payment.amount || 0).toLocaleString()}` : "";
+  const method = getPaymentMethodValue(payment);
+
+  return `${id}${amount} (${method})`;
+};
+
+const EDIT_PAYMENT_METHOD_OPTIONS = [
+  NO_PAYMENT_METHOD_LABEL,
+  "GCash",
+  "Card",
+  "Cash",
+  "Maya",
+  "Credit Card",
+  "Debit Card",
+  "Insurance",
+  "Check",
+  "Bank Transfer",
+  "Pay at Clinic",
+];
+
 type EditPaymentModalMemory = {
   paymentMethod: string | null;
   amount: string;
@@ -68,6 +101,7 @@ export function EditPaymentModal() {
     paymentId,
     paymentData,
     patientId,
+    appointmentId: contextAppointmentId,
     appointments: contextAppointments,
   } = usePaymentModal();
   const { refreshPatients } = useAppointmentModal();
@@ -79,13 +113,29 @@ export function EditPaymentModal() {
   const [notes, setNotes] = useState<string>("");
   const [selectedAppointment, setSelectedAppointment] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointmentPayments, setAppointmentPayments] = useState<any[]>([]);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
+  const [isFetchingAppointmentPayments, setIsFetchingAppointmentPayments] = useState(false);
   const [fetchedPaymentData, setFetchedPaymentData] = useState<any | null>(null);
   const [isFetchingPayment, setIsFetchingPayment] = useState(false);
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(null);
   const modalMemoryPausedRef = useRef(false);
 
   const effectivePaymentData = fetchedPaymentData || paymentData;
+  const paymentMethodOptions = useMemo(() => {
+    const options = new Set(EDIT_PAYMENT_METHOD_OPTIONS);
+    const currentMethod = normalizeBookingPaymentMethod(paymentMethod);
+    if (currentMethod) options.add(currentMethod);
+
+    return Array.from(options);
+  }, [paymentMethod]);
+  const currentAppointmentId = String(
+    effectivePaymentData?.appointmentId ||
+    contextAppointmentId ||
+    selectedAppointment ||
+    ""
+  ).trim();
+  const activePaymentLookupId = resolvedPaymentId || paymentId;
   const editPaymentMemoryKey = useMemo(
     () =>
       buildModalMemoryKey(
@@ -101,6 +151,14 @@ export function EditPaymentModal() {
       modalMemoryPausedRef.current = false;
     }
   }, [isPaymentModalOpen]);
+
+  useEffect(() => {
+    if (isPaymentModalOpen) {
+      setResolvedPaymentId(null);
+      setFetchedPaymentData(null);
+      setAppointmentPayments([]);
+    }
+  }, [isPaymentModalOpen, paymentId]);
 
   const restoreEditPaymentMemory = useCallback((memory: EditPaymentModalMemory) => {
     setPaymentMethod(memory.paymentMethod || null);
@@ -135,10 +193,9 @@ export function EditPaymentModal() {
   }, [clearEditPaymentMemory]);
 
   useEffect(() => {
-    if (!isPaymentModalOpen || !paymentId) {
+    if (!isPaymentModalOpen || !activePaymentLookupId) {
       setFetchedPaymentData(null);
       setIsFetchingPayment(false);
-      setResolvedPaymentId(null);
       return;
     }
 
@@ -147,7 +204,7 @@ export function EditPaymentModal() {
     const fetchPayment = async () => {
       setIsFetchingPayment(true);
       try {
-        const candidates = getPaymentLookupCandidates(paymentId, paymentData);
+        const candidates = getPaymentLookupCandidates(activePaymentLookupId, paymentData);
         let lastError = "Failed to fetch payment";
 
         for (const candidate of candidates) {
@@ -187,14 +244,14 @@ export function EditPaymentModal() {
     return () => {
       cancelled = true;
     };
-  }, [isPaymentModalOpen, paymentId, paymentData]);
+  }, [isPaymentModalOpen, activePaymentLookupId, paymentData]);
 
   useEffect(() => {
     if (isPaymentModalOpen && effectivePaymentData) {
       console.log("Payment Data received:", effectivePaymentData);
       
       // Set payment method with hardcoded fallback options
-      const method = effectivePaymentData.method || null;
+      const method = getPaymentMethodValue(effectivePaymentData);
       setPaymentMethod(method);
       
       // Set amount - handle both 'amount' and 'value' fields
@@ -203,13 +260,14 @@ export function EditPaymentModal() {
       
       // Format and set payment date - ensure it's in YYYY-MM-DD format
       let formattedDate = "";
-      if (effectivePaymentData.date) {
-        if (typeof effectivePaymentData.date === "string") {
-          if (effectivePaymentData.date.includes("T")) {
+      const rawDate = effectivePaymentData.paymentDate || effectivePaymentData.date;
+      if (rawDate) {
+        if (typeof rawDate === "string") {
+          if (rawDate.includes("T")) {
             // ISO format - extract just the date part
-            formattedDate = effectivePaymentData.date.split("T")[0];
+            formattedDate = rawDate.split("T")[0];
           } else {
-            formattedDate = effectivePaymentData.date;
+            formattedDate = rawDate;
           }
         }
       }
@@ -218,7 +276,11 @@ export function EditPaymentModal() {
       // Set other fields
       setTransactionId(effectivePaymentData.transactionId || "");
       setNotes(effectivePaymentData.notes || "");
-      setSelectedAppointment(effectivePaymentData.appointmentId || null);
+      setSelectedAppointment(
+        effectivePaymentData.appointmentId ||
+        contextAppointmentId ||
+        null
+      );
       
       console.log("Form state set:", {
         method,
@@ -228,7 +290,53 @@ export function EditPaymentModal() {
         appointmentId: effectivePaymentData.appointmentId
       });
     }
-  }, [editPaymentMemoryKey, isPaymentModalOpen, effectivePaymentData]);
+  }, [contextAppointmentId, editPaymentMemoryKey, isPaymentModalOpen, effectivePaymentData]);
+
+  useEffect(() => {
+    if (!isPaymentModalOpen || !currentAppointmentId) {
+      setAppointmentPayments([]);
+      setIsFetchingAppointmentPayments(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchAppointmentPayments = async () => {
+      setIsFetchingAppointmentPayments(true);
+      try {
+        const res = await fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(currentAppointmentId)}`), {
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
+          credentials: "include",
+        });
+        const json = await res.json().catch(() => ({}));
+        const rows = res.ok && json?.success && Array.isArray(json.data) ? json.data : [];
+
+        if (cancelled) return;
+
+        const merged = [...rows];
+        const effectiveId = getPaymentRecordId(effectivePaymentData);
+        if (effectivePaymentData && effectiveId && !merged.some((row) => getPaymentRecordId(row) === effectiveId)) {
+          merged.unshift(effectivePaymentData);
+        }
+
+        setAppointmentPayments(merged);
+      } catch (err) {
+        console.error("Error fetching appointment payments", err);
+        if (!cancelled) {
+          const effectiveId = getPaymentRecordId(effectivePaymentData);
+          setAppointmentPayments(effectiveId ? [effectivePaymentData] : []);
+        }
+      } finally {
+        if (!cancelled) setIsFetchingAppointmentPayments(false);
+      }
+    };
+
+    fetchAppointmentPayments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAppointmentId, effectivePaymentData, isPaymentModalOpen]);
 
   useEffect(() => {
     if (isPaymentModalOpen && (patientId || effectivePaymentData?.patientId)) {
@@ -288,10 +396,6 @@ export function EditPaymentModal() {
       toast.error("Payment ID is missing");
       return;
     }
-    if (!paymentMethod) {
-      toast.error("Select payment method");
-      return;
-    }
     if (!amt || amt <= 0) {
       toast.error("Enter a valid amount");
       return;
@@ -304,7 +408,7 @@ export function EditPaymentModal() {
     try {
       const body = {
         amount: amt,
-        method: paymentMethod,
+        method: normalizeBookingPaymentMethod(paymentMethod),
         date: paymentDate,
         transactionId: transactionId,
         notes,
@@ -408,22 +512,62 @@ export function EditPaymentModal() {
 
           <div className="space-y-4">
             <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment ID</Label>
+              <Select
+                value={resolvedPaymentId || getPaymentRecordId(effectivePaymentData) || paymentId || ""}
+                onValueChange={(value) => {
+                  setResolvedPaymentId(value);
+                  setFetchedPaymentData(null);
+                }}
+                disabled={isFetchingPayment || isFetchingAppointmentPayments || appointmentPayments.length <= 1}
+              >
+                <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                  <SelectValue placeholder={isFetchingAppointmentPayments ? "Loading payment ids..." : "Select payment id"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {appointmentPayments.length > 0 ? (
+                    appointmentPayments.map((payment) => {
+                      const optionId = getPaymentRecordId(payment);
+                      if (!optionId) return null;
+
+                      return (
+                        <SelectItem key={optionId} value={optionId}>
+                          {getPaymentOptionLabel(payment)}
+                        </SelectItem>
+                      );
+                    })
+                  ) : (
+                    <SelectItem value={getPaymentRecordId(effectivePaymentData) || paymentId || "payment"} disabled>
+                      {getPaymentRecordId(effectivePaymentData) || paymentId || "No payment id"}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Appointment ID</Label>
+              <Input
+                value={currentAppointmentId || "N/A"}
+                readOnly
+                className="h-12 rounded-xl border-slate-200 bg-slate-100 font-mono text-xs font-semibold text-slate-600 shadow-sm"
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment Method</Label>
               <Select
-                value={paymentMethod || ""}
-                onValueChange={(v) => setPaymentMethod(v || null)}
+                value={paymentMethod || NO_PAYMENT_METHOD_LABEL}
+                onValueChange={(v) => setPaymentMethod(normalizeBookingPaymentMethod(v))}
                 disabled={isFetchingPaymentMethods}
               >
                 <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                   <SelectValue placeholder={isFetchingPaymentMethods ? "Loading payment methods..." : "Select payment method"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Credit Card">Credit Card</SelectItem>
-                  <SelectItem value="Cash">Cash</SelectItem>
-                  <SelectItem value="Debit Card">Debit Card</SelectItem>
-                  <SelectItem value="Insurance">Insurance</SelectItem>
-                  <SelectItem value="Check">Check</SelectItem>
-                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  {paymentMethodOptions.map((method) => (
+                    <SelectItem key={method} value={method}>{method}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

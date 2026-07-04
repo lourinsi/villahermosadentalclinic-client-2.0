@@ -23,6 +23,11 @@ import {
   Phone,
   Mail,
   Calendar,
+  CheckCircle2,
+  AlertTriangle,
+  Clock3,
+  ClipboardCheck,
+  ClipboardX,
   Eye,
   MoreVertical,
   Bell,
@@ -56,6 +61,15 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
     default:
       return null;
   }
+};
+
+const formatMissingProfileSections = (missing?: string[] | null) => {
+  const sections = Array.isArray(missing) ? missing.filter(Boolean) : [];
+  if (sections.some((section) => section.toLowerCase() === "consent form")) {
+    return "Incomplete: consent form is not finished.";
+  }
+  if (sections.length === 0) return "Some required profile details are missing.";
+  return `Missing ${sections.join(", ")}.`;
 };
 
 const isTourDemoPatient = (patient: Patient) =>
@@ -139,6 +153,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             lastVisit: patient.lastVisit || "",
             nextAppointment: patient.nextAppointment ?? null,
             status: patient.status || "active",
+            profileCompletion: patient.profileCompletion || "incomplete",
+            profileCompletionMissing: patient.profileCompletionMissing || ["consent form"],
             balance: patient.balance ?? 0,
             overdueAppointmentCount: patient.overdueAppointmentCount ?? 0,
           };
@@ -185,38 +201,74 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     fetchPatients(currentPage);
   }, [currentPage, fetchPatients, refreshTrigger]);
 
+  const renderIconBadge = (badge: React.ReactNode, tooltip: string) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-help" title={tooltip} aria-label={tooltip} tabIndex={0}>
+          {badge}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6} className="max-w-[260px] text-center">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+
   const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
     let badge: React.ReactNode;
+    let tooltip = getPatientStatusTooltip(s, overdueAppointmentCount);
 
     switch (s) {
       case "active":
-        badge = <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">Active</Badge>;
+        badge = (
+          <Badge className="h-6 w-6 justify-center rounded-full border-emerald-200 bg-emerald-50 p-0 text-emerald-600 hover:bg-emerald-50">
+            <CheckCircle2 className="h-4 w-4" />
+          </Badge>
+        );
+        tooltip = "Active patient";
         break;
       case "overdue":
-        badge = <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50">Overdue</Badge>;
+        badge = (
+          <Badge className="h-6 w-6 justify-center rounded-full border-amber-200 bg-amber-50 p-0 text-amber-700 hover:bg-amber-50">
+            <AlertTriangle className="h-3.5 w-3.5" />
+          </Badge>
+        );
         break;
       case "inactive":
-        badge = <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50">Inactive</Badge>;
+        badge = (
+          <Badge className="h-6 w-6 justify-center rounded-full border-slate-200 bg-slate-50 p-0 text-slate-500 hover:bg-slate-50">
+            <Clock3 className="h-3.5 w-3.5" />
+          </Badge>
+        );
+        tooltip = "Inactive because there has been no appointment for over a year.";
         break;
       default:
-        badge = <Badge variant="outline" className="capitalize">{s}</Badge>;
+        badge = <Badge variant="outline" className="h-6 rounded-full px-2 text-[10px] capitalize">{s}</Badge>;
+        tooltip = s;
     }
 
-    const tooltip = getPatientStatusTooltip(s, overdueAppointmentCount);
-    if (!tooltip) return badge;
+    return renderIconBadge(badge, tooltip || s);
+  };
 
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex cursor-help" title={tooltip} aria-label={tooltip} tabIndex={0}>
-            {badge}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={6} className="max-w-[260px] text-center">
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
+  const getProfileCompletionBadge = (profileCompletion?: string, missing?: string[] | null) => {
+    const completion = profileCompletion?.toLowerCase() === "incomplete" ? "incomplete" : "complete";
+    const isComplete = completion === "complete";
+    const badge = (
+      <Badge
+        className={
+          isComplete
+            ? "h-6 w-6 justify-center rounded-full border-sky-200 bg-sky-50 p-0 text-sky-600 hover:bg-sky-50"
+            : "h-6 w-6 justify-center rounded-full border-orange-200 bg-orange-50 p-0 text-orange-700 hover:bg-orange-50"
+        }
+      >
+        {isComplete ? <ClipboardCheck className="h-3.5 w-3.5" /> : <ClipboardX className="h-3.5 w-3.5" />}
+      </Badge>
+    );
+
+    return renderIconBadge(
+      badge,
+      isComplete ? "Complete: consent form is finished." : formatMissingProfileSections(missing)
     );
   };
 
@@ -524,13 +576,19 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                             sizeClass="h-10 w-10"
                           />
                           <div className="min-w-0">
-                            <button
-                              type="button"
-                              className="block max-w-full truncate text-left text-sm font-semibold text-slate-900"
-                              onClick={() => openPatientProfile(patient)}
-                            >
-                              {patient.name}
-                            </button>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <button
+                                type="button"
+                                className="block min-w-0 flex-1 truncate text-left text-sm font-semibold text-slate-900"
+                                onClick={() => openPatientProfile(patient)}
+                              >
+                                {patient.name}
+                              </button>
+                              <span className="flex shrink-0 items-center gap-1">
+                                {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
+                                {getProfileCompletionBadge(patient.profileCompletion, patient.profileCompletionMissing)}
+                              </span>
+                            </div>
                             {effectiveRole !== "receptionist" && (
                               <p className="mt-1 truncate text-xs text-slate-500">ID: {patient.id?.slice(-8).toUpperCase()}</p>
                             )}
@@ -540,7 +598,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
                         <Badge variant="outline" className={(patient.balance ?? 0) > 0 ? "border-red-100 bg-red-50 text-red-600" : "border-emerald-100 bg-emerald-50 text-emerald-700"}>
                           ₱{(patient.balance ?? 0).toLocaleString()}
                         </Badge>
@@ -568,7 +625,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                     <TableHead className="w-[300px] text-slate-500 font-medium py-4">Patient Information</TableHead>
                     <TableHead className="text-slate-500 font-medium">Contact Details</TableHead>
                     <TableHead className="text-slate-500 font-medium">Next Visit</TableHead>
-                    <TableHead className="text-slate-500 font-medium text-center">Status</TableHead>
                     <TableHead className="text-slate-500 font-medium text-right">Balance</TableHead>
                     <TableHead className="w-[100px] text-slate-500 font-medium text-right pr-6">Actions</TableHead>
                   </TableRow>
@@ -590,13 +646,19 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                             sizeClass="h-10 w-10"
                           />
                           <div className="min-w-0">
-                            <span className="block font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer text-sm truncate"
-                              onClick={() => {
-                                openPatientProfile(patient);
-                              }}
-                            >
-                              {patient.name}
-                            </span>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="block min-w-0 flex-1 truncate font-semibold text-slate-900 transition-colors group-hover:text-violet-600 cursor-pointer text-sm"
+                                onClick={() => {
+                                  openPatientProfile(patient);
+                                }}
+                              >
+                                {patient.name}
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1">
+                                {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
+                                {getProfileCompletionBadge(patient.profileCompletion, patient.profileCompletionMissing)}
+                              </span>
+                            </div>
                             <div className="mt-1 flex flex-col gap-1 text-xs text-slate-500">
                               {effectiveRole !== "receptionist" && (
                                 <span className="truncate min-w-0">ID: {patient.id?.slice(-8).toUpperCase()}</span>
@@ -639,9 +701,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                             <span>No appointments</span>
                           </div>
                         )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-1">

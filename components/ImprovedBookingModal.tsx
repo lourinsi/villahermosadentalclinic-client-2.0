@@ -64,7 +64,6 @@ import useSharedBookingLogic, {
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
   isPastAppointmentSchedule,
-  isUnassignedBookingDoctor,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizeBookingToothNumbers,
@@ -1769,9 +1768,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
       setSelectedDate(toDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate })));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
-      // Set doctor from the appointment
-      if (appointmentToEdit.doctor) {
-        setSelectedDoctor(appointmentToEdit.doctor);
+      // Set doctor from the appointment, including older snapshots that used doctorName.
+      const appointmentDoctor = appointmentToEdit.doctor || appointmentToEdit.doctorName;
+      if (appointmentDoctor) {
+        setSelectedDoctor(appointmentDoctor);
       }
       // For editing, initialize payment amount to empty so user enters NEW payment amount
       setAmountToPay('0');
@@ -1975,12 +1975,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     });
 
   // Derived display values for schedule block
-  const scheduleDoctorName = selectedDoctor || appointmentToEdit?.doctor || doctorName;
+  const scheduleDoctorName = selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName;
   const displayDoctor = formatDoctorName(scheduleDoctorName);
   const selectedDoctorForSchedule = getBookingDoctorValue(selectedDoctor);
-  const selectedDoctorForBooking = isUnassignedBookingDoctor(selectedDoctor)
-    ? ""
-    : getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || doctorName);
+  const selectedDoctorForBooking = getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorSelectValue = selectedDoctor ? getBookingDoctorSelectValue(selectedDoctor) : undefined;
   const showDoctorStep = !isDoctorSelectionLocked;
   const visibleBookingSteps: Array<{ id: ImprovedBookingStep; label: string; icon: string }> = [
@@ -3771,58 +3769,73 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
-                <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-6 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="flex items-center gap-6 rounded-[1.25rem] border border-gray-100 bg-white p-6 shadow-sm">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.25rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100">
+                <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-5 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.35rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100 sm:h-16 sm:w-16 sm:rounded-[1.25rem]">
                       <CreditCard className="h-8 w-8" />
                     </div>
-                    <div>
-                      <h3 className="text-3xl font-black tracking-tight text-gray-900">Payment & Status</h3>
-                      <p className="text-base font-medium text-slate-500">Review the balance and record the payment.</p>
+                    <div className="min-w-0">
+                      <h3 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">Payment & Status</h3>
+                      <p className="mt-1 text-base font-medium leading-snug text-slate-500">Review the balance and record the payment.</p>
                     </div>
                   </div>
 
-                  <div className="rounded-[1.25rem] border border-gray-100 bg-white p-6 shadow-sm">
-                    <h4 className="mb-4 text-lg font-black text-gray-900">Bill Summary</h4>
-                    <div className="grid gap-4 md:grid-cols-3 md:divide-x md:divide-gray-100">
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-slate-500">Total Billed:</p>
-                      <div className="flex flex-col items-center justify-center">
-                        {Number(discount) > 0 && (
-                          <span className="text-xs font-bold text-gray-400 line-through decoration-gray-400/50">&#8369;{(customPrice === "0" ? finalPrice : Number(customPrice)).toLocaleString()}</span>
-                        )}
-                        <p className="mt-2 text-3xl font-black tracking-tight text-gray-900">&#8369;{discountedPrice.toLocaleString()}</p>
+                  <div className="rounded-[1.5rem] border border-gray-100 bg-white p-5 shadow-md shadow-gray-200/50 sm:rounded-[1.25rem] sm:p-6 sm:shadow-sm">
+                    <h4 className="mb-4 text-xl font-black text-gray-900 sm:text-lg">Bill Summary</h4>
+                    <div className="divide-y divide-gray-100">
+                      <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
+                        <div className="flex min-w-0 items-center gap-4">
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                            <ClipboardList className="h-6 w-6" />
+                          </span>
+                          <p className="text-base font-bold text-slate-500">Total Billed</p>
+                        </div>
+                        <div className="text-right">
+                          {Number(discount) > 0 && (
+                            <p className="text-xs font-bold text-gray-400 line-through decoration-gray-400/50">&#8369;{(customPrice === "0" ? finalPrice : Number(customPrice)).toLocaleString()}</p>
+                          )}
+                          <p className="text-xl font-black tracking-tight text-gray-900">&#8369;{discountedPrice.toLocaleString()}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 py-3">
+                        <div className="flex min-w-0 items-center gap-4">
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                            <CreditCard className="h-6 w-6" />
+                          </span>
+                          <p className="text-base font-bold text-slate-500">Total Paid</p>
+                        </div>
+                        <p className="text-xl font-black tracking-tight text-gray-900">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
+                        <div className="flex min-w-0 items-center gap-4">
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                            <Banknote className="h-6 w-6" />
+                          </span>
+                          <p className="text-base font-bold text-slate-500">Current Balance Due</p>
+                        </div>
+                        <p className="text-2xl font-black tracking-tight text-emerald-600">&#8369;{remainingBalance.toLocaleString()}</p>
                       </div>
                     </div>
-                    <div className="text-center md:pl-4">
-                      <p className="text-sm font-medium text-slate-500">Total Paid:</p>
-                      <p className="mt-2 text-3xl font-black tracking-tight text-gray-900">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
-                    </div>
-                    <div className="text-center md:pl-4">
-                      <p className="text-sm font-medium text-slate-500">Current Balance Due:</p>
-                      <p className="mt-2 text-3xl font-black tracking-tight text-emerald-600">&#8369;{remainingBalance.toLocaleString()}</p>
-                    </div>
-                    </div>
                   </div>
 
-                  <div className="rounded-[1.25rem] border border-gray-100 bg-white p-7 shadow-sm">
+                  <div className="rounded-[1.5rem] border border-gray-100 bg-white p-5 shadow-md shadow-gray-200/50 sm:rounded-[1.25rem] sm:p-7 sm:shadow-sm">
                     <div className="space-y-6">
                       <div>
-                        <h4 className="text-2xl font-black text-gray-900">Payment Details</h4>
-                        <p className="mt-2 text-base font-medium text-slate-500">
+                        <h4 className="text-xl font-black text-gray-900 sm:text-2xl">Payment Details</h4>
+                        <p className="mt-3 text-base font-medium text-slate-500">
                           Payment for: <span className="font-black text-emerald-600">{selectedTreatmentName || "Selected Treatment"}</span>
                         </p>
                       </div>
-                      <div className="grid gap-7 lg:grid-cols-2 lg:items-start">
+                      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
                         <div className="space-y-3">
-                          <div className="flex h-7 items-center">
+                          <div className="flex items-center">
                             <Label htmlFor="improvedBookingAmount" className="text-base font-semibold text-slate-900">
                               Amount to Pay
                             </Label>
                           </div>
                           <div className="group relative">
                             <div className="pointer-events-none absolute inset-y-0 left-5 flex items-center">
-                              <span className="text-2xl font-black text-slate-400 opacity-60 transition-colors group-focus-within:text-emerald-600">&#8369;</span>
+                              <span className="text-2xl font-black text-slate-300 transition-colors group-focus-within:text-emerald-600">&#8369;</span>
                             </div>
                             <Input
                               id="improvedBookingAmount"
@@ -3831,7 +3844,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               placeholder="0"
                               value={amountToPay}
                               onChange={(e: any) => setAmountToPay(e.target.value)}
-                              className="h-[4.5rem] rounded-2xl border-2 border-emerald-200/70 bg-emerald-50/35 pl-14 pr-32 text-3xl font-black tracking-tight text-slate-950 shadow-none transition-all appearance-none focus:border-emerald-500 focus:bg-white focus:ring-0"
+                              className="h-20 rounded-2xl border-2 border-emerald-200/80 bg-white pl-14 pr-32 text-3xl font-black tracking-tight text-slate-950 shadow-none transition-all appearance-none focus:border-emerald-500 focus:bg-white focus:ring-0"
                             />
                             <Button
                               type="button"
@@ -3840,17 +3853,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               disabled={remainingBalance <= 0}
                               className="absolute right-4 top-1/2 h-10 -translate-y-1/2 rounded-xl px-3 text-sm font-black uppercase tracking-wide text-blue-700 hover:bg-blue-50 disabled:opacity-40"
                             >
-                              Pay Full
+                              PAY FULL
                             </Button>
                           </div>
-                          <p className="text-sm font-medium text-slate-500">
+                          <p className="hidden text-sm font-medium text-slate-500 sm:block">
                             Remaining balance after payment: <span className="font-black text-emerald-600">&#8369;{projectedRemainingBalance.toLocaleString()}</span>
                           </p>
                         </div>
 
                         <div className="space-y-3">
-                          <div className="flex h-7 items-center gap-3">
-                            <CalendarIcon className="h-4 w-4 text-blue-600" />
+                          <div className="flex items-center gap-3">
                             <Label htmlFor="improvedBookingPaymentDate" className="text-base font-semibold text-slate-700">
                               Payment Date
                             </Label>
@@ -3864,7 +3876,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               max={getDefaultBookingPaymentDate()}
                               onChange={(e: any) => setPaymentDate(e.target.value)}
                               onClick={openPaymentDatePicker}
-                              className="h-[4.5rem] rounded-2xl border-2 border-slate-200 bg-white px-7 pr-20 text-3xl font-black tracking-tight text-slate-950 shadow-none focus:border-blue-500 focus:bg-white focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0"
+                              className="h-20 rounded-2xl border-2 border-slate-200 bg-white px-6 pr-20 text-3xl font-black tracking-tight text-slate-950 shadow-none focus:border-blue-500 focus:bg-white focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0"
                             />
                             <button
                               type="button"
@@ -3875,7 +3887,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <CalendarIcon className="h-6 w-6" />
                             </button>
                           </div>
-                          <p className="text-sm font-medium text-slate-500">
+                          <p className="hidden text-sm font-medium text-slate-500 sm:block">
                             {formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
                           </p>
                         </div>
@@ -3883,7 +3895,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
 
                     <div className="space-y-4 pt-6">
-                      <p className="text-base font-semibold text-gray-900">Choose Payment Method</p>
+                      <p className="text-base font-semibold text-gray-900">Payment Method</p>
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         {[
                           { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
@@ -3895,21 +3907,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             type="button"
                             aria-pressed={paymentMethod === pm.id}
                             onClick={() => setPaymentMethod(pm.id)}
-                            className={`relative flex h-24 items-center gap-5 rounded-2xl border-2 px-6 text-left transition-all group ${
+                            className={`relative flex h-[5.75rem] items-center gap-5 rounded-2xl border-2 px-6 text-left transition-all group ${
                               paymentMethod === pm.id
-                                ? `border-blue-600 bg-blue-50 text-blue-700 shadow-lg ${pm.shadow}`
+                                ? `border-blue-600 bg-white text-blue-700 shadow-lg ${pm.shadow}`
                                 : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
                             }`}
                           >
-                            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full ${pm.color} text-sm font-black text-white shadow-lg transition-transform group-hover:scale-105`}>
+                            <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full ${pm.color} text-sm font-black text-white shadow-lg transition-transform group-hover:scale-105`}>
                               {pm.icon}
                             </div>
-                            <span className="text-sm font-black uppercase tracking-wide">{pm.label}</span>
-                            {paymentMethod === pm.id && (
-                              <div className="absolute right-5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-blue-600 text-white shadow-md">
-                                <Check className="h-4 w-4" />
-                              </div>
-                            )}
+                            <span className="text-base font-black text-gray-900">{pm.label}</span>
+                            <div className={`absolute right-5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-2 ${
+                              paymentMethod === pm.id ? 'border-blue-600 text-blue-600' : 'border-gray-200 text-transparent'
+                            }`}>
+                              <Check className="h-5 w-5" />
+                            </div>
                           </button>
                         ))}
                       </div>
@@ -3957,7 +3969,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   data-tour-id="booking-next-button"
                   className={`w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
                     modalStep === 'payment'
-                      ? 'h-12 bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:min-w-[260px]'
+                      ? 'h-16 rounded-full bg-emerald-600 uppercase tracking-widest shadow-xl shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:h-12 sm:min-w-[260px] sm:rounded-2xl'
                     : modalStep === 'treatment'
                       ? 'h-12 bg-blue-600 text-sm normal-case tracking-normal shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[16rem] sm:text-base'
                       : 'h-12 bg-blue-600 uppercase tracking-widest shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'

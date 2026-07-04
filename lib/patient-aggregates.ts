@@ -85,10 +85,21 @@ export const getAppointmentOutstandingBalance = (appointment: PatientAggregateAp
   return Math.max(0, price - discount - totalPaid);
 };
 
-export const getOverdueAppointmentCount = (appointments: PatientAggregateAppointment[]) =>
+const isPastAppointment = (appointment: PatientAggregateAppointment, today = new Date()) => {
+  const appointmentDate = dateOnly(appointment.date);
+  return Boolean(appointmentDate && appointmentDate < formatDateToYYYYMMDD(today));
+};
+
+export const isOverdueAppointment = (appointment: PatientAggregateAppointment, today = new Date()) => {
+  if (!isBillableAppointment(appointment)) return false;
+  if (String(appointment.paymentStatus || "").toLowerCase() === "overdue") return true;
+
+  return isPastAppointment(appointment, today) && getAppointmentOutstandingBalance(appointment) > 0;
+};
+
+export const getOverdueAppointmentCount = (appointments: PatientAggregateAppointment[], today = new Date()) =>
   appointments.filter((appointment) => {
-    if (!isBillableAppointment(appointment)) return false;
-    return String(appointment.paymentStatus || "").toLowerCase() === "overdue";
+    return isOverdueAppointment(appointment, today);
   }).length;
 
 const getLatestCompletedVisit = (appointments: PatientAggregateAppointment[]) => {
@@ -140,7 +151,7 @@ export const buildPatientAppointmentSummary = (
   );
   const storedBalance = Math.max(0, toFiniteNumber(patient.balance));
   const balance = appointmentBalance > 0 ? appointmentBalance : storedBalance;
-  const overdueAppointmentCount = getOverdueAppointmentCount(patientAppointments);
+  const overdueAppointmentCount = getOverdueAppointmentCount(patientAppointments, now);
   const lastVisitFromAppointments = getLatestCompletedVisit(patientAppointments);
   const storedLastVisit = dateOnly(patient.lastVisit);
   const lastVisit =

@@ -199,6 +199,8 @@ export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
 export const UNASSIGNED_DOCTOR_VALUE = "__assign_later__";
 export const UNASSIGNED_DOCTOR_LABEL = "To assign later";
+export const UNASSIGNED_DOCTOR_NAME = "N/A";
+export const NO_PAYMENT_METHOD_LABEL = "N/A";
 
 const ALLOWED_BOOKING_DURATION_SET = new Set<number>(ALLOWED_BOOKING_DURATIONS);
 
@@ -288,11 +290,12 @@ export function isUnassignedBookingDoctor(value?: unknown) {
 }
 
 export function getBookingDoctorValue(value?: unknown) {
-  if (isUnassignedBookingDoctor(value)) return "";
+  if (isUnassignedBookingDoctor(value)) return UNASSIGNED_DOCTOR_NAME;
   return String(value || "").trim();
 }
 
 export function getBookingDoctorSelectValue(value?: unknown) {
+  if (isUnassignedBookingDoctor(value)) return UNASSIGNED_DOCTOR_VALUE;
   return getBookingDoctorValue(value) || UNASSIGNED_DOCTOR_VALUE;
 }
 
@@ -305,9 +308,18 @@ export function formatBookingDoctorName(name?: string): string {
 }
 
 export function normalizeBookingDoctorName(name?: string) {
-  if (isUnassignedBookingDoctor(name)) return "";
+  if (isUnassignedBookingDoctor(name)) return UNASSIGNED_DOCTOR_NAME.toLowerCase();
   const cleanName = (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(cleanName) ? "" : cleanName;
+  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(cleanName) ? UNASSIGNED_DOCTOR_NAME.toLowerCase() : cleanName;
+}
+
+export function normalizeBookingPaymentMethod(value?: unknown) {
+  const method = String(value ?? "").trim();
+  if (!method || /^(?:n\/?a|none|null|undefined|unknown|payment|payment log)$/i.test(method)) {
+    return NO_PAYMENT_METHOD_LABEL;
+  }
+
+  return method;
 }
 
 export function normalizeBookingHistoryStatus(value?: unknown) {
@@ -808,7 +820,7 @@ export function getBookingAutoPreselectConfig({
   return {
     type: "search",
     defaultAppointmentType,
-    doctorToSearch: selectedDoctor,
+    doctorToSearch: getBookingDoctorValue(selectedDoctor),
     durationToSearch,
     patientToSearch: patientId || selectedPatient || defaultPatientId || undefined,
   };
@@ -835,13 +847,13 @@ export async function findNextAvailableBookingSlot({
   availabilityMode?: "authenticated" | "public";
   localBlockingAppointments?: any[];
 }): Promise<BookingSlot | null> {
-  if (!doctorToCheck) return null;
+  const doctorQuery = getBookingDoctorValue(doctorToCheck);
+  if (!doctorQuery) return null;
 
   const durationMins = normalizeBookingDuration(durationToCheck);
   const start = parseLocalDateOnly(startDate) ?? new Date();
-  const normalizeDoctor = (doctor?: string) =>
-    String(doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-  const targetDoctor = normalizeDoctor(doctorToCheck);
+  const normalizeDoctor = (doctor?: string) => normalizeBookingDoctorName(doctor);
+  const targetDoctor = normalizeDoctor(doctorQuery);
 
   const getSlotsForDate = async (date: Date) => {
     try {
@@ -850,8 +862,8 @@ export async function findNextAvailableBookingSlot({
 
       const endpoint =
         availabilityMode === "public"
-          ? `/api/appointments/public-availability?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}`
-          : `/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
+          ? `/api/appointments/public-availability?doctor=${encodeURIComponent(doctorQuery)}&startDate=${dateStr}&endDate=${dateStr}`
+          : `/api/appointments?doctor=${encodeURIComponent(doctorQuery)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
       const response = await fetch(
         apiUrl(endpoint),
         { credentials: "include" }
@@ -868,7 +880,7 @@ export async function findNextAvailableBookingSlot({
       });
       const appointments = [...remoteAppointments, ...localAppointmentsForDate];
       console.log(`[${logPrefix}] findNextAvailableSlot fetched appointments for`, dateStr, {
-        doctorToCheck,
+        doctorToCheck: doctorQuery,
         appointmentsCount: appointments.length,
       });
 

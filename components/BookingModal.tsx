@@ -60,8 +60,8 @@ import useSharedBookingLogic, {
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
-  isUnassignedBookingDoctor,
   isPastAppointmentSchedule,
+  normalizeBookingPaymentMethod,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizeBookingDuration,
   normalizeBookingToothNumbers,
@@ -1241,9 +1241,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
       setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
-      // Set doctor from the appointment
-      if (appointmentToEdit.doctor) {
-        setSelectedDoctor(appointmentToEdit.doctor);
+      // Set doctor from the appointment, including older snapshots that used doctorName.
+      const appointmentDoctor = appointmentToEdit.doctor || appointmentToEdit.doctorName;
+      if (appointmentDoctor) {
+        setSelectedDoctor(appointmentDoctor);
       }
       // For editing, initialize payment amount to empty so user enters NEW payment amount
       setAmountToPay('0');
@@ -1409,11 +1410,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [clearBookingMemory, onOpenChange]);
 
   // Derived display values for schedule block
-  const displayDoctor = formatDoctorName(selectedDoctor || appointmentToEdit?.doctor || doctorName);
+  const displayDoctor = formatDoctorName(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorForSchedule = getBookingDoctorValue(selectedDoctor);
-  const selectedDoctorForBooking = isUnassignedBookingDoctor(selectedDoctor)
-    ? ""
-    : getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || doctorName);
+  const selectedDoctorForBooking = getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorSelectValue = selectedDoctor ? getBookingDoctorSelectValue(selectedDoctor) : undefined;
   
   // Calculate remaining balance for display in payment step
@@ -1755,11 +1754,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         return;
       }
 
+      const paymentMethodPayload = normalizeBookingPaymentMethod(paymentMethod);
+
       console.log('[BookingModal Payment] Payment confirmation:', {
         amountToPay,
         amountPaidRaw,
         amountPaid,
-        paymentMethod,
+        paymentMethod: paymentMethodPayload,
         paymentDate: paymentDatePayload || undefined,
         finalPrice,
         parsing: {
@@ -1808,7 +1809,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
-              paymentMethod,
+              paymentMethod: paymentMethodPayload,
               totalPaid: newTotalPaid,
               paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
@@ -1830,7 +1831,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               ...treatmentNotesUpdate,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
-              paymentMethod,
+              paymentMethod: paymentMethodPayload,
               totalPaid: newTotalPaid,
               paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
@@ -1916,7 +1917,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newBalance,
           autoStatus,
           paymentStatus,
-          paymentMethod,
+          paymentMethod: paymentMethodPayload,
         });
 
         const selectedPatientRecord = patients.find(p => String(p.id) === String(selectedPatient));
@@ -1939,7 +1940,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               discount: Number(discount) || 0,
               status: autoStatus as any,
               paymentStatus: paymentStatus as any,
-              paymentMethod,
+              paymentMethod: paymentMethodPayload,
               totalPaid: amountPaid,
               paymentDate: paymentDatePayload || undefined,
               balance: newBalance,
@@ -1969,7 +1970,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 status: autoStatus,
                 paymentStatus: paymentStatus,
                 totalPaid: amountPaid,
-                paymentMethod,
+                paymentMethod: paymentMethodPayload,
                 paymentDate: paymentDatePayload || undefined,
                 price: finalPrice,
                 discount: Number(discount) || 0,
@@ -2012,7 +2013,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   discount: Number(discount) || 0,
                   status: autoStatus as any,
                   paymentStatus: paymentStatus as any,
-                  paymentMethod,
+                  paymentMethod: paymentMethodPayload,
                   totalPaid: amountPaid,
                   paymentDate: paymentDatePayload || undefined,
                   balance: newBalance,
@@ -2035,7 +2036,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 discount: Number(discount) || 0,
                 status: autoStatus as any,
                 paymentStatus: paymentStatus as any,
-                paymentMethod,
+                paymentMethod: paymentMethodPayload,
                 totalPaid: amountPaid,
                 paymentDate: paymentDatePayload || undefined,
                 balance: newBalance,
@@ -2058,7 +2059,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             ...treatmentNotesUpdate,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
-            paymentMethod,
+            paymentMethod: paymentMethodPayload,
             totalPaid: amountPaid,
             paymentDate: paymentDatePayload || undefined,
             balance: newBalance,

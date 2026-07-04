@@ -1,6 +1,9 @@
 "use client";
+import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { apiUrl } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
@@ -105,6 +108,45 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
       toast.error("Failed to logout");
     }
   };
+
+  React.useEffect(() => {
+    if (!user?.username || !user?.role || user.role === "patient") return;
+
+    let cancelled = false;
+
+    const showIncompletePatientToast = async () => {
+      try {
+        const doctorParam = encodeURIComponent(user.username);
+        const response = await fetch(apiUrl(`/api/patients?page=1&limit=1&status=all&doctor=${doctorParam}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success || cancelled) return;
+
+        const count = Number(payload?.meta?.incompletePatientCount || 0);
+        const patientLabel = count === 1 ? "patient" : "patients";
+        const message =
+          count > 0
+            ? `You have ${count} incomplete ${patientLabel}. Please tend to ${count === 1 ? "this patient" : "them"}.`
+            : "You have 0 incomplete patients to tend to.";
+
+        if (count > 0) {
+          toast.warning(message, { duration: 8000 });
+        } else {
+          toast.success(message, { duration: 5000 });
+        }
+      } catch (error) {
+        console.warn("[DoctorLayout] Failed to fetch incomplete patient count:", error);
+      }
+    };
+
+    showIncompletePatientToast();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role, user?.username]);
 
   const navItems = [
     { href: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },

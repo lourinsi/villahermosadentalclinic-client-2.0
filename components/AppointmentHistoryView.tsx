@@ -21,6 +21,8 @@ import {
   formatBookingPaymentAdjustmentAmountLabel,
   getBookingPaymentAdjustment,
   getBookingTreatmentNotesValue,
+  getBookingToothNumbersValue,
+  normalizeBookingPaymentMethod,
   normalizeBookingHistoryStatus,
 } from "./sharedBookingLogic";
 
@@ -716,6 +718,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? latestPaymentDateRaw
       : "";
   const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
+  const snapshotPaymentMethodLabel = normalizeBookingPaymentMethod(
+    displayedSnapshot?.paymentMethod ||
+    displayedSnapshot?.newState?.paymentMethod ||
+    displayedSnapshot?.paymentDetails?.method ||
+    displayedSnapshot?.transaction?.method ||
+    appointmentSnapshot?.paymentMethod ||
+    appointmentSnapshot?.newState?.paymentMethod
+  );
   const getPatientIdentity = (snapshot: any) => {
     const patient = snapshot?.patient;
     if (patient && typeof patient !== "string" && patient.id) return String(patient.id);
@@ -762,6 +772,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? getBookingTreatmentNotesValue(latestStateForComparison)
     : undefined;
   const displayedTreatmentNotesText = displayedTreatmentNotesComparisonText || "No treatment notes provided for this snapshot.";
+  const displayedToothNumbersText = getBookingToothNumbersValue(displayedSnapshot);
+  const latestToothNumbersText = latestStateForComparison
+    ? getBookingToothNumbersValue(latestStateForComparison)
+    : undefined;
 
   const statusCurrentChange = createCurrentFieldChange(
     "status",
@@ -819,10 +833,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   );
   const serviceCurrentChange = createCurrentFieldChange(
     "service",
-    typeName,
-    latestHasTreatment ? latestTreatmentName : undefined,
-    typeName,
-    latestTreatmentName
+    `${typeName}|${displayedToothNumbersText}`,
+    latestHasTreatment ? `${latestTreatmentName}|${latestToothNumbersText || ""}` : undefined,
+    displayedToothNumbersText ? `${typeName} - Tooth # ${displayedToothNumbersText}` : typeName,
+    latestToothNumbersText ? `${latestTreatmentName} - Tooth # ${latestToothNumbersText}` : latestTreatmentName
   );
   const priceCurrentChange = createCurrentFieldChange(
     "service price",
@@ -1223,12 +1237,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-                <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><Stethoscope className="h-5 w-5" /></div>
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <p className="truncate text-lg font-black leading-tight text-slate-900">{typeName}</p>
-                    <CurrentChangeIndicator change={serviceCurrentChange} />
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><Stethoscope className="h-5 w-5" /></div>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p className="truncate text-lg font-black leading-tight text-slate-900">{typeName}</p>
+                      <CurrentChangeIndicator change={serviceCurrentChange} />
+                    </div>
                   </div>
+                  {displayedToothNumbersText ? (
+                    <span className="inline-flex max-w-full shrink-0 items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                      Tooth # {displayedToothNumbersText}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="space-y-4 p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -1247,7 +1268,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   {shouldShowPaymentLine ? (
                     <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
                       <span className="text-[11px] font-black uppercase tracking-widest text-emerald-600/80">{snapshotPaymentLabel}</span>
-                      <span className="text-base font-black text-emerald-600">{snapshotPaymentAmountLabel}</span>
+                      <div className="text-right">
+                        <div className="text-base font-black text-emerald-600">{snapshotPaymentAmountLabel}</div>
+                        <div className="text-[11px] font-bold text-slate-400">
+                          {snapshotPaymentMethodLabel}{snapshotPaymentDateLabel ? ` - ${snapshotPaymentDateLabel}` : ""}
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                   <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
