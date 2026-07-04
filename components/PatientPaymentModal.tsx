@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,7 @@ import {
 import { Button } from "./ui/button";
 import { Banknote, CreditCard, X } from "lucide-react";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatWordyDate } from "@/lib/utils";
@@ -28,6 +29,11 @@ import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 const getNonClinicPaymentStatus = (status?: string | null) =>
   String(status || "").trim().toLowerCase() === "pay-at-clinic" ? "unpaid" : status || "unpaid";
+
+type PatientPaymentModalMemory = {
+  paymentMethod: string;
+  paymentAmount: string;
+};
 
 export function PatientPaymentModal() {
   const {
@@ -46,6 +52,38 @@ export function PatientPaymentModal() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
+  const modalMemoryPausedRef = useRef(false);
+  const patientPaymentMemoryKey = useMemo(
+    () => buildModalMemoryKey("patient-payment-modal", appointmentId || ""),
+    [appointmentId]
+  );
+
+  useEffect(() => {
+    if (isPatientPaymentModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isPatientPaymentModalOpen]);
+
+  const restorePatientPaymentMemory = useCallback((memory: PatientPaymentModalMemory) => {
+    setPaymentMethod(memory.paymentMethod || "GCash");
+    setPaymentAmount(memory.paymentAmount || "");
+  }, []);
+
+  const isPatientPaymentMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearPatientPaymentMemory = usePersistentModalMemory({
+    key: patientPaymentMemoryKey,
+    open: isPatientPaymentModalOpen,
+    value: { paymentMethod, paymentAmount },
+    restore: restorePatientPaymentMemory,
+    enabled: false,
+    isPaused: isPatientPaymentMemoryPaused,
+  });
+
+  const clearCompletedPatientPaymentDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearPatientPaymentMemory();
+  }, [clearPatientPaymentMemory]);
 
   const selectedAppointment = appointments.find(
     (a: Appointment) => a.id === appointmentId
@@ -120,6 +158,7 @@ export function PatientPaymentModal() {
           (window as any).dispatchEvent(new Event('appointments:updated'));
         }
       }
+      clearCompletedPatientPaymentDraft();
       closePaymentModal();
     } catch (err) {
       console.error("Error completing payment", err);
@@ -185,6 +224,7 @@ export function PatientPaymentModal() {
           (window as any).dispatchEvent(new Event('appointments:updated'));
         }
       }
+      clearCompletedPatientPaymentDraft();
       closePaymentModal();
     } catch (err) {
       console.error("Error completing payment", err);

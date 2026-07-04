@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 
 type Toast = { error?: (msg: string) => void; success?: (msg: string) => void };
 
@@ -296,6 +297,12 @@ type UseSharedAddStaffLogicArgs = AddStaffModalProps & {
   toast: Toast;
 };
 
+type StaffModalMemory = {
+  form: AddStaffForm;
+  staffModalStep: StaffModalStep;
+  isConfirmSummaryOpen: boolean;
+};
+
 export function useSharedAddStaffLogic({
   open,
   onOpenChange,
@@ -315,6 +322,7 @@ export function useSharedAddStaffLogic({
   const isViewMode = staffMode === "view";
   const isReadOnly = isViewMode;
   const staffId = staff?.id != null ? String(staff.id) : "";
+  const modalMemoryPausedRef = useRef(false);
 
   const activeStaffStepIndex = Math.max(0, staffModalSteps.findIndex((step) => step.id === staffModalStep));
   const staffProgressWidth =
@@ -326,11 +334,45 @@ export function useSharedAddStaffLogic({
   );
 
   useEffect(() => {
+    if (open) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     setForm(staffRecordToForm(staff));
     setStaffModalStep("profile");
     setIsConfirmSummaryOpen(false);
   }, [open, staff, staffMode]);
+
+  const staffMemoryKey = useMemo(
+    () =>
+      buildModalMemoryKey(
+        "staff-modal",
+        staffMode,
+        staffId || "new",
+        showCompensationFields ? "compensation" : "no-compensation"
+      ),
+    [showCompensationFields, staffId, staffMode]
+  );
+
+  const restoreStaffMemory = useCallback((memory: StaffModalMemory) => {
+    if (memory.form) setForm({ ...emptyStaffForm, ...memory.form });
+    setStaffModalStep(memory.staffModalStep || "profile");
+    setIsConfirmSummaryOpen(Boolean(memory.isConfirmSummaryOpen));
+  }, []);
+
+  const isStaffMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearStaffMemory = usePersistentModalMemory({
+    key: staffMemoryKey,
+    open,
+    value: { form, staffModalStep, isConfirmSummaryOpen },
+    restore: restoreStaffMemory,
+    enabled: isCreateMode,
+    isPaused: isStaffMemoryPaused,
+  });
 
   const updateForm = (updates: Partial<AddStaffForm>) => {
     if (isReadOnly) return;
@@ -349,7 +391,6 @@ export function useSharedAddStaffLogic({
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && isSaving) return;
     onOpenChange(nextOpen);
-    if (!nextOpen) resetForm();
   };
 
   const handleConfirmSummaryOpenChange = (nextOpen: boolean) => {
@@ -486,6 +527,8 @@ export function useSharedAddStaffLogic({
 
       safeToastSuccess(toast, isEditMode ? "Staff member updated successfully!" : "Staff member added successfully!");
       setIsConfirmSummaryOpen(false);
+      modalMemoryPausedRef.current = true;
+      clearStaffMemory();
       onOpenChange(false);
       resetForm();
       onStaffAdded?.(result?.data);

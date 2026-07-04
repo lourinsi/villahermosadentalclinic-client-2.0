@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
@@ -276,6 +277,34 @@ const preventNonWholeNumberInput = (event: React.FormEvent<HTMLInputElement>) =>
   if (data && /\D/.test(data)) event.preventDefault();
 };
 
+type ImprovedBookingModalMemory = {
+  modalStep: ImprovedBookingStep;
+  selectedPatient: string;
+  selectedDoctor: string;
+  appointmentType: string;
+  customAppointmentTypeName: string;
+  declinedTreatmentSuggestion: { normalizedInput: string; treatment: string } | null;
+  pendingConfirmAfterTreatmentSuggestion: boolean;
+  duration: string;
+  discount: string;
+  customPrice: string;
+  notes: string;
+  treatmentNotes: string;
+  toothNumberEntries: string[];
+  selectedDate: string;
+  selectedTime: string;
+  paymentMethod: string;
+  amountToPay: string;
+  paymentDate: string;
+  appointmentStatus: string;
+  paymentStatus: string;
+  statusChangedByUser: number;
+  paymentStatusChangedByUser: number;
+  repeatOption: string;
+  customRepeatDate: string;
+  isRescheduling: boolean;
+};
+
 const getTreatmentAliases = (treatment: string) => {
   const normalized = normalizeTreatmentInput(treatment);
   const aliases = new Set([normalized]);
@@ -496,6 +525,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
+  const bookingMemoryPausedRef = useRef(false);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
   const autoPreselectedScheduleRef = useRef<{ patientId: string; scheduleKey: string } | null>(null);
   const autoPreselectedDoctorRef = useRef<string | null>(null);
@@ -513,6 +543,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       console.log('[BookingModal] Available appointment statuses:', appointmentStatuses.map(s => s.value));
     }
   }, [open, appointmentStatuses]);
+
+  useEffect(() => {
+    if (open) {
+      bookingMemoryPausedRef.current = false;
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -1786,6 +1822,138 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username, isPastAppointmentMode]);
 
+  const bookingMemoryKey = useMemo(
+    () =>
+      buildModalMemoryKey(
+        "improved-booking-modal",
+        bookingMode,
+        appointmentCreationMode,
+        appointmentToEdit?.id ? `edit-${appointmentToEdit.id}` : "create",
+        defaultPatientId || "",
+        defaultDate ? formatDateToYYYYMMDD(defaultDate) : "",
+        defaultTime || "",
+        doctorName || "",
+        user?.role || "",
+        user?.username || ""
+      ),
+    [
+      appointmentCreationMode,
+      appointmentToEdit?.id,
+      bookingMode,
+      defaultDate,
+      defaultPatientId,
+      defaultTime,
+      doctorName,
+      user?.role,
+      user?.username,
+    ]
+  );
+
+  const bookingMemoryValue = useMemo<ImprovedBookingModalMemory>(
+    () => ({
+      modalStep,
+      selectedPatient,
+      selectedDoctor,
+      appointmentType,
+      customAppointmentTypeName,
+      declinedTreatmentSuggestion,
+      pendingConfirmAfterTreatmentSuggestion,
+      duration,
+      discount,
+      customPrice,
+      notes,
+      treatmentNotes,
+      toothNumberEntries,
+      selectedDate: formatDateToYYYYMMDD(selectedDate),
+      selectedTime,
+      paymentMethod,
+      amountToPay,
+      paymentDate,
+      appointmentStatus,
+      paymentStatus,
+      statusChangedByUser,
+      paymentStatusChangedByUser,
+      repeatOption,
+      customRepeatDate,
+      isRescheduling,
+    }),
+    [
+      amountToPay,
+      appointmentStatus,
+      appointmentType,
+      customAppointmentTypeName,
+      customPrice,
+      customRepeatDate,
+      declinedTreatmentSuggestion,
+      discount,
+      duration,
+      isRescheduling,
+      modalStep,
+      notes,
+      paymentDate,
+      paymentMethod,
+      paymentStatus,
+      paymentStatusChangedByUser,
+      pendingConfirmAfterTreatmentSuggestion,
+      repeatOption,
+      selectedDate,
+      selectedDoctor,
+      selectedPatient,
+      selectedTime,
+      statusChangedByUser,
+      toothNumberEntries,
+      treatmentNotes,
+    ]
+  );
+
+  const restoreBookingMemory = useCallback((memory: ImprovedBookingModalMemory) => {
+    autoPreselectedScheduleRef.current = null;
+    autoPreselectedDoctorRef.current = null;
+    previousSelectedPatientRef.current = memory.selectedPatient || "";
+    setModalStep(memory.modalStep || "patient");
+    setSelectedPatient(memory.selectedPatient || "");
+    setSelectedDoctor(memory.selectedDoctor || "");
+    setAppointmentType(memory.appointmentType || DEFAULT_BOOKING_TREATMENT);
+    setCustomAppointmentTypeName(memory.customAppointmentTypeName || "");
+    setDeclinedTreatmentSuggestion(memory.declinedTreatmentSuggestion || null);
+    setPendingConfirmAfterTreatmentSuggestion(Boolean(memory.pendingConfirmAfterTreatmentSuggestion));
+    setDuration(String(normalizeBookingDuration(memory.duration)));
+    setDiscount(memory.discount || "0");
+    setCustomPrice(memory.customPrice || "0");
+    setNotes(memory.notes || "");
+    setTreatmentNotes(memory.treatmentNotes || "");
+    setToothNumberEntries(Array.isArray(memory.toothNumberEntries) && memory.toothNumberEntries.length > 0 ? memory.toothNumberEntries : [""]);
+    setSelectedDate(toDate(parseLocalDateOnly(memory.selectedDate) || getBookingCreateDate({ defaultDate, isPastAppointmentMode })));
+    setSelectedTime(memory.selectedTime || "");
+    setPaymentMethod(memory.paymentMethod || "");
+    setAmountToPay(memory.amountToPay || "0");
+    setPaymentDate(memory.paymentDate || getDefaultBookingPaymentDate());
+    setAppointmentStatus(memory.appointmentStatus || (isPastAppointmentMode ? "completed" : "scheduled"));
+    setPaymentStatus(memory.paymentStatus || "unpaid");
+    setStatusChangedByUser(Number(memory.statusChangedByUser) || 0);
+    setPaymentStatusChangedByUser(Number(memory.paymentStatusChangedByUser) || 0);
+    setRepeatOption(memory.repeatOption || "do-not-repeat");
+    setCustomRepeatDate(memory.customRepeatDate || "");
+    setIsRescheduling(Boolean(memory.isRescheduling));
+  }, [defaultDate, isPastAppointmentMode]);
+
+  const isBookingMemoryPaused = useCallback(() => bookingMemoryPausedRef.current, []);
+
+  const clearBookingMemory = usePersistentModalMemory({
+    key: bookingMemoryKey,
+    open,
+    value: bookingMemoryValue,
+    restore: restoreBookingMemory,
+    enabled: !appointmentToEdit && !defaultPatientId && !doctorName && bookingMode === "standard",
+    isPaused: isBookingMemoryPaused,
+  });
+
+  const closeAfterCommittedBookingAction = useCallback(() => {
+    bookingMemoryPausedRef.current = true;
+    clearBookingMemory();
+    onOpenChange(false);
+  }, [clearBookingMemory, onOpenChange]);
+
     // Use shared booking logic for next/prev step handling
     const { handleNextStep, handlePrevStep } = useSharedBookingLogic({
       modalStep,
@@ -2461,7 +2629,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         }
 
         // close modal after updating
-        onOpenChange(false);
+        closeAfterCommittedBookingAction();
       } else {
         // create new appointment
         // Determine payment status
@@ -2768,7 +2936,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: newApt } })); } catch {}
         if (onBooked) onBooked(newApt);
         // close modal after creating
-        onOpenChange(false);
+        closeAfterCommittedBookingAction();
       }
 
       setModalStep('patient');
@@ -2799,7 +2967,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } catch {}
         if (onDeleted) onDeleted({ ...appointmentToEdit, hardDeleted: true });
         toast?.success?.('Appointment permanently deleted');
-        onOpenChange(false);
+        closeAfterCommittedBookingAction();
         return;
       }
 
@@ -2818,7 +2986,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } catch {}
         if (onDeleted) onDeleted(deletedAppointment);
         toast?.success?.('Appointment marked as deleted');
-        onOpenChange(false);
+        closeAfterCommittedBookingAction();
         return;
       }
 
@@ -2837,7 +3005,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (onBooked) onBooked(updated);
         if (onDeleted) onDeleted(updated);
       toast?.success?.('Appointment marked as cancelled');
-      onOpenChange(false);
+      closeAfterCommittedBookingAction();
     } catch (err) {
       console.error('Failed to cancel appointment', err);
       toast?.error?.('Failed to cancel appointment');
@@ -2850,12 +3018,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     autoPreselectedScheduleRef.current = null;
     autoPreselectedDoctorRef.current = null;
     previousSelectedPatientRef.current = "";
-    setModalStep("patient");
-    setIsRescheduling(false);
-    setAmountToPay("0");
-    setPaymentDate(getDefaultBookingPaymentDate());
-    setCustomAppointmentTypeName("");
-    setCustomPrice("0");
     onOpenChange(false);
   };
 

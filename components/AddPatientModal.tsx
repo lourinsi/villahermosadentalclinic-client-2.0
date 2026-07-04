@@ -2,13 +2,14 @@
 
 import { apiUrl } from "@/lib/api";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { CheckCircle2, UserPlus, X } from "lucide-react";
 import {
   createCachedPublicBookingPatient,
@@ -27,6 +28,17 @@ type SimilarPatientMatch = {
   displayName: string;
   isExact: boolean;
   score: number;
+};
+
+type AddPatientModalMemory = {
+  formData: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    dateOfBirth: string;
+  };
+  showSummary: boolean;
 };
 
 const normalizeNamePart = (value?: string | null) =>
@@ -167,10 +179,50 @@ export function AddPatientModal() {
   });
 
   const firstNameRef = useRef<HTMLInputElement | null>(null);
+  const modalMemoryPausedRef = useRef(false);
   const similarPatientMatch = useMemo(
     () => findSimilarPatientMatch(formData, existingPatients),
     [existingPatients, formData]
   );
+
+  useEffect(() => {
+    if (isAddPatientModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isAddPatientModalOpen]);
+
+  const addPatientMemoryKey = useMemo(
+    () => buildModalMemoryKey("add-patient-modal", addPatientModalMode),
+    [addPatientModalMode]
+  );
+
+  const restoreAddPatientMemory = useCallback((memory: AddPatientModalMemory) => {
+    if (memory.formData) {
+      setFormData({
+        firstName: memory.formData.firstName || "",
+        lastName: memory.formData.lastName || "",
+        email: memory.formData.email || "",
+        phone: memory.formData.phone || "",
+        dateOfBirth: memory.formData.dateOfBirth || "",
+      });
+    }
+    setShowSummary(Boolean(memory.showSummary));
+  }, []);
+
+  const isAddPatientMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearAddPatientMemory = usePersistentModalMemory({
+    key: addPatientMemoryKey,
+    open: isAddPatientModalOpen,
+    value: { formData, showSummary },
+    restore: restoreAddPatientMemory,
+    isPaused: isAddPatientMemoryPaused,
+  });
+
+  const clearCompletedAddPatientDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearAddPatientMemory();
+  }, [clearAddPatientMemory]);
 
   // Focus on first name when modal opens
   useEffect(() => {
@@ -255,6 +307,7 @@ export function AddPatientModal() {
         const publicPatient = createCachedPublicBookingPatient(patientData);
         toast.success("Patient added to public booking cache!");
         notifyPatientAdded(publicPatient);
+        clearCompletedAddPatientDraft();
         closeAddPatientModal();
         setShowSummary(false);
         setFormData({
@@ -285,6 +338,7 @@ export function AddPatientModal() {
         } else {
           refreshPatients();
         }
+        clearCompletedAddPatientDraft();
         closeAddPatientModal();
         setShowSummary(false);
         setFormData({
@@ -306,7 +360,6 @@ export function AddPatientModal() {
   };
 
   const handleCancel = () => {
-    setShowSummary(false);
     closeAddPatientModal();
   };
 

@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "./ui/textarea";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { buildModalMemoryKey, readModalMemory, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
 import { CheckCircle, CreditCard, Edit, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
@@ -18,6 +19,15 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
+
+type PaymentModalMemory = {
+  selectedAppointment: string | null;
+  paymentMethod: string | null;
+  amount: string;
+  paymentDate: string;
+  transactionId: string;
+  notes: string;
+};
 
 export function PaymentModal() {
   const {
@@ -43,10 +53,64 @@ export function PaymentModal() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
   const paymentAmountPrefilledRef = useRef(false);
+  const modalMemoryPausedRef = useRef(false);
+  const shouldRememberPaymentDraft = !appointmentId && !paymentData && !paymentId;
+  const paymentMemoryKey = useMemo(
+    () =>
+      buildModalMemoryKey(
+        "payment-modal",
+        appointmentId || "appointment",
+        patientId || patientName || "",
+        initialRecord?.transactionId || ""
+      ),
+    [appointmentId, initialRecord?.transactionId, patientId, patientName]
+  );
+
+  useEffect(() => {
+    if (isPaymentModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isPaymentModalOpen]);
+
+  const restorePaymentMemory = useCallback((memory: PaymentModalMemory) => {
+    setSelectedAppointment(memory.selectedAppointment || null);
+    setPaymentMethod(memory.paymentMethod || null);
+    setAmount(memory.amount || "");
+    setPaymentDate(memory.paymentDate || new Date().toISOString().split("T")[0]);
+    setTransactionId(memory.transactionId || "");
+    setNotes(memory.notes || "");
+  }, []);
+
+  const isPaymentMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearPaymentMemory = usePersistentModalMemory({
+    key: paymentMemoryKey,
+    open: isPaymentModalOpen && !paymentData && !paymentId,
+    value: {
+      selectedAppointment,
+      paymentMethod,
+      amount,
+      paymentDate,
+      transactionId,
+      notes,
+    },
+    restore: restorePaymentMemory,
+    enabled: shouldRememberPaymentDraft,
+    isPaused: isPaymentMemoryPaused,
+  });
+
+  const clearCompletedPaymentDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearPaymentMemory();
+  }, [clearPaymentMemory]);
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
     if (paymentData || paymentId) return;
+    if (shouldRememberPaymentDraft && readModalMemory<PaymentModalMemory>(paymentMemoryKey)) {
+      setAppointments(modalAppointments || []);
+      return;
+    }
 
     // Record mode: reset fields and use modalAppointments
     setSelectedAppointment(appointmentId || null);
@@ -63,7 +127,7 @@ export function PaymentModal() {
     setAppointments(modalAppointments || []);
     // Clear initialRecord after using it so subsequent opens don't reuse it
     // (usePaymentModal.closePaymentModal will also clear it on modal close)
-  }, [isPaymentModalOpen, paymentData, paymentId, appointmentId, modalAppointments, patientId, initialRecord]);
+  }, [isPaymentModalOpen, paymentData, paymentId, appointmentId, modalAppointments, patientId, initialRecord, paymentMemoryKey, shouldRememberPaymentDraft]);
 
   useEffect(() => {
     if (!isPaymentModalOpen) return;
@@ -167,6 +231,7 @@ export function PaymentModal() {
         }
         toast.success("Payment updated successfully");
         refreshPatients();
+        clearCompletedPaymentDraft();
         closePaymentModal();
       } catch (err) {
         console.error("Error updating payment", err);
@@ -213,6 +278,7 @@ export function PaymentModal() {
         }
 
         refreshPatients();
+        clearCompletedPaymentDraft();
         closePaymentModal();
         toast.success("Payment recorded");
       } catch (err) {

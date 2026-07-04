@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,15 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useRegistrationModal } from "@/hooks/useRegistrationModal";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
+
+type RegistrationModalMemory = {
+  formData: {
+    name: string;
+    email: string;
+    phone: string;
+  };
+};
 
 export function RegistrationModal() {
   const { isRegistrationModalOpen, closeRegistrationModal } =
@@ -25,6 +34,38 @@ export function RegistrationModal() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const modalMemoryPausedRef = useRef(false);
+  const registrationMemoryKey = useMemo(() => buildModalMemoryKey("registration-modal"), []);
+
+  useEffect(() => {
+    if (isRegistrationModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isRegistrationModalOpen]);
+
+  const restoreRegistrationMemory = useCallback((memory: RegistrationModalMemory) => {
+    if (!memory.formData) return;
+    setFormData({
+      name: memory.formData.name || "",
+      email: memory.formData.email || "",
+      phone: memory.formData.phone || "",
+    });
+  }, []);
+
+  const isRegistrationMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearRegistrationMemory = usePersistentModalMemory({
+    key: registrationMemoryKey,
+    open: isRegistrationModalOpen,
+    value: { formData },
+    restore: restoreRegistrationMemory,
+    isPaused: isRegistrationMemoryPaused,
+  });
+
+  const clearCompletedRegistrationDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearRegistrationMemory();
+  }, [clearRegistrationMemory]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +84,7 @@ export function RegistrationModal() {
 
       if (result.success) {
         toast.success("Registration successful! You can now log in with your credentials and default password.");
+        clearCompletedRegistrationDraft();
         closeRegistrationModal();
         setFormData({
           name: "",

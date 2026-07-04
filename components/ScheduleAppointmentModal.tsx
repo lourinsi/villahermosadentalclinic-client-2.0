@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
@@ -23,6 +24,22 @@ import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBoo
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 
 type ScheduleFieldErrors = Partial<Record<"patientName" | "date" | "time" | "type" | "customType" | "doctor", string>>;
+
+type ScheduleAppointmentModalMemory = {
+  formData: {
+    date: string;
+    time: string;
+    duration: string;
+    type: number;
+    customType: string;
+    doctor: string;
+    notes: string;
+    patientName: string;
+    patientId: string;
+  };
+  showSlotPicker: boolean;
+  selectedSlot: string;
+};
 
 export function ScheduleAppointmentModal() {
   const {
@@ -63,6 +80,60 @@ export function ScheduleAppointmentModal() {
   // New state: show a compact slot picker first for doctors
   const [showSlotPicker, setShowSlotPicker] = useState<boolean>(false);
   const [selectedSlot, setSelectedSlot] = useState<string>("");
+  const modalMemoryPausedRef = useRef(false);
+  const shouldRememberScheduleDraft = !newAppointmentPatientId && !newAppointmentPatientName;
+
+  useEffect(() => {
+    if (isScheduleModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isScheduleModalOpen]);
+
+  const scheduleMemoryKey = useMemo(
+    () =>
+      buildModalMemoryKey(
+        "schedule-appointment-modal",
+        newAppointmentPatientId || "",
+        newAppointmentPatientName || "",
+        user?.role || "",
+        user?.username || ""
+      ),
+    [newAppointmentPatientId, newAppointmentPatientName, user?.role, user?.username]
+  );
+
+  const restoreScheduleMemory = useCallback((memory: ScheduleAppointmentModalMemory) => {
+    if (memory.formData) {
+      setFormData({
+        date: memory.formData.date || "",
+        time: memory.formData.time || "",
+        duration: String(normalizeBookingDuration(memory.formData.duration)),
+        type: Number.isFinite(Number(memory.formData.type)) ? Number(memory.formData.type) : -1,
+        customType: memory.formData.customType || "",
+        doctor: memory.formData.doctor || "",
+        notes: memory.formData.notes || "",
+        patientName: memory.formData.patientName || "",
+        patientId: memory.formData.patientId || "",
+      });
+    }
+    setShowSlotPicker(Boolean(memory.showSlotPicker));
+    setSelectedSlot(memory.selectedSlot || "");
+  }, []);
+
+  const isScheduleMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearScheduleMemory = usePersistentModalMemory({
+    key: scheduleMemoryKey,
+    open: isScheduleModalOpen,
+    value: { formData, showSlotPicker, selectedSlot },
+    restore: restoreScheduleMemory,
+    enabled: shouldRememberScheduleDraft,
+    isPaused: isScheduleMemoryPaused,
+  });
+
+  const clearCompletedScheduleDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearScheduleMemory();
+  }, [clearScheduleMemory]);
 
   const clearFieldError = (field: keyof ScheduleFieldErrors) => {
     setFieldErrors((currentErrors) => {
@@ -223,6 +294,7 @@ export function ScheduleAppointmentModal() {
       refreshAppointments();
       
       console.log("Closing modal and resetting form...");
+      clearCompletedScheduleDraft();
       closeScheduleModal();
       setFieldErrors({});
       setFormData({
@@ -338,7 +410,7 @@ export function ScheduleAppointmentModal() {
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-4">
-                  <Button variant="cancel" type="button" onClick={() => { closeScheduleModal(); setShowSlotPicker(false); }}>
+                  <Button variant="cancel" type="button" onClick={() => closeScheduleModal()}>
                     Cancel
                   </Button>
                   <Button type="button" onClick={() => setShowSlotPicker(false)} disabled={!selectedSlot && !formData.time}>

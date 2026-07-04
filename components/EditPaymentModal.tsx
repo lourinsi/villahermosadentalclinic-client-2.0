@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
 import { Textarea } from "./ui/textarea";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
 import { CreditCard, DollarSign, Edit, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
@@ -51,6 +52,15 @@ const getPaymentLookupCandidates = (paymentId?: string | null, paymentData?: any
   return Array.from(candidates);
 };
 
+type EditPaymentModalMemory = {
+  paymentMethod: string | null;
+  amount: string;
+  paymentDate: string;
+  transactionId: string;
+  notes: string;
+  selectedAppointment: string | null;
+};
+
 export function EditPaymentModal() {
   const {
     isPaymentModalOpen,
@@ -73,8 +83,56 @@ export function EditPaymentModal() {
   const [fetchedPaymentData, setFetchedPaymentData] = useState<any | null>(null);
   const [isFetchingPayment, setIsFetchingPayment] = useState(false);
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(null);
+  const modalMemoryPausedRef = useRef(false);
 
   const effectivePaymentData = fetchedPaymentData || paymentData;
+  const editPaymentMemoryKey = useMemo(
+    () =>
+      buildModalMemoryKey(
+        "edit-payment-modal",
+        paymentId || effectivePaymentData?.id || "payment",
+        patientId || effectivePaymentData?.patientId || ""
+      ),
+    [effectivePaymentData?.id, effectivePaymentData?.patientId, patientId, paymentId]
+  );
+
+  useEffect(() => {
+    if (isPaymentModalOpen) {
+      modalMemoryPausedRef.current = false;
+    }
+  }, [isPaymentModalOpen]);
+
+  const restoreEditPaymentMemory = useCallback((memory: EditPaymentModalMemory) => {
+    setPaymentMethod(memory.paymentMethod || null);
+    setAmount(memory.amount || "");
+    setPaymentDate(memory.paymentDate || "");
+    setTransactionId(memory.transactionId || "");
+    setNotes(memory.notes || "");
+    setSelectedAppointment(memory.selectedAppointment || null);
+  }, []);
+
+  const isEditPaymentMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
+
+  const clearEditPaymentMemory = usePersistentModalMemory({
+    key: editPaymentMemoryKey,
+    open: isPaymentModalOpen,
+    value: {
+      paymentMethod,
+      amount,
+      paymentDate,
+      transactionId,
+      notes,
+      selectedAppointment,
+    },
+    restore: restoreEditPaymentMemory,
+    enabled: false,
+    isPaused: isEditPaymentMemoryPaused,
+  });
+
+  const clearCompletedEditPaymentDraft = useCallback(() => {
+    modalMemoryPausedRef.current = true;
+    clearEditPaymentMemory();
+  }, [clearEditPaymentMemory]);
 
   useEffect(() => {
     if (!isPaymentModalOpen || !paymentId) {
@@ -170,7 +228,7 @@ export function EditPaymentModal() {
         appointmentId: effectivePaymentData.appointmentId
       });
     }
-  }, [isPaymentModalOpen, effectivePaymentData]);
+  }, [editPaymentMemoryKey, isPaymentModalOpen, effectivePaymentData]);
 
   useEffect(() => {
     if (isPaymentModalOpen && (patientId || effectivePaymentData?.patientId)) {
@@ -271,6 +329,7 @@ export function EditPaymentModal() {
         window.dispatchEvent(new CustomEvent("appointments:updated"));
       }
       refreshPatients();
+      clearCompletedEditPaymentDraft();
       closePaymentModal();
     } catch (err) {
       console.error("Error updating payment", err);
