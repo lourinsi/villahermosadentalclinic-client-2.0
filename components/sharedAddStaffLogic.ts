@@ -8,6 +8,7 @@ type Toast = { error?: (msg: string) => void; success?: (msg: string) => void };
 
 export type StaffModalStep = "profile" | "role" | "employment" | "credentials";
 export type StaffFormMode = "add" | "edit" | "view";
+export type StaffRoleOption = { value: string; label: string };
 
 export type AddStaffForm = {
   name: string;
@@ -38,6 +39,7 @@ export interface AddStaffModalProps {
   onStaffAdded?: (staff?: unknown) => void;
   onStaffSaved?: (staff?: unknown) => void;
   showCompensationFields?: boolean;
+  roleOptions?: StaffRoleOption[];
 }
 
 export const emptyStaffForm: AddStaffForm = {
@@ -70,7 +72,7 @@ export const staffModalSteps: Array<{ id: StaffModalStep; label: string; icon: s
   { id: "credentials", label: "Credentials", icon: "4" },
 ];
 
-export const staffRoleOptions = [
+export const staffRoleOptions: StaffRoleOption[] = [
   { value: "dentist", label: "Dentist" },
   { value: "hygienist", label: "Dental Hygienist" },
   { value: "assistant", label: "Dental Assistant" },
@@ -78,6 +80,10 @@ export const staffRoleOptions = [
   { value: "receptionist", label: "Receptionist" },
   { value: "other", label: "Other" },
 ];
+
+export const dentalStaffRoleOptions: StaffRoleOption[] = staffRoleOptions.filter((option) =>
+  ["dentist", "hygienist", "assistant"].includes(option.value)
+);
 
 export const staffDepartmentOptions = [
   { value: "dentistry", label: "Dentistry" },
@@ -181,12 +187,25 @@ const normalizeOptionValue = (value: unknown, options: Array<{ value: string; la
   return option?.value || rawValue;
 };
 
-export const staffRecordToForm = (staff?: StaffRecordForModal | null): AddStaffForm => {
+const isOptionValueAllowed = (value: unknown, options: Array<{ value: string; label: string }>) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return false;
+
+  const normalizedValue = normalizeFilterValue(rawValue);
+  return options.some(
+    (item) => normalizeFilterValue(item.value) === normalizedValue || normalizeFilterValue(item.label) === normalizedValue
+  );
+};
+
+export const staffRecordToForm = (
+  staff?: StaffRecordForModal | null,
+  roleOptions: StaffRoleOption[] = staffRoleOptions
+): AddStaffForm => {
   if (!staff) return emptyStaffForm;
 
   return {
     name: String(staff.name || ""),
-    role: normalizeOptionValue(staff.role, staffRoleOptions),
+    role: normalizeOptionValue(staff.role, roleOptions),
     email: String(staff.email || ""),
     phone: String(staff.phone || ""),
     department: normalizeOptionValue(staff.department, staffDepartmentOptions),
@@ -311,9 +330,30 @@ export function useSharedAddStaffLogic({
   onStaffAdded,
   onStaffSaved,
   showCompensationFields = true,
+  roleOptions,
   toast,
 }: UseSharedAddStaffLogicArgs) {
-  const [form, setForm] = useState<AddStaffForm>(() => staffRecordToForm(staff));
+  const availableRoleOptions = useMemo(
+    () => (roleOptions?.length ? roleOptions : staffRoleOptions),
+    [roleOptions]
+  );
+  const hasRestrictedRoleOptions = Boolean(roleOptions?.length);
+  const sanitizeStaffFormForRoleOptions = useCallback(
+    (nextForm: AddStaffForm): AddStaffForm => {
+      if (!hasRestrictedRoleOptions || !nextForm.role) return nextForm;
+
+      const normalizedRole = normalizeOptionValue(nextForm.role, availableRoleOptions);
+      if (isOptionValueAllowed(normalizedRole, availableRoleOptions)) {
+        return { ...nextForm, role: normalizedRole };
+      }
+
+      return { ...nextForm, role: "" };
+    },
+    [availableRoleOptions, hasRestrictedRoleOptions]
+  );
+  const [form, setForm] = useState<AddStaffForm>(() =>
+    sanitizeStaffFormForRoleOptions(staffRecordToForm(staff, availableRoleOptions))
+  );
   const [staffModalStep, setStaffModalStep] = useState<StaffModalStep>("profile");
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -341,10 +381,18 @@ export function useSharedAddStaffLogic({
 
   useEffect(() => {
     if (!open) return;
-    setForm(staffRecordToForm(staff));
+    setForm(sanitizeStaffFormForRoleOptions(staffRecordToForm(staff, availableRoleOptions)));
     setStaffModalStep("profile");
     setIsConfirmSummaryOpen(false);
-  }, [open, staff, staffMode]);
+  }, [availableRoleOptions, open, sanitizeStaffFormForRoleOptions, staff, staffMode]);
+
+  const staffRoleScope = useMemo(
+    () =>
+      hasRestrictedRoleOptions
+        ? availableRoleOptions.map((option) => normalizeFilterValue(option.value)).join("-") || "restricted"
+        : "all-roles",
+    [availableRoleOptions, hasRestrictedRoleOptions]
+  );
 
   const staffMemoryKey = useMemo(
     () =>
@@ -352,16 +400,20 @@ export function useSharedAddStaffLogic({
         "staff-modal",
         staffMode,
         staffId || "new",
-        showCompensationFields ? "compensation" : "no-compensation"
+        showCompensationFields ? "compensation" : "no-compensation",
+        staffRoleScope
       ),
-    [showCompensationFields, staffId, staffMode]
+    [showCompensationFields, staffId, staffMode, staffRoleScope]
   );
 
-  const restoreStaffMemory = useCallback((memory: StaffModalMemory) => {
-    if (memory.form) setForm({ ...emptyStaffForm, ...memory.form });
-    setStaffModalStep(memory.staffModalStep || "profile");
-    setIsConfirmSummaryOpen(Boolean(memory.isConfirmSummaryOpen));
-  }, []);
+  const restoreStaffMemory = useCallback(
+    (memory: StaffModalMemory) => {
+      if (memory.form) setForm(sanitizeStaffFormForRoleOptions({ ...emptyStaffForm, ...memory.form }));
+      setStaffModalStep(memory.staffModalStep || "profile");
+      setIsConfirmSummaryOpen(Boolean(memory.isConfirmSummaryOpen));
+    },
+    [sanitizeStaffFormForRoleOptions]
+  );
 
   const isStaffMemoryPaused = useCallback(() => modalMemoryPausedRef.current, []);
 
@@ -378,12 +430,19 @@ export function useSharedAddStaffLogic({
     if (isReadOnly) return;
     const visibleUpdates = { ...updates };
     if (!showCompensationFields) delete visibleUpdates.baseSalary;
+    if (Object.prototype.hasOwnProperty.call(visibleUpdates, "role") && typeof visibleUpdates.role === "string") {
+      const normalizedRole = normalizeOptionValue(visibleUpdates.role, availableRoleOptions);
+      visibleUpdates.role =
+        !hasRestrictedRoleOptions || isOptionValueAllowed(normalizedRole, availableRoleOptions)
+          ? normalizedRole
+          : "";
+    }
     if (Object.keys(visibleUpdates).length === 0) return;
-    setForm((current) => ({ ...current, ...visibleUpdates }));
+    setForm((current) => sanitizeStaffFormForRoleOptions({ ...current, ...visibleUpdates }));
   };
 
   const resetForm = () => {
-    setForm(staffRecordToForm(staff));
+    setForm(sanitizeStaffFormForRoleOptions(staffRecordToForm(staff, availableRoleOptions)));
     setStaffModalStep("profile");
     setIsConfirmSummaryOpen(false);
   };
@@ -400,6 +459,10 @@ export function useSharedAddStaffLogic({
   const validateNewStaffForm = () => {
     if (!form.name.trim() || !form.role || !form.email.trim()) {
       safeToastError(toast, "Name, role, and email are required");
+      return false;
+    }
+    if (hasRestrictedRoleOptions && !isOptionValueAllowed(form.role, availableRoleOptions)) {
+      safeToastError(toast, "Please select an available role");
       return false;
     }
     return true;
@@ -551,6 +614,7 @@ export function useSharedAddStaffLogic({
     isEditMode,
     isViewMode,
     isReadOnly,
+    roleOptions: availableRoleOptions,
     staffToAdd,
     addStaffSummaryRows,
     staffModalStep,

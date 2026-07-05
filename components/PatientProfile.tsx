@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -70,11 +72,22 @@ import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
-import { getAppointmentTypeName } from "../lib/appointment-types";
+import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "../lib/appointment-types";
+import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
@@ -100,9 +113,10 @@ import {
   type QuestionnaireQuestion,
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
-import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL, type BookingInitialStep } from "./sharedBookingLogic";
+import { normalizeBookingDuration, normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL, type BookingInitialStep } from "./sharedBookingLogic";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
 
 export interface Patient {
   id?: string;
@@ -143,6 +157,70 @@ export interface Patient {
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
   deleted?: boolean;
 }
+
+const PHYSICIAN_INFORMATION_QUESTION_ID = "baseline_physician_information";
+
+type PhysicianInformationState = {
+  name: string;
+  officeAddress: string;
+  officeNumber: string;
+};
+
+type PhysicianInformationField = keyof PhysicianInformationState;
+
+const EMPTY_PHYSICIAN_INFORMATION: PhysicianInformationState = {
+  name: "",
+  officeAddress: "",
+  officeNumber: "",
+};
+
+const PHYSICIAN_INFORMATION_FIELDS: Array<{
+  id: PhysicianInformationField;
+  label: string;
+  placeholder: string;
+}> = [
+  { id: "name", label: "Name of Physician", placeholder: "Enter physician name" },
+  { id: "officeAddress", label: "Office Address", placeholder: "Enter office address" },
+  { id: "officeNumber", label: "Office Number", placeholder: "Enter office number" },
+];
+
+const stringValue = (value: unknown) => String(value ?? "");
+
+const createPhysicianInformationState = (data?: Record<string, any>): PhysicianInformationState => {
+  const source = data && typeof data === "object" ? data : {};
+  const nested = source.physicianInformation && typeof source.physicianInformation === "object"
+    ? source.physicianInformation
+    : {};
+
+  return {
+    name: stringValue(source.physicianName ?? source.nameOfPhysician ?? source.name ?? nested.name),
+    officeAddress: stringValue(source.physicianOfficeAddress ?? source.officeAddress ?? nested.officeAddress),
+    officeNumber: stringValue(source.physicianOfficeNumber ?? source.officeNumber ?? nested.officeNumber),
+  };
+};
+
+const serializePhysicianInformation = (physicianInformation: PhysicianInformationState) => {
+  const name = physicianInformation.name.trim();
+  const officeAddress = physicianInformation.officeAddress.trim();
+  const officeNumber = physicianInformation.officeNumber.trim();
+
+  return {
+    physicianInformation: {
+      name,
+      officeAddress,
+      officeNumber,
+    },
+    physicianName: name,
+    physicianOfficeAddress: officeAddress,
+    physicianOfficeNumber: officeNumber,
+  };
+};
+
+const physicianInformationComparable = (physicianInformation: PhysicianInformationState) => ({
+  name: physicianInformation.name.trim(),
+  officeAddress: physicianInformation.officeAddress.trim(),
+  officeNumber: physicianInformation.officeNumber.trim(),
+});
 
 const CONSENT_VERSION = "focused-informed-consent-v1";
 
@@ -980,6 +1058,9 @@ const getPaymentEventDateKey = (txn: RecentTransaction) => {
   return toDateOnly(txn.date) || toDateOnly(row.createdAt) || toDateOnly(row.updatedAt);
 };
 
+const getPaymentSortDateValue = (txn: RecentTransaction) =>
+  String((txn as any).paymentDate || txn.date || "");
+
 const hasClosePaymentTimestamp = (a: RecentTransaction, b: RecentTransaction) =>
   getPaymentEventTimestamps(a).some((aTime) =>
     getPaymentEventTimestamps(b).some((bTime) => Math.abs(aTime - bTime) <= 10_000)
@@ -1019,17 +1100,9 @@ const findMatchingAppointmentPaymentLog = (paymentLog: PaymentLogRow, appointmen
 };
 
 const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
-  const aRow = a as PaymentRow;
-  const bRow = b as PaymentRow;
-  const paymentDateDiff = parsePaymentTimestamp(b.date) - parsePaymentTimestamp(a.date);
+  const paymentDateDiff = parsePaymentTimestamp(getPaymentSortDateValue(b)) - parsePaymentTimestamp(getPaymentSortDateValue(a));
 
   if (paymentDateDiff !== 0) return paymentDateDiff;
-
-  const createdDiff = parsePaymentTimestamp(bRow.createdAt) - parsePaymentTimestamp(aRow.createdAt);
-  if (createdDiff !== 0) return createdDiff;
-
-  const updatedDiff = parsePaymentTimestamp(bRow.updatedAt) - parsePaymentTimestamp(aRow.updatedAt);
-  if (updatedDiff !== 0) return updatedDiff;
 
   return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
 };
@@ -1043,6 +1116,75 @@ const normalizeComparableDoctor = (value: unknown) =>
 const isUnassignedDoctorValue = (value: unknown) => {
   const normalized = normalizeComparableDoctor(value);
   return !normalized || /^(none|null|undefined|unassigned|no doctor assigned|n\/a|n\.a\.?|na|-)$/.test(normalized);
+};
+
+const normalizeTreatmentNameForMatch = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getTreatmentNameDistance = (first: string, second: string) => {
+  const a = normalizeTreatmentNameForMatch(first);
+  const b = normalizeTreatmentNameForMatch(second);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array(b.length + 1).fill(0);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+
+    for (let j = 0; j <= b.length; j += 1) previous[j] = current[j];
+  }
+
+  return previous[b.length];
+};
+
+const getTreatmentSimilarityScore = (input: string, treatmentName: string) => {
+  const normalizedInput = normalizeTreatmentNameForMatch(input);
+  const normalizedTreatment = normalizeTreatmentNameForMatch(treatmentName);
+  if (!normalizedInput || !normalizedTreatment) return 0;
+  if (normalizedInput === normalizedTreatment) return 1;
+
+  const maxLength = Math.max(normalizedInput.length, normalizedTreatment.length);
+  const distanceScore = 1 - getTreatmentNameDistance(normalizedInput, normalizedTreatment) / maxLength;
+  const inputWords = normalizedInput.split(" ").filter(Boolean);
+  const treatmentWords = new Set(normalizedTreatment.split(" ").filter(Boolean));
+  const sharedWords = inputWords.filter((word) => treatmentWords.has(word)).length;
+  const wordScore = sharedWords / Math.max(1, Math.min(inputWords.length, treatmentWords.size));
+  const containsScore =
+    maxLength >= 6 && (normalizedInput.includes(normalizedTreatment) || normalizedTreatment.includes(normalizedInput))
+      ? 0.88
+      : 0;
+
+  return Math.max(distanceScore, wordScore, containsScore);
+};
+
+const findSimilarTreatmentService = (input: string, treatments: ServiceCatalogItem[]) => {
+  const normalizedInput = normalizeTreatmentNameForMatch(input);
+  if (!normalizedInput) return null;
+
+  const ranked = treatments
+    .filter((treatment) => treatment.isActive !== false && treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX)
+    .map((treatment) => ({
+      treatment,
+      score: getTreatmentSimilarityScore(normalizedInput, treatment.label),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const bestMatch = ranked[0];
+  return bestMatch && bestMatch.score >= 0.78 ? bestMatch.treatment : null;
 };
 
 const getVisitDoctorName = (appointment: Partial<Appointment> | HistoryAppointment | null | undefined) => {
@@ -1246,10 +1388,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 }, ref) => {
   const { refreshPatients, appointments, refreshAppointments, openCreateModal, updateAppointment, refreshTrigger } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
+  const { effectiveRole } = useAdminViewMode();
   const [activeTab, setActiveTab] = useState("info");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
-  const { doctors, isLoadingDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
+  const canSeeDeletedAppointments = effectiveRole === "admin";
+  const shouldLoadTreatmentOptions = activeTab === "history" || activeTab === "payments";
+  const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(shouldLoadTreatmentOptions);
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -1290,6 +1436,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [isRescheduleDatePickerOpen, setIsRescheduleDatePickerOpen] = useState(false);
   const [isRescheduleTimePickerOpen, setIsRescheduleTimePickerOpen] = useState(false);
   const [isRescheduleSaving, setIsRescheduleSaving] = useState(false);
+  const [updateTreatmentAppointment, setUpdateTreatmentAppointment] = useState<Appointment | HistoryAppointment | null>(null);
+  const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
+  const [customVisitTreatmentName, setCustomVisitTreatmentName] = useState("");
+  const [visitTreatmentPrice, setVisitTreatmentPrice] = useState("");
+  const [similarVisitTreatmentPrompt, setSimilarVisitTreatmentPrompt] = useState<{
+    input: string;
+    service: ServiceCatalogItem;
+  } | null>(null);
+  const [isUpdatingVisitTreatment, setIsUpdatingVisitTreatment] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [parentPatient, setParentPatient] = useState<Patient | null>(null);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
@@ -1297,6 +1452,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [savedQuestionnaireAnswers, setSavedQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
+  const [physicianInformation, setPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
+  const [savedPhysicianInformation, setSavedPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
   const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
   const [isSavingQuestionnaire, setIsSavingQuestionnaire] = useState(false);
   const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
@@ -1363,11 +1520,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : {};
       const answers = normalizeQuestionnaireAnswers(questionnaireData);
       const nextConsentForm = createConsentFormState(questionnaireData);
+      const nextPhysicianInformation = createPhysicianInformationState(questionnaireData);
 
       setQuestionnaireQuestions(questionsResult.questions.filter((question) => question.isActive !== false));
       setPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);
+      setPhysicianInformation(nextPhysicianInformation);
+      setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(nextConsentForm);
       setSavedConsentForm(nextConsentForm);
       setHasConsentSignatureInk(Boolean(nextConsentForm.patientSignatureImage));
@@ -1406,8 +1566,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   }, [consentCanvasRef, consentForm.patientSignatureImage]);
 
   const questionnaireHasChanges = React.useMemo(
-    () => JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers),
-    [questionnaireAnswers, savedQuestionnaireAnswers]
+    () =>
+      JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers) ||
+      JSON.stringify(physicianInformationComparable(physicianInformation)) !==
+        JSON.stringify(physicianInformationComparable(savedPhysicianInformation)),
+    [physicianInformation, questionnaireAnswers, savedPhysicianInformation, savedQuestionnaireAnswers]
   );
 
   const consentFormHasChanges = React.useMemo(
@@ -1433,6 +1596,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setQuestionnaireAnswers((current) => ({
       ...current,
       [questionId]: checked,
+    }));
+
+    if (questionId === PHYSICIAN_INFORMATION_QUESTION_ID && !checked) {
+      setPhysicianInformation({ ...EMPTY_PHYSICIAN_INFORMATION });
+    }
+
+    setIsModified(true);
+  };
+
+  const updatePhysicianInformation = (field: PhysicianInformationField, value: string) => {
+    setPhysicianInformation((current) => ({
+      ...current,
+      [field]: value,
     }));
     setIsModified(true);
   };
@@ -1486,6 +1662,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setIsSavingQuestionnaire(true);
     try {
+      const submittedPhysicianInformation = questionnaireAnswers[PHYSICIAN_INFORMATION_QUESTION_ID]
+        ? physicianInformation
+        : EMPTY_PHYSICIAN_INFORMATION;
+
       const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
         method: "PUT",
         credentials: "include",
@@ -1493,6 +1673,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         body: JSON.stringify({
           ...patientQuestionnaireData,
           questionnaireAnswers,
+          ...serializePhysicianInformation(submittedPhysicianInformation),
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -1503,11 +1684,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
         ...patientQuestionnaireData,
         questionnaireAnswers,
+        ...serializePhysicianInformation(submittedPhysicianInformation),
       };
       const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      const nextPhysicianInformation = createPhysicianInformationState(nextData);
       setPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
+      setPhysicianInformation(nextPhysicianInformation);
+      setSavedPhysicianInformation(nextPhysicianInformation);
       setHasRestoredQuestionnaireDraft(false);
       return true;
     } catch (error) {
@@ -1539,6 +1724,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         patientSignatureImage: signatureImage,
         signedAt: isComplete ? new Date().toISOString() : "",
       };
+      const submittedPhysicianInformation = questionnaireAnswers[PHYSICIAN_INFORMATION_QUESTION_ID]
+        ? physicianInformation
+        : EMPTY_PHYSICIAN_INFORMATION;
 
       const response = await fetch(apiUrl(`/api/questionnaires/${encodeURIComponent(String(patient.id))}`), {
         method: "PUT",
@@ -1547,6 +1735,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         body: JSON.stringify({
           ...patientQuestionnaireData,
           questionnaireAnswers,
+          ...serializePhysicianInformation(submittedPhysicianInformation),
           ...serializeConsentForm(nextConsentForm),
         }),
       });
@@ -1558,13 +1747,17 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextData = payload.data && typeof payload.data === "object" ? payload.data : {
         ...patientQuestionnaireData,
         questionnaireAnswers,
+        ...serializePhysicianInformation(submittedPhysicianInformation),
         ...serializeConsentForm(nextConsentForm),
       };
       const nextAnswers = normalizeQuestionnaireAnswers(nextData);
+      const nextPhysicianInformation = createPhysicianInformationState(nextData);
       const savedConsent = createConsentFormState(nextData);
       setPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
+      setPhysicianInformation(nextPhysicianInformation);
+      setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(savedConsent);
       setSavedConsentForm(savedConsent);
       setHasConsentSignatureInk(Boolean(savedConsent.patientSignatureImage));
@@ -1885,6 +2078,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
+    const physicianFieldLabels: Record<PhysicianInformationField, string> = {
+      name: "Questionnaire - Name of Physician",
+      officeAddress: "Questionnaire - Physician Office Address",
+      officeNumber: "Questionnaire - Physician Office Number",
+    };
+
+    PHYSICIAN_INFORMATION_FIELDS.forEach((field) => {
+      const oldValue = savedPhysicianInformation[field.id];
+      const newValue = physicianInformation[field.id];
+      if (toComparableValue(oldValue) !== toComparableValue(newValue)) {
+        changes[physicianFieldLabels[field.id]] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
     CONSENT_ACKNOWLEDGEMENTS.forEach((item) => {
       const oldValue = Boolean(savedConsentForm.acknowledgements[item.id]);
       const newValue = Boolean(consentForm.acknowledgements[item.id]);
@@ -1921,9 +2131,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     consentForm,
     formData,
     originalLoadedData,
+    physicianInformation,
     questionnaireAnswers,
     questionnaireQuestions,
     savedConsentForm,
+    savedPhysicianInformation,
     savedQuestionnaireAnswers,
   ]);
 
@@ -2249,6 +2461,129 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
+  const openUpdateTreatmentModal = (appointment: Appointment | HistoryAppointment) => {
+    const appointmentId = String(appointment?.id || "");
+    if (!appointmentId) {
+      toast.error("Could not find appointment to update");
+      return;
+    }
+
+    const sourceAppointment =
+      patientAppointments.find((apt: Appointment) => String(apt.id) === appointmentId) ||
+      mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === appointmentId) ||
+      appointment;
+    const numericType = Number((sourceAppointment as any).type);
+    const selectedId = Number.isInteger(numericType) ? numericType : OTHER_APPOINTMENT_TYPE_INDEX;
+    const selectedService = treatmentOptions.find((option) => option.id === selectedId);
+    const currentTreatmentName =
+      getAppointmentTypeName(numericType, (sourceAppointment as any).customType) ||
+      String((sourceAppointment as any).type || "");
+    const currentPrice = Number((sourceAppointment as any).price ?? selectedService?.price ?? 0);
+
+    setUpdateTreatmentAppointment(sourceAppointment);
+    setSelectedVisitTreatmentId(selectedId);
+    setCustomVisitTreatmentName(
+      selectedId === OTHER_APPOINTMENT_TYPE_INDEX
+        ? String((sourceAppointment as any).customType || currentTreatmentName || "").trim()
+        : ""
+    );
+    setVisitTreatmentPrice(String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0));
+    setSimilarVisitTreatmentPrompt(null);
+  };
+
+  const closeUpdateTreatmentModal = (force = false) => {
+    if (isUpdatingVisitTreatment && !force) return;
+
+    setUpdateTreatmentAppointment(null);
+    setSelectedVisitTreatmentId(null);
+    setCustomVisitTreatmentName("");
+    setVisitTreatmentPrice("");
+    setSimilarVisitTreatmentPrompt(null);
+  };
+
+  const handleSaveVisitTreatment = async (skipSimilarityCheck = false) => {
+    const appointmentId = String(updateTreatmentAppointment?.id || "");
+    const selectedTreatment = treatmentOptions.find((option) => option.id === selectedVisitTreatmentId);
+
+    if (!appointmentId) {
+      toast.error("Could not find appointment to update");
+      return;
+    }
+
+    if (!selectedTreatment) {
+      toast.error("Please select a treatment");
+      return;
+    }
+
+    const isOtherTreatment = selectedTreatment.id === OTHER_APPOINTMENT_TYPE_INDEX;
+    const customType = isOtherTreatment ? customVisitTreatmentName.trim() : "";
+    if (isOtherTreatment && !customType) {
+      toast.error("Custom treatment name is required");
+      return;
+    }
+
+    if (isOtherTreatment && !skipSimilarityCheck) {
+      const similarService = findSimilarTreatmentService(customType, treatmentOptions);
+      if (similarService) {
+        setSimilarVisitTreatmentPrompt({ input: customType, service: similarService });
+        return;
+      }
+    }
+
+    const nextPrice = Number(visitTreatmentPrice);
+    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
+      toast.error("Enter a valid treatment price");
+      return;
+    }
+
+    const previousDuration = normalizeBookingDuration((updateTreatmentAppointment as any).duration || selectedTreatment.duration || 30);
+    const nextDuration = isOtherTreatment
+      ? previousDuration
+      : normalizeBookingDuration(selectedTreatment.duration || 30);
+
+    setIsUpdatingVisitTreatment(true);
+    try {
+      const updated = await updateAppointment(appointmentId, {
+        type: selectedTreatment.id,
+        customType: isOtherTreatment ? customType : undefined,
+        duration: nextDuration,
+        price: Math.max(0, nextPrice),
+      } as Partial<Appointment>);
+
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId
+          ? ({
+              ...apt,
+              ...updated,
+              type: updated.type ?? selectedTreatment.id,
+              customType: isOtherTreatment ? customType : updated.customType,
+              duration: updated.duration ?? nextDuration,
+              price: updated.price ?? Math.max(0, nextPrice),
+            } as Appointment)
+          : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId },
+          })
+        );
+      } catch {}
+
+      toast.success("Treatment updated");
+      closeUpdateTreatmentModal(true);
+    } catch (error) {
+      console.error("[PatientProfile] Failed to update treatment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update treatment");
+    } finally {
+      setIsUpdatingVisitTreatment(false);
+    }
+  };
+
   const handleOpenTransactionSnapshot = (transaction: RecentTransaction) => {
     const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
       || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
@@ -2268,6 +2603,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
+    const isChangingDoctor = Boolean(getVisitDoctorName(assignDoctorAppointment));
     setIsAssigningVisitDoctor(true);
     try {
       const updated = await updateAppointment(appointmentId, {
@@ -2294,7 +2630,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       refreshAppointments();
       refreshPatients();
       setAssignDoctorAppointment(null);
-      toast.success("Doctor assigned");
+      toast.success(isChangingDoctor ? "Doctor changed" : "Doctor assigned");
     } catch (error) {
       console.error("[PatientProfile] Failed to assign doctor:", error);
       toast.error("Failed to assign doctor");
@@ -2337,13 +2673,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
+        const normalizedStatus = normalizeAppointmentStatus(String(apt.status || ""));
+        if (!canSeeDeletedAppointments && (apt.deleted || normalizedStatus === "deleted")) return false;
         if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
         if (historyDoctorFilter !== 'all' && getVisitDoctorName(apt) !== historyDoctorFilter) return false;
         if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
-        
+
         if (historySearchFilter) {
           const search = historySearchFilter.toLowerCase();
-          const match = 
+          const match =
             String(apt.type || '').toLowerCase().includes(search) ||
             String(apt.doctor || '').toLowerCase().includes(search) ||
             String(apt.notes || '').toLowerCase().includes(search);
@@ -2352,12 +2690,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         return true;
     });
-  }, [mappedHistory, historyPaymentStatusFilter, historyDoctorFilter, historyProcedureFilter, historySearchFilter]);
+  }, [canSeeDeletedAppointments, mappedHistory, historyPaymentStatusFilter, historyDoctorFilter, historyProcedureFilter, historySearchFilter]);
 
   // Filters for Payments tab
   const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
+  const [paymentSearchFilter, setPaymentSearchFilter] = useState('');
+  const [paymentDateSortDirection, setPaymentDateSortDirection] = useState<"asc" | "desc">("desc");
 
   const uniquePaymentDoctors = React.useMemo(() => {
     const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean).map(String));
@@ -2387,14 +2727,74 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   }, [paymentProcedureFilter, uniquePaymentProcedures]);
 
   const filteredTransactions = React.useMemo(() => {
-    return allTransactions.filter(t => {
-      if (doctorFilter && t.doctor !== doctorFilter) return false;
-      if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
-      if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
-      if (paymentProcedureFilter !== 'all' && t.appointmentType !== paymentProcedureFilter) return false;
-      return true;
-    });
-  }, [allTransactions, doctorFilter, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
+    const search = paymentSearchFilter.trim().toLowerCase();
+    const getVisiblePaymentDateTimestamp = (transaction: RecentTransaction) =>
+      parsePaymentTimestamp(getPaymentSortDateValue(transaction));
+
+    return allTransactions
+      .filter(t => {
+        if (doctorFilter && t.doctor !== doctorFilter) return false;
+        if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
+        if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
+        if (paymentProcedureFilter !== 'all' && t.appointmentType !== paymentProcedureFilter) return false;
+        if (search) {
+          const searchText = [
+            t.method,
+            t.doctor,
+            t.appointmentType,
+            t.appointmentDate,
+            t.transactionId,
+            t.notes,
+            t.amount,
+            formatPatientLogDate((t as any).paymentDate || t.date, ""),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          if (!searchText.includes(search)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const paymentDateDiff = getVisiblePaymentDateTimestamp(a) - getVisiblePaymentDateTimestamp(b);
+        if (paymentDateDiff !== 0) {
+          return paymentDateSortDirection === "asc" ? paymentDateDiff : -paymentDateDiff;
+        }
+
+        const keyDiff = getPaymentTransactionKey(a).localeCompare(getPaymentTransactionKey(b));
+        return paymentDateSortDirection === "asc" ? keyDiff : -keyDiff;
+      });
+  }, [allTransactions, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter]);
+
+  const paymentSummary = React.useMemo(() => {
+    return mockAppointmentHistoryLocal.reduce(
+      (summary, apt: Appointment) => {
+        const billed = Number(apt.price || 0);
+        const paid = Number(apt.totalPaid || 0);
+
+        summary.totalBilled += billed;
+        summary.totalPaid += paid;
+        summary.outstanding += Math.max(0, billed - paid);
+
+        return summary;
+      },
+      { totalPaid: 0, outstanding: 0, totalBilled: 0 }
+    );
+  }, [mockAppointmentHistoryLocal]);
+
+  const hasPaymentFilters =
+    Boolean(paymentSearchFilter.trim()) ||
+    paymentMethodFilter !== "all" ||
+    paymentDoctorFilter !== "all" ||
+    paymentProcedureFilter !== "all";
+
+  const clearPaymentFilters = () => {
+    setPaymentSearchFilter("");
+    setPaymentMethodFilter("all");
+    setPaymentDoctorFilter("all");
+    setPaymentProcedureFilter("all");
+  };
 
   const getPaymentMethodIcon = (method: string) => {
     switch ((method || '').toLowerCase()) {
@@ -2519,6 +2919,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setFormData(loadedData);
     setOriginalLoadedData(loadedData);
     setQuestionnaireLoadedPatientId(null);
+    setPhysicianInformation({ ...EMPTY_PHYSICIAN_INFORMATION });
+    setSavedPhysicianInformation({ ...EMPTY_PHYSICIAN_INFORMATION });
     const blankConsentForm = createConsentFormState();
     setConsentForm(blankConsentForm);
     setSavedConsentForm(blankConsentForm);
@@ -2542,6 +2944,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setQuestionnaireAnswers(draft.questionnaireAnswers || {});
       setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
       setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
+      setPhysicianInformation(createPhysicianInformationState(draft.physicianInformation || draft.patientQuestionnaireData || {}));
+      setSavedPhysicianInformation(createPhysicianInformationState(draft.savedPhysicianInformation || draft.patientQuestionnaireData || {}));
       setQuestionnaireQuestions(draft.questionnaireQuestions || []);
       const restoredConsentForm = createConsentFormState(draft.consentForm || draft.patientQuestionnaireData || {});
       const restoredSavedConsentForm = createConsentFormState(draft.savedConsentForm || draft.patientQuestionnaireData || {});
@@ -2579,6 +2983,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       questionnaireAnswers,
       savedQuestionnaireAnswers,
       patientQuestionnaireData,
+      physicianInformation,
+      savedPhysicianInformation,
       questionnaireQuestions,
       consentForm,
       savedConsentForm,
@@ -2593,9 +2999,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     originalLoadedData,
     patientDisplayName,
     patientQuestionnaireData,
+    physicianInformation,
     questionnaireAnswers,
     questionnaireQuestions,
     savedConsentForm,
+    savedPhysicianInformation,
     savedQuestionnaireAnswers,
   ]);
 
@@ -3050,6 +3458,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     discardStoredDraft();
     setFormData(originalLoadedData);
     setQuestionnaireAnswers(savedQuestionnaireAnswers);
+    setPhysicianInformation(savedPhysicianInformation);
     setConsentForm(savedConsentForm);
     setHasConsentSignatureInk(Boolean(savedConsentForm.patientSignatureImage));
     setIsConsentSignatureDirty(false);
@@ -3068,6 +3477,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     : "";
   const rescheduleDuration = String((rescheduleAppointment as any)?.duration || "");
   const rescheduleAppointmentId = rescheduleAppointment?.id ? String(rescheduleAppointment.id) : "";
+  const activeTreatmentOptions = treatmentOptions.filter((option): option is ServiceCatalogItem => option.isActive !== false);
+  const updateTreatmentCurrentLabel = updateTreatmentAppointment
+    ? typeof (updateTreatmentAppointment as any).type === "number"
+      ? getHistoryAppointmentType(updateTreatmentAppointment as Appointment)
+      : String((updateTreatmentAppointment as any).type || "Appointment")
+    : "";
+  const selectedVisitTreatment = activeTreatmentOptions.find((option) => option.id === selectedVisitTreatmentId) || null;
+  const visitTreatmentPriceNumber = Number(visitTreatmentPrice);
+  const canSaveVisitTreatment = Boolean(
+    selectedVisitTreatment &&
+    (!selectedVisitTreatment || selectedVisitTreatment.id !== OTHER_APPOINTMENT_TYPE_INDEX || customVisitTreatmentName.trim()) &&
+    Number.isFinite(visitTreatmentPriceNumber) &&
+    visitTreatmentPriceNumber >= 0
+  );
+  const assignDoctorActionLabel = assignDoctorAppointment && getVisitDoctorName(assignDoctorAppointment)
+    ? "Change Doctor"
+    : "Assign Doctor";
 
   return (
     <div className="flex-1 overflow-hidden bg-slate-50">
@@ -3634,22 +4060,68 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {questionnaireQuestions.map((question) => (
-                    <label
-                      key={question.id}
-                      htmlFor={`patient-questionnaire-${question.id}`}
-                      className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
-                    >
-                      <Checkbox
-                        id={`patient-questionnaire-${question.id}`}
-                        checked={Boolean(questionnaireAnswers[question.id])}
-                        onCheckedChange={(checked) => handleQuestionnaireAnswerChange(question.id, checked === true)}
-                        disabled={isSavingQuestionnaire}
-                        className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
-                      />
-                      <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
-                    </label>
-                  ))}
+                  {questionnaireQuestions.map((question) => {
+                    const checkboxId = `patient-questionnaire-${question.id}`;
+                    const checked = Boolean(questionnaireAnswers[question.id]);
+                    const isPhysicianInformationQuestion = question.id === PHYSICIAN_INFORMATION_QUESTION_ID;
+
+                    if (isPhysicianInformationQuestion) {
+                      return (
+                        <div
+                          key={question.id}
+                          className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
+                        >
+                          <label htmlFor={checkboxId} className="flex min-h-8 cursor-pointer items-start gap-3">
+                            <Checkbox
+                              id={checkboxId}
+                              checked={checked}
+                              onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
+                              disabled={isSavingQuestionnaire}
+                              className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
+                            />
+                            <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
+                          </label>
+
+                          {checked && (
+                            <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+                              {PHYSICIAN_INFORMATION_FIELDS.map((field) => (
+                                <div key={field.id} className="space-y-1.5">
+                                  <Label htmlFor={`${checkboxId}-${field.id}`} className="text-xs font-semibold text-slate-600">
+                                    {field.label}
+                                  </Label>
+                                  <Input
+                                    id={`${checkboxId}-${field.id}`}
+                                    value={physicianInformation[field.id]}
+                                    onChange={(event) => updatePhysicianInformation(field.id, event.target.value)}
+                                    disabled={isSavingQuestionnaire}
+                                    placeholder={field.placeholder}
+                                    className="h-10 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <label
+                        key={question.id}
+                        htmlFor={checkboxId}
+                        className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
+                      >
+                        <Checkbox
+                          id={checkboxId}
+                          checked={checked}
+                          onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
+                          disabled={isSavingQuestionnaire}
+                          className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
+                        />
+                        <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -4049,21 +4521,30 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
-                              {displayedBalance > 0 ? (
+                              {!isVoidedAppointment ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="h-9 rounded-xl border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
-                                  onClick={() => openPaymentModal(String(patient.id || ""), patientDisplayName, mockAppointmentHistoryLocal, appointmentId)}
+                                  className={
+                                    displayedBalance > 0
+                                      ? "h-9 rounded-xl border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                                      : "h-9 rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                  }
+                                  disabled={!patient.id}
+                                  onClick={() => {
+                                    if (patient.id) {
+                                      openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
+                                    }
+                                  }}
                                 >
                                   <DollarSign className="mr-2 h-4 w-4" />
                                   Record Payment
                                 </Button>
                               ) : (
-                                <div className="flex h-9 items-center justify-center rounded-xl bg-emerald-50 text-sm font-black text-emerald-700">
+                                <div className="flex h-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-black text-slate-600">
                                   <CheckCircle className="mr-2 h-4 w-4" />
-                                  Paid
+                                  Closed
                                 </div>
                               )}
                               {originalAppointment ? (
@@ -4097,10 +4578,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   <span className="sr-only">Visit actions</span>
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
+                              <DropdownMenuContent align="end" className="w-52">
                                 <DropdownMenuItem onClick={() => handleOpenSnapshot(appointment)}>
                                   <Eye className="mr-2 h-4 w-4" />
                                   View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!patient.id || isVoidedAppointment}
+                                  onClick={() => {
+                                    if (patient.id && !isVoidedAppointment) {
+                                      openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
+                                    }
+                                  }}
+                                >
+                                  <DollarSign className="mr-2 h-4 w-4" />
+                                  Record Payment
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   disabled={!originalAppointment}
@@ -4113,12 +4605,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   <Calendar className="mr-2 h-4 w-4" />
                                   Reschedule
                                 </DropdownMenuItem>
-                                {isDoctorUnassigned ? (
-                                  <DropdownMenuItem onClick={() => setAssignDoctorAppointment(appointment)}>
-                                    <Stethoscope className="mr-2 h-4 w-4" />
-                                    Assign Doctor
-                                  </DropdownMenuItem>
-                                ) : null}
+                                <DropdownMenuItem
+                                  disabled={!originalAppointment}
+                                  onClick={() => {
+                                    if (originalAppointment) {
+                                      openUpdateTreatmentModal(originalAppointment);
+                                    }
+                                  }}
+                                >
+                                  <ClipboardList className="mr-2 h-4 w-4" />
+                                  Update Treatment
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!originalAppointment}
+                                  onClick={() => {
+                                    if (originalAppointment) {
+                                      setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment);
+                                    }
+                                  }}
+                                >
+                                  <Stethoscope className="mr-2 h-4 w-4" />
+                                  {isDoctorUnassigned ? "Assign Doctor" : "Change Doctor"}
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
@@ -4230,222 +4738,304 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
 
         <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-          <Card className={cardClass}>
-            <CardHeader>
-                <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-                    <CardTitle>Payment History</CardTitle>
-                    <div className="flex flex-col gap-1 sm:items-end">
-                            <Button
-                            size="sm"
-                            onClick={() => {
-                              if (patient.id && patient.name) {
-                                // Open payment modal for adding a new payment (no appointment selected)
-                                openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, null);
-                              }
-                            }}
-                        >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Payment
-                        </Button>
-                        <div className="text-sm text-muted-foreground">
-                            Total Transactions: <span className="font-semibold">{filteredTransactions.length}</span>
-                        </div>
-                    </div>
+          <Card className={`${cardClass} overflow-hidden border-slate-200 bg-white shadow-sm`}>
+            <CardHeader className="space-y-6 p-5 sm:p-7">
+              <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+                <div>
+                  <CardTitle className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                    Payment History
+                  </CardTitle>
+                  <p className="mt-2 text-sm font-medium text-slate-500">
+                    View and manage your payment transactions
+                  </p>
                 </div>
-                <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:flex xl:items-center">
-                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
-                        <SelectTrigger className="w-full xl:w-[180px]">
-                            <SelectValue placeholder="Filter by payment method" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {uniquePaymentMethods.map(method => (
-                                <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
-                            ))}
-                        </SelectContent>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <Button
+                    size="sm"
+                    className="h-11 rounded-lg bg-violet-600 px-5 text-sm font-bold text-white shadow-lg shadow-violet-200 hover:bg-violet-700"
+                    onClick={() => {
+                      if (patient.id) {
+                        openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, null);
+                      }
+                    }}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Payment
+                  </Button>
+                  <div className="text-sm font-medium text-slate-400">
+                    Total Transactions: <span className="font-bold text-slate-600">{filteredTransactions.length}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
+                <div className={`grid gap-3 ${doctorFilter ? "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]" : "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]"}`}>
+                  <div className="relative min-w-0">
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={paymentSearchFilter}
+                      onChange={(event) => setPaymentSearchFilter(event.target.value)}
+                      placeholder="Search payments..."
+                      className="h-12 rounded-lg border-slate-200 bg-white pl-11 text-sm font-medium shadow-none placeholder:text-slate-400"
+                    />
+                  </div>
+                  <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                      <SelectValue placeholder="All Methods" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uniquePaymentMethods.map(method => (
+                        <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!doctorFilter && (
+                    <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
+                      <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                        <SelectValue placeholder="All Doctors" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniquePaymentDoctors.map(doctor => (
+                          <SelectItem key={String(doctor)} value={String(doctor)}>{String(doctor) === 'all' ? 'All Doctors' : String(doctor)}</SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
-                    {/* Hide doctor filter when viewing as a doctor */}
-                    {!doctorFilter && (
-                      <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
-                          <SelectTrigger className="w-full xl:w-[180px]">
-                              <SelectValue placeholder="Filter by doctor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                {uniquePaymentDoctors.map(doctor => (
-                  <SelectItem key={String(doctor)} value={String(doctor)}>{String(doctor) === 'all' ? 'All Doctors' : String(doctor)}</SelectItem>
-                ))}
-                          </SelectContent>
-                      </Select>
+                  )}
+                  <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
+                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                      <SelectValue placeholder="All Procedures" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uniquePaymentProcedures.map(proc => (
+                        <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                    onClick={() => setPaymentDateSortDirection((direction) => direction === "desc" ? "asc" : "desc")}
+                    title="Sort by payment date"
+                  >
+                    {paymentDateSortDirection === "desc" ? (
+                      <ChevronDown className="mr-2 h-4 w-4 text-violet-600" />
+                    ) : (
+                      <ChevronUp className="mr-2 h-4 w-4 text-violet-600" />
                     )}
-                    <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
-                        <SelectTrigger className="w-full xl:w-[180px]">
-                            <SelectValue placeholder="Filter by procedure" />
-                        </SelectTrigger>
-                        <SelectContent>
-              {uniquePaymentProcedures.map(proc => (
-                <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
-              ))}
-                        </SelectContent>
-                    </Select>
+                    {paymentDateSortDirection === "desc" ? "Newest Paid" : "Oldest Paid"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50"
+                    onClick={clearPaymentFilters}
+                    disabled={!hasPaymentFilters}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Clear Filters
+                  </Button>
                 </div>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {/* Summary Cards */}
-                <div className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Paid</p>
-                          <p className="text-2xl font-semibold text-green-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.totalPaid || 0), 0)}
-                          </p>
-                        </div>
-                        <CheckCircle className="h-8 w-8 text-green-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Outstanding</p>
-                          <p className="text-2xl font-semibold text-red-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
-                          </p>
-                        </div>
-                        <AlertTriangle className="h-8 w-8 text-red-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Billed</p>
-                          <p className="text-2xl font-semibold">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.price || 0), 0)}
-                          </p>
-                        </div>
-                        <DollarSign className="h-8 w-8 text-gray-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
+
+            <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                      <CreditCard className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Total Paid</p>
+                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
+                        {formatPatientHistoryCurrency(paymentSummary.totalPaid)}
+                      </p>
+                    </div>
+                  </div>
+                  <CheckCircle className="h-8 w-8 shrink-0 text-emerald-600" />
+                </div>
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                      <AlertTriangle className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Outstanding</p>
+                      <p className="mt-1 truncate text-2xl font-black text-red-600">
+                        {formatPatientHistoryCurrency(paymentSummary.outstanding)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                </div>
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                      <FileText className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Total Billed</p>
+                      <p className="mt-1 truncate text-2xl font-black text-slate-950">
+                        {formatPatientHistoryCurrency(paymentSummary.totalBilled)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-violet-600 bg-white text-violet-600">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-950">Transaction Timeline</h3>
+                    <p className="text-sm font-medium text-slate-500">
+                      {filteredTransactions.length} payment{filteredTransactions.length === 1 ? "" : "s"} found
+                    </p>
+                  </div>
                 </div>
 
-                {/* Transaction List */}
-                <div className="space-y-3">
-                  <h3 className="font-medium">All Transactions</h3>
-                  {filteredTransactions.length > 0 ? (
-                    filteredTransactions.map((txn) => {
+                {filteredTransactions.length > 0 ? (
+                  <div className="relative space-y-5 pl-8 sm:pl-12">
+                    <div className="absolute bottom-8 left-[15px] top-0 border-l border-dashed border-slate-200 sm:left-[15px]" />
+                    {filteredTransactions.map((txn) => {
                       const paymentDisplay = getTransactionPaymentDisplay(txn);
-                      const txnPaymentDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
+                      const txnPaymentDateRaw = (txn as any).paymentDate || txn.date;
+                      const txnPaymentDate = formatPatientLogDate(txnPaymentDateRaw);
+                      const txnDateParts = getPatientHistoryDateParts(txnPaymentDateRaw);
+                      const transactionIdLabel = txn.transactionId || txn.id || "N/A";
+                      const editablePaymentId = getEditablePaymentId(txn);
 
                       return (
-                      <div
-                        key={txn.id}
-                        className={`border rounded-lg p-4 ${paymentDisplay.isLog ? "bg-gray-50/60 border-gray-200 opacity-80" : ""}`}
-                      >
-                        <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="flex min-w-0 items-center space-x-3">
-                            <div className="p-2 bg-gray-100 rounded">
-                              {getPaymentMethodIcon(txn.method)}
-                            </div>
-                            <div>
-                              <div className="font-medium">{txn.method}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {txn.appointmentType} - Appointment: {formatPatientLogDate(txn.appointmentDate, "N/A")}
+                        <div key={txn.id} className="relative">
+                          <span className="absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white bg-violet-600 shadow-md shadow-violet-200 sm:-left-[3rem]" />
+                          <div className={`rounded-lg border bg-white p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200"}`}>
+                            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+                                <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
+                                  <div className="text-center sm:w-24">
+                                    <div className="text-lg font-black leading-none text-violet-600">{txnDateParts.month}</div>
+                                    <div className="mt-1 text-5xl font-black leading-none text-slate-950">{txnDateParts.day}</div>
+                                    <div className="mt-2 text-lg font-bold leading-none text-slate-500">{txnDateParts.year}</div>
+                                  </div>
+                                </div>
+                                <div className="min-w-0">
+                                  <h4 className="truncate text-lg font-black text-slate-950">{txn.doctor || "Unassigned Doctor"}</h4>
+                                  <p className="mt-1 truncate text-base font-medium text-slate-500">{txn.appointmentType || "Appointment Payment"}</p>
+                                  <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
+                                    <span className="inline-flex items-center gap-2">
+                                      <Calendar className="h-4 w-4 text-slate-600" />
+                                      Appointment: {formatPatientLogDate(txn.appointmentDate, "N/A")}
+                                    </span>
+                                    <span className="inline-flex items-center gap-2">
+                                      <CreditCard className="h-4 w-4 text-slate-600" />
+                                      Payment Method: {txn.method || "N/A"}
+                                    </span>
+                                    <span className="inline-flex items-center gap-2">
+                                      <FileText className="h-4 w-4 text-slate-600" />
+                                      Ref No.: {transactionIdLabel}
+                                    </span>
+                                  </div>
+                                  {txn.notes && (
+                                    <p className="mt-3 text-sm font-medium italic text-slate-500">{txn.notes}</p>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Dr: {txn.doctor}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3 sm:justify-end">
-                            <div className="sm:text-right">
-                              <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
-                              <div className="text-xs text-muted-foreground">Payment Date: {txnPaymentDate}</div>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleOpenTransactionSnapshot(txn)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span className="sr-only">View Appointment Snapshot</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className={`h-8 w-8 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
-                              title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                              onClick={() => handleEditPaymentTransaction(txn)}
-                            >
-                              <Edit className="h-4 w-4" />
-                              <span className="sr-only">Edit Payment</span>
-                            </Button>
-                            {!isReadOnlyPaymentRow(txn) && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
+
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
+                                <div className="sm:text-right">
+                                  <div className="text-2xl font-black text-emerald-600">
+                                    {formatPatientHistoryCurrency(txn.amount)}
+                                  </div>
+                                  <div className="mt-2">
+                                    {paymentDisplay.isLog ? (
+                                      <Badge variant="outline" className="rounded-md border-slate-200 bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">
+                                        Log
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="rounded-md border-emerald-100 bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">
+                                        Paid
+                                        <CheckCircle className="ml-1.5 h-3.5 w-3.5" />
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="mt-2 text-xs font-medium text-slate-400">Payment Date: {txnPaymentDate}</div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
                                   <Button
-                                    variant="ghost"
+                                    variant="outline"
                                     size="icon"
-                                    className="h-8 w-8"
+                                    className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                    onClick={() => handleOpenTransactionSnapshot(txn)}
                                   >
-                                    <MoreVertical className="h-4 w-4" />
+                                    <Eye className="h-5 w-5" />
+                                    <span className="sr-only">View Appointment Snapshot</span>
                                   </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${editablePaymentId ? "" : "opacity-60"}`}
+                                    title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
                                     onClick={() => handleEditPaymentTransaction(txn)}
                                   >
-                                    <Edit className="h-4 w-4 mr-2" />
-                                    Edit
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setPdConfirmTitle("Delete Payment");
-                                      setPdConfirmMessage("Are you sure you want to delete this payment?");
-                                      setPdConfirmAction(() => async () => {
-                                        if (txn.id) await handleDeletePayment(String(txn.id), txn.appointmentId);
-                                      });
-                                      setPdIsConfirmOpen(true);
-                                    }}
-                                    className="text-red-600"
-                                  >
-                                    <Trash className="h-4 w-4 mr-2" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
+                                    <Edit className="h-5 w-5" />
+                                    <span className="sr-only">Edit Payment</span>
+                                  </Button>
+                                  {!isReadOnlyPaymentRow(txn) && (
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                        >
+                                          <MoreVertical className="h-5 w-5" />
+                                          <span className="sr-only">More payment actions</span>
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleEditPaymentTransaction(txn)}>
+                                          <Edit className="mr-2 h-4 w-4" />
+                                          Edit
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setPdConfirmTitle("Delete Payment");
+                                            setPdConfirmMessage("Are you sure you want to delete this payment?");
+                                            setPdConfirmAction(() => async () => {
+                                              if (txn.id) await handleDeletePayment(String(txn.id), txn.appointmentId);
+                                            });
+                                            setPdIsConfirmOpen(true);
+                                          }}
+                                          className="text-red-600"
+                                        >
+                                          <Trash className="mr-2 h-4 w-4" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between text-sm pt-2 border-t">
-                          <div className="text-muted-foreground">
-                            ID: {txn.transactionId}
-                          </div>
-                          {paymentDisplay.label && (
-                            <Badge variant="outline" className={paymentDisplay.className}>
-                              {paymentDisplay.label}
-                            </Badge>
-                          )}
-                        </div>
-                        {txn.notes && (
-                          <div className="text-sm text-muted-foreground mt-2 italic">
-                            {txn.notes}
-                          </div>
-                        )}
-                      </div>
                       );
-                    })
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No payment transactions found for the selected filters.
-                    </div>
-                  )}
-                </div>
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-12 text-center text-sm font-medium text-slate-500">
+                    No payment transactions found for the selected filters.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 text-sm font-medium text-slate-400">
+                <ShieldCheck className="h-5 w-5 text-violet-600" />
+                All transactions are secure and encrypted.
               </div>
             </CardContent>
           </Card>
@@ -4500,6 +5090,65 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           dateSelectionMode="edit"
         />
       ) : null}
+      <SelectTreatmentModal
+        open={Boolean(updateTreatmentAppointment)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeUpdateTreatmentModal();
+        }}
+        title="Update Treatment"
+        description={updateTreatmentAppointment ? `${updateTreatmentCurrentLabel || "Visit"} for ${patientDisplayName}` : patientDisplayName}
+        treatments={activeTreatmentOptions}
+        selectedTreatmentId={selectedVisitTreatmentId}
+        currentTreatmentLabel={updateTreatmentCurrentLabel}
+        customTreatmentName={customVisitTreatmentName}
+        selectedPrice={visitTreatmentPrice}
+        onCustomTreatmentNameChange={setCustomVisitTreatmentName}
+        onSelectedPriceChange={setVisitTreatmentPrice}
+        onTreatmentSelect={(treatment) => {
+          setSelectedVisitTreatmentId(treatment.id);
+          setVisitTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
+          if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
+            setCustomVisitTreatmentName("");
+          } else if (!customVisitTreatmentName.trim()) {
+            setCustomVisitTreatmentName(updateTreatmentCurrentLabel);
+          }
+        }}
+        onSave={handleSaveVisitTreatment}
+        onCancel={() => closeUpdateTreatmentModal()}
+        isSaving={isUpdatingVisitTreatment}
+        canSave={canSaveVisitTreatment && !isLoadingTreatmentOptions}
+      />
+      <AlertDialog
+        open={Boolean(similarVisitTreatmentPrompt)}
+        onOpenChange={(open) => {
+          if (!open && !isUpdatingVisitTreatment) {
+            setSimilarVisitTreatmentPrompt(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar Treatment Found</AlertDialogTitle>
+            <AlertDialogDescription>
+              {similarVisitTreatmentPrompt
+                ? `"${similarVisitTreatmentPrompt.input}" looks similar to "${similarVisitTreatmentPrompt.service.label}". Are you sure you want to save it as a custom treatment?`
+                : "This treatment looks similar to an existing service. Are you sure you want to save it?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isUpdatingVisitTreatment}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isUpdatingVisitTreatment}
+              onClick={() => {
+                setSimilarVisitTreatmentPrompt(null);
+                void handleSaveVisitTreatment(true);
+              }}
+            >
+              Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={Boolean(assignDoctorAppointment)} onOpenChange={(nextOpen) => !isAssigningVisitDoctor && !nextOpen && setAssignDoctorAppointment(null)}>
         <DialogContent
           showCloseButton={false}
@@ -4513,7 +5162,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   <Stethoscope className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 text-left">
-                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
+                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">{assignDoctorActionLabel}</DialogTitle>
                   <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
                     {assignDoctorAppointment ? `${String(assignDoctorAppointment.type || "Visit")} for ${patientDisplayName}` : "Choose a provider for this visit"}
                   </DialogDescription>
@@ -4526,7 +5175,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
-            <SelectDoctorModal className="mx-auto max-w-[38rem]">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
               {isLoadingDoctors ? (
                 <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />

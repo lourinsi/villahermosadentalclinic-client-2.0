@@ -22,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAppointmentTypeOptions, type AppointmentTypeForm } from "@/hooks/useAppointmentTypeOptions";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
-import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope } from "lucide-react";
+import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope, Trash2 } from "lucide-react";
 import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 const emptyForm: AppointmentTypeForm = {
@@ -139,11 +139,13 @@ export function ServicesView() {
   const [drafts, setDrafts] = useState<Record<number, ServiceCatalogItem>>({});
   const [newService, setNewService] = useState<AppointmentTypeForm>(emptyForm);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [similarServicePrompt, setSimilarServicePrompt] = useState<{
     draft: AppointmentTypeForm;
     service: ServiceCatalogItem;
   } | null>(null);
+  const [deleteServicePrompt, setDeleteServicePrompt] = useState<ServiceCatalogItem | null>(null);
 
   const visibleOptions = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -240,6 +242,36 @@ export function ServicesView() {
     const pendingDraft = similarServicePrompt?.draft;
     setSimilarServicePrompt(null);
     if (pendingDraft) await handleCreate(true, pendingDraft);
+  };
+
+  const handleDeleteService = async () => {
+    const service = deleteServicePrompt;
+    if (!service) return;
+
+    if (service.label === "Other") {
+      toast.error("The Other treatment cannot be deleted.");
+      setDeleteServicePrompt(null);
+      return;
+    }
+
+    setDeletingId(service.id);
+    try {
+      await saveService({
+        ...service,
+        isActive: false,
+      });
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[service.id];
+        return next;
+      });
+      toast.success("Service deleted");
+      setDeleteServicePrompt(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete service");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -356,7 +388,7 @@ export function ServicesView() {
                   <TableHead className="w-[130px] sm:w-[180px]">Default Price</TableHead>
                   <TableHead className="hidden w-[160px] sm:table-cell">Duration</TableHead>
                   <TableHead className="hidden w-[120px] lg:table-cell">Status</TableHead>
-                  <TableHead className="w-[56px] text-right sm:w-[120px]">Action</TableHead>
+                  <TableHead className="w-[56px] text-right sm:w-[220px]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -438,22 +470,34 @@ export function ServicesView() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant={changed ? "default" : "outline"}
-                          onClick={() => handleSave(service)}
-                          disabled={!changed || savingId === service.id}
-                          className="hidden gap-2 sm:inline-flex"
-                        >
-                          {savingId === service.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : changed ? (
-                            <Save className="h-4 w-4" />
-                          ) : (
-                            <Check className="h-4 w-4" />
-                          )}
-                          {changed ? "Save" : "Saved"}
-                        </Button>
+                        <div className="hidden justify-end gap-2 sm:flex">
+                          <Button
+                            size="sm"
+                            variant={changed ? "default" : "outline"}
+                            onClick={() => handleSave(service)}
+                            disabled={!changed || savingId === service.id || deletingId === service.id}
+                            className="gap-2"
+                          >
+                            {savingId === service.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : changed ? (
+                              <Save className="h-4 w-4" />
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )}
+                            {changed ? "Save" : "Saved"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDeleteServicePrompt(service)}
+                            disabled={service.label === "Other" || deletingId === service.id}
+                            className="gap-2 text-red-600 hover:text-red-700"
+                          >
+                            {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            Delete
+                          </Button>
+                        </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl sm:hidden" title="Service actions">
@@ -462,10 +506,17 @@ export function ServicesView() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-36">
                             <DropdownMenuItem
-                              disabled={!changed || savingId === service.id}
+                              disabled={!changed || savingId === service.id || deletingId === service.id}
                               onSelect={() => handleSave(service)}
                             >
                               {savingId === service.id ? "Saving..." : changed ? "Save" : "Saved"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-600 focus:text-red-600"
+                              disabled={service.label === "Other" || deletingId === service.id}
+                              onSelect={() => setDeleteServicePrompt(service)}
+                            >
+                              {deletingId === service.id ? "Deleting..." : "Delete"}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -493,6 +544,28 @@ export function ServicesView() {
             <AlertDialogCancel disabled={isCreating}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmSimilarServiceCreate} disabled={isCreating}>
               Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(deleteServicePrompt)} onOpenChange={(open) => !open && setDeleteServicePrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteServicePrompt
+                ? `"${deleteServicePrompt.label}" will be hidden from new bookings and service selection. Existing appointment records will remain intact.`
+                : "This service will be hidden from new bookings and service selection."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deleteServicePrompt && deletingId === deleteServicePrompt.id)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteService}
+              disabled={Boolean(deleteServicePrompt && deletingId === deleteServicePrompt.id)}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {deleteServicePrompt && deletingId === deleteServicePrompt.id ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

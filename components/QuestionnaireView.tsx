@@ -14,11 +14,112 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertTriangle, Check, ClipboardList, ListPlus, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
 export type { QuestionnaireQuestion };
+
+const QUESTION_MATCH_STOP_WORDS = new Set([
+  "are",
+  "can",
+  "did",
+  "does",
+  "for",
+  "has",
+  "have",
+  "had",
+  "the",
+  "this",
+  "that",
+  "you",
+  "your",
+  "with",
+]);
+
+const normalizeQuestionTextForMatch = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getQuestionTextDistance = (first: string, second: string) => {
+  const a = normalizeQuestionTextForMatch(first);
+  const b = normalizeQuestionTextForMatch(second);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array(b.length + 1).fill(0);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+
+    for (let j = 0; j <= b.length; j += 1) previous[j] = current[j];
+  }
+
+  return previous[b.length];
+};
+
+const getQuestionKeywords = (value: string) =>
+  normalizeQuestionTextForMatch(value)
+    .split(" ")
+    .filter((word) => word.length > 2 && !QUESTION_MATCH_STOP_WORDS.has(word));
+
+const getQuestionSimilarityScore = (input: string, questionText: string) => {
+  const normalizedInput = normalizeQuestionTextForMatch(input);
+  const normalizedQuestion = normalizeQuestionTextForMatch(questionText);
+  if (!normalizedInput || !normalizedQuestion) return 0;
+  if (normalizedInput === normalizedQuestion) return 1;
+
+  const maxLength = Math.max(normalizedInput.length, normalizedQuestion.length);
+  const distanceScore = 1 - getQuestionTextDistance(normalizedInput, normalizedQuestion) / maxLength;
+  const inputKeywords = getQuestionKeywords(normalizedInput);
+  const questionKeywords = new Set(getQuestionKeywords(normalizedQuestion));
+  const sharedKeywords = inputKeywords.filter((word) => questionKeywords.has(word)).length;
+  const keywordScore = sharedKeywords / Math.max(1, Math.min(inputKeywords.length, questionKeywords.size));
+  const containsScore =
+    maxLength >= 12 && (normalizedInput.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedInput))
+      ? 0.88
+      : 0;
+
+  return Math.max(distanceScore, keywordScore, containsScore);
+};
+
+const findSimilarQuestion = (input: string, questions: QuestionnaireQuestion[]) => {
+  const normalizedInput = normalizeQuestionTextForMatch(input);
+  if (!normalizedInput) return null;
+
+  const ranked = questions
+    .filter((question) => question.isActive !== false)
+    .map((question) => ({
+      question,
+      score: getQuestionSimilarityScore(normalizedInput, question.text),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const bestMatch = ranked[0];
+  return bestMatch && bestMatch.score >= 0.82 ? bestMatch.question : null;
+};
 
 export function QuestionnaireView() {
   const [questions, setQuestions] = useState<QuestionnaireQuestion[]>([]);
@@ -31,6 +132,10 @@ export function QuestionnaireView() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [questionRouteMessage, setQuestionRouteMessage] = useState("");
+  const [similarQuestionPrompt, setSimilarQuestionPrompt] = useState<{
+    text: string;
+    question: QuestionnaireQuestion;
+  } | null>(null);
   const isQuestionRouteUnavailable = Boolean(questionRouteMessage);
 
   const visibleQuestions = useMemo(() => {
@@ -68,16 +173,24 @@ export function QuestionnaireView() {
     }));
   };
 
-  const handleCreate = async () => {
+  const handleCreate = async (skipSimilarityCheck = false, overrideText?: string) => {
     if (isQuestionRouteUnavailable) {
       toast.error("Questionnaire question management is not available on the current production API.");
       return;
     }
 
-    const text = newQuestion.trim();
+    const text = (overrideText ?? newQuestion).trim();
     if (!text) {
       toast.error("Question text is required");
       return;
+    }
+
+    if (!skipSimilarityCheck) {
+      const similarQuestion = findSimilarQuestion(text, questions);
+      if (similarQuestion) {
+        setSimilarQuestionPrompt({ text, question: similarQuestion });
+        return;
+      }
     }
 
     setIsCreating(true);
@@ -100,6 +213,12 @@ export function QuestionnaireView() {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleConfirmSimilarQuestionCreate = async () => {
+    const pendingText = similarQuestionPrompt?.text;
+    setSimilarQuestionPrompt(null);
+    if (pendingText) await handleCreate(true, pendingText);
   };
 
   const handleRestoreDefaults = async () => {
@@ -245,7 +364,7 @@ export function QuestionnaireView() {
                 disabled={isQuestionRouteUnavailable}
               />
             </div>
-            <Button onClick={handleCreate} disabled={isQuestionRouteUnavailable || isCreating} className="gap-2">
+            <Button onClick={() => handleCreate()} disabled={isQuestionRouteUnavailable || isCreating} className="gap-2">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
             </Button>
@@ -377,6 +496,24 @@ export function QuestionnaireView() {
           </div>
         </CardContent>
       </Card>
+      <AlertDialog open={Boolean(similarQuestionPrompt)} onOpenChange={(open) => !open && setSimilarQuestionPrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar question found</AlertDialogTitle>
+            <AlertDialogDescription>
+              {similarQuestionPrompt
+                ? `"${similarQuestionPrompt.text}" looks similar to "${similarQuestionPrompt.question.text}". Are you sure you want to add it as a new question?`
+                : "This question looks similar to an existing question. Are you sure you want to add it?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCreating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSimilarQuestionCreate} disabled={isCreating}>
+              Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

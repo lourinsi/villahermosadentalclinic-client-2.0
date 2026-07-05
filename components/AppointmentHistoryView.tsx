@@ -374,7 +374,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [latestPaymentLogDate, setLatestPaymentLogDate] = useState<string>("");
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
-  const { doctors, isLoadingDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
@@ -1584,7 +1584,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
-            <SelectDoctorModal className="mx-auto max-w-[38rem]">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
               {isLoadingDoctors ? (
                 <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />

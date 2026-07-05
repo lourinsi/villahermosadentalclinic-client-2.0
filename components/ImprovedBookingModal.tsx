@@ -424,7 +424,7 @@ interface BookingModalProps {
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard", initialStep }: BookingModalProps) {
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
-  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
+  const { doctors, reloadDoctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, deleteAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
@@ -3364,7 +3364,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               {/* STEP 3: DOCTOR */}
               {modalStep === 'doctor' && showDoctorStep && (
-                <SelectDoctorModal>
+                <SelectDoctorModal
+                  showAddDoctorButton={!isPublicBookingMode}
+                  onDoctorAdded={(staff) => {
+                    const addedDoctorName =
+                      staff && typeof staff === "object" ? String((staff as { name?: unknown }).name || "").trim() : "";
+                    if (addedDoctorName) {
+                      autoPreselectedDoctorRef.current = null;
+                      setSelectedDoctor(addedDoctorName);
+                    }
+                    void reloadDoctors();
+                  }}
+                >
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Award className="h-7 w-7" />
