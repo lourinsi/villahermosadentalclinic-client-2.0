@@ -23,6 +23,7 @@ interface NextAppointmentCardProps {
   sameTimeAppointments?: Appointment[];
   onViewDetails: (appointment: Appointment) => void;
   onViewAll?: () => void;
+  onBookAppointment?: () => void;
   showHeader?: boolean;
 }
 
@@ -33,6 +34,7 @@ export function NextAppointmentCard({
   sameTimeAppointments = [],
   onViewDetails,
   onViewAll,
+  onBookAppointment,
   showHeader = false,
 }: NextAppointmentCardProps) {
   const router = useRouter();
@@ -64,6 +66,14 @@ export function NextAppointmentCard({
     role === "patient" ? "/patient/doctors" :
     role === "admin" ? "/admin/doctors" :
     "/doctors";
+  const handleBookAppointment = () => {
+    if (onBookAppointment) {
+      onBookAppointment();
+      return;
+    }
+
+    router.push(doctorsRoute);
+  };
 
   useEffect(() => {
     setCurrentIndex(0);
@@ -138,7 +148,7 @@ export function NextAppointmentCard({
           </div>
           <Button 
             className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-6"
-            onClick={() => router.push(doctorsRoute)}
+            onClick={handleBookAppointment}
           >
             Book Now
           </Button>

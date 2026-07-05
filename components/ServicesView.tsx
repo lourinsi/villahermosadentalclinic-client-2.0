@@ -7,12 +7,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAppointmentTypeOptions, type AppointmentTypeForm } from "@/hooks/useAppointmentTypeOptions";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
-import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope } from "lucide-react";
+import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope, Trash2 } from "lucide-react";
+import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 const emptyForm: AppointmentTypeForm = {
   label: "",
@@ -48,13 +59,93 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+const getServiceDraftBase = (service: ServiceCatalogItem): ServiceCatalogItem => ({
+  ...service,
+  duration: normalizeBookingDuration(service.duration),
+});
+
+const normalizeServiceNameForMatch = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getServiceNameDistance = (first: string, second: string) => {
+  const a = normalizeServiceNameForMatch(first);
+  const b = normalizeServiceNameForMatch(second);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array(b.length + 1).fill(0);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+
+    for (let j = 0; j <= b.length; j += 1) previous[j] = current[j];
+  }
+
+  return previous[b.length];
+};
+
+const getServiceSimilarityScore = (input: string, serviceName: string) => {
+  const normalizedInput = normalizeServiceNameForMatch(input);
+  const normalizedService = normalizeServiceNameForMatch(serviceName);
+  if (!normalizedInput || !normalizedService) return 0;
+  if (normalizedInput === normalizedService) return 1;
+
+  const maxLength = Math.max(normalizedInput.length, normalizedService.length);
+  const distanceScore = 1 - getServiceNameDistance(normalizedInput, normalizedService) / maxLength;
+  const inputWords = normalizedInput.split(" ").filter(Boolean);
+  const serviceWords = new Set(normalizedService.split(" ").filter(Boolean));
+  const sharedWords = inputWords.filter((word) => serviceWords.has(word)).length;
+  const wordScore = sharedWords / Math.max(1, Math.min(inputWords.length, serviceWords.size));
+  const containsScore =
+    maxLength >= 6 && (normalizedInput.includes(normalizedService) || normalizedService.includes(normalizedInput))
+      ? 0.88
+      : 0;
+
+  return Math.max(distanceScore, wordScore, containsScore);
+};
+
+const findSimilarService = (input: string, services: ServiceCatalogItem[]) => {
+  const normalizedInput = normalizeServiceNameForMatch(input);
+  if (!normalizedInput) return null;
+
+  const ranked = services
+    .filter((service) => service.isActive !== false)
+    .map((service) => ({
+      service,
+      score: getServiceSimilarityScore(normalizedInput, service.label),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const bestMatch = ranked[0];
+  return bestMatch && bestMatch.score >= 0.78 ? bestMatch.service : null;
+};
+
 export function ServicesView() {
   const { options, isLoading, refresh, saveService, createService } = useAppointmentTypeOptions(true);
   const [search, setSearch] = useState("");
   const [drafts, setDrafts] = useState<Record<number, ServiceCatalogItem>>({});
   const [newService, setNewService] = useState<AppointmentTypeForm>(emptyForm);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [similarServicePrompt, setSimilarServicePrompt] = useState<{
+    draft: AppointmentTypeForm;
+    service: ServiceCatalogItem;
+  } | null>(null);
+  const [deleteServicePrompt, setDeleteServicePrompt] = useState<ServiceCatalogItem | null>(null);
 
   const visibleOptions = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -65,13 +156,13 @@ export function ServicesView() {
     setDrafts((current) => ({
       ...current,
       [service.id]: {
-        ...(current[service.id] || service),
+        ...(current[service.id] || getServiceDraftBase(service)),
         ...updates,
       },
     }));
   };
 
-  const getDraft = (service: ServiceCatalogItem) => drafts[service.id] || service;
+  const getDraft = (service: ServiceCatalogItem) => drafts[service.id] || getServiceDraftBase(service);
 
   const hasDraftChanged = (service: ServiceCatalogItem) => {
     const draft = getDraft(service);
@@ -95,7 +186,7 @@ export function ServicesView() {
       await saveService({
         ...draft,
         price: Math.max(0, toNumber(draft.price)),
-        duration: Math.max(1, Math.round(toNumber(draft.duration))),
+        duration: normalizeBookingDuration(draft.duration),
       });
       setDrafts((current) => {
         const next = { ...current };
@@ -110,19 +201,33 @@ export function ServicesView() {
     }
   };
 
-  const handleCreate = async () => {
-    if (!newService.label.trim()) {
+  const handleCreate = async (skipSimilarityCheck = false, overrideDraft?: AppointmentTypeForm) => {
+    const draft = {
+      ...(overrideDraft || newService),
+      label: (overrideDraft || newService).label.trim(),
+      duration: normalizeBookingDuration((overrideDraft || newService).duration),
+    };
+
+    if (!draft.label) {
       toast.error("Service name is required");
       return;
+    }
+
+    if (!skipSimilarityCheck) {
+      const similarService = findSimilarService(draft.label, options);
+      if (similarService) {
+        setSimilarServicePrompt({ draft, service: similarService });
+        return;
+      }
     }
 
     setIsCreating(true);
     try {
       await createService({
-        label: newService.label.trim(),
-        icon: newService.icon || "🦷",
-        price: Math.max(0, toNumber(newService.price)),
-        duration: Math.max(1, Math.round(toNumber(newService.duration))),
+        label: draft.label,
+        icon: draft.icon || "🦷",
+        price: Math.max(0, toNumber(draft.price)),
+        duration: normalizeBookingDuration(draft.duration),
       });
       setNewService(emptyForm);
       toast.success("Service created");
@@ -130,6 +235,42 @@ export function ServicesView() {
       toast.error(error instanceof Error ? error.message : "Failed to create service");
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleConfirmSimilarServiceCreate = async () => {
+    const pendingDraft = similarServicePrompt?.draft;
+    setSimilarServicePrompt(null);
+    if (pendingDraft) await handleCreate(true, pendingDraft);
+  };
+
+  const handleDeleteService = async () => {
+    const service = deleteServicePrompt;
+    if (!service) return;
+
+    if (service.label === "Other") {
+      toast.error("The Other treatment cannot be deleted.");
+      setDeleteServicePrompt(null);
+      return;
+    }
+
+    setDeletingId(service.id);
+    try {
+      await saveService({
+        ...service,
+        isActive: false,
+      });
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[service.id];
+        return next;
+      });
+      toast.success("Service deleted");
+      setDeleteServicePrompt(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete service");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -197,15 +338,23 @@ export function ServicesView() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-service-duration">Duration</Label>
-              <Input
-                id="new-service-duration"
-                type="number"
-                min="1"
-                value={newService.duration}
-                onChange={(event) => setNewService((current) => ({ ...current, duration: toNumber(event.target.value) }))}
-              />
+              <Select
+                value={String(normalizeBookingDuration(newService.duration))}
+                onValueChange={(value) => setNewService((current) => ({ ...current, duration: normalizeBookingDuration(value) }))}
+              >
+                <SelectTrigger id="new-service-duration" className="h-10">
+                  <SelectValue placeholder="Select duration" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALLOWED_BOOKING_DURATIONS.map((duration) => (
+                    <SelectItem key={duration} value={String(duration)}>
+                      {duration} mins
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Button onClick={handleCreate} disabled={isCreating} className="gap-2">
+            <Button onClick={() => handleCreate()} disabled={isCreating} className="gap-2">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
             </Button>
@@ -239,7 +388,7 @@ export function ServicesView() {
                   <TableHead className="w-[130px] sm:w-[180px]">Default Price</TableHead>
                   <TableHead className="hidden w-[160px] sm:table-cell">Duration</TableHead>
                   <TableHead className="hidden w-[120px] lg:table-cell">Status</TableHead>
-                  <TableHead className="w-[56px] text-right sm:w-[120px]">Action</TableHead>
+                  <TableHead className="w-[56px] text-right sm:w-[220px]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -264,7 +413,7 @@ export function ServicesView() {
                         />
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:hidden">
                           <span className="rounded-full bg-gray-100 px-2 py-1">{draft.icon || "Icon"}</span>
-                          <span className="rounded-full bg-gray-100 px-2 py-1 sm:hidden">{draft.duration ?? 30} min</span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 sm:hidden">{normalizeBookingDuration(draft.duration)} min</span>
                           <Badge className="border-none bg-emerald-100 text-emerald-700 lg:hidden">
                             Active
                           </Badge>
@@ -299,12 +448,21 @@ export function ServicesView() {
                         <p className="mt-1 truncate text-[11px] text-muted-foreground sm:text-xs">{formatCurrency(draft.price)}</p>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <Input
-                          type="number"
-                          min="1"
-                          value={draft.duration ?? 30}
-                          onChange={(event) => updateDraft(service, { duration: toNumber(event.target.value) })}
-                        />
+                        <Select
+                          value={String(normalizeBookingDuration(draft.duration))}
+                          onValueChange={(value) => updateDraft(service, { duration: normalizeBookingDuration(value) })}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select duration" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ALLOWED_BOOKING_DURATIONS.map((duration) => (
+                              <SelectItem key={duration} value={String(duration)}>
+                                {duration} mins
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell className="hidden lg:table-cell">
                         <Badge className="border-none bg-emerald-100 text-emerald-700">
@@ -312,22 +470,34 @@ export function ServicesView() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant={changed ? "default" : "outline"}
-                          onClick={() => handleSave(service)}
-                          disabled={!changed || savingId === service.id}
-                          className="hidden gap-2 sm:inline-flex"
-                        >
-                          {savingId === service.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : changed ? (
-                            <Save className="h-4 w-4" />
-                          ) : (
-                            <Check className="h-4 w-4" />
-                          )}
-                          {changed ? "Save" : "Saved"}
-                        </Button>
+                        <div className="hidden justify-end gap-2 sm:flex">
+                          <Button
+                            size="sm"
+                            variant={changed ? "default" : "outline"}
+                            onClick={() => handleSave(service)}
+                            disabled={!changed || savingId === service.id || deletingId === service.id}
+                            className="gap-2"
+                          >
+                            {savingId === service.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : changed ? (
+                              <Save className="h-4 w-4" />
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )}
+                            {changed ? "Save" : "Saved"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDeleteServicePrompt(service)}
+                            disabled={service.label === "Other" || deletingId === service.id}
+                            className="gap-2 text-red-600 hover:text-red-700"
+                          >
+                            {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            Delete
+                          </Button>
+                        </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl sm:hidden" title="Service actions">
@@ -336,10 +506,17 @@ export function ServicesView() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-36">
                             <DropdownMenuItem
-                              disabled={!changed || savingId === service.id}
+                              disabled={!changed || savingId === service.id || deletingId === service.id}
                               onSelect={() => handleSave(service)}
                             >
                               {savingId === service.id ? "Saving..." : changed ? "Save" : "Saved"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-600 focus:text-red-600"
+                              disabled={service.label === "Other" || deletingId === service.id}
+                              onSelect={() => setDeleteServicePrompt(service)}
+                            >
+                              {deletingId === service.id ? "Deleting..." : "Delete"}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -352,6 +529,47 @@ export function ServicesView() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={Boolean(similarServicePrompt)} onOpenChange={(open) => !open && setSimilarServicePrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar service found</AlertDialogTitle>
+            <AlertDialogDescription>
+              {similarServicePrompt
+                ? `"${similarServicePrompt.draft.label}" looks similar to "${similarServicePrompt.service.label}". Are you sure you want to add it as a new service?`
+                : "This service looks similar to an existing service. Are you sure you want to add it?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCreating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSimilarServiceCreate} disabled={isCreating}>
+              Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(deleteServicePrompt)} onOpenChange={(open) => !open && setDeleteServicePrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteServicePrompt
+                ? `"${deleteServicePrompt.label}" will be hidden from new bookings and service selection. Existing appointment records will remain intact.`
+                : "This service will be hidden from new bookings and service selection."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deleteServicePrompt && deletingId === deleteServicePrompt.id)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteService}
+              disabled={Boolean(deleteServicePrompt && deletingId === deleteServicePrompt.id)}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {deleteServicePrompt && deletingId === deleteServicePrompt.id ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

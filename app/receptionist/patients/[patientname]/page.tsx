@@ -13,6 +13,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import type { BookingInitialStep } from "@/components/sharedBookingLogic";
 
 const normalizePatientName = (patient: Patient) =>
   (patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`).trim();
@@ -32,6 +33,7 @@ export default function ReceptionistPatientProfilePage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingInitialStep, setBookingInitialStep] = useState<BookingInitialStep | undefined>();
   const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<Appointment | null>(null);
   const [isUnsavedExitDialogOpen, setIsUnsavedExitDialogOpen] = useState(false);
   const [pendingNavigationHref, setPendingNavigationHref] = useState<string | null>(null);
@@ -267,7 +269,8 @@ export default function ReceptionistPatientProfilePage() {
         setIsModified={setIsModified}
         onBackToPatients={() => requestNavigation(patientsBasePath)}
         openBookingAppointmentId={bookingModalOpen ? selectedAppointmentToEdit?.id : null}
-        onOpenBookingModal={(appointment: Appointment) => {
+        onOpenBookingModal={(appointment: Appointment, options) => {
+          setBookingInitialStep(options?.initialStep);
           setSelectedAppointmentToEdit(appointment);
           setBookingModalOpen(true);
         }}
@@ -312,15 +315,21 @@ export default function ReceptionistPatientProfilePage() {
       {bookingModalOpen && (
         <BookingModalWrapper
           open={bookingModalOpen}
-          onOpenChange={setBookingModalOpen}
+          onOpenChange={(open) => {
+            setBookingModalOpen(open);
+            if (!open) setBookingInitialStep(undefined);
+          }}
           defaultPatientId={patient.id ? String(patient.id) : undefined}
           appointmentToEdit={selectedAppointmentToEdit}
+          initialStep={bookingInitialStep}
           onBooked={() => {
             setSelectedAppointmentToEdit(null);
+            setBookingInitialStep(undefined);
             refreshPatients();
           }}
           onDeleted={() => {
             setSelectedAppointmentToEdit(null);
+            setBookingInitialStep(undefined);
             refreshPatients();
           }}
           appointmentCreationMode={newAppointmentCreationMode}

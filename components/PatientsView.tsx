@@ -75,6 +75,37 @@ const formatMissingProfileSections = (missing?: string[] | null) => {
 const isTourDemoPatient = (patient: Patient) =>
   String(patient.id || "").toUpperCase().includes("ENT_TEST");
 
+const formatPatientBalance = (value: number) => `\u20b1${value.toLocaleString()}`;
+
+const getPatientBalanceDisplay = (patient: Patient) => {
+  const originalBalance = Math.max(0, Number(patient.balance ?? 0));
+  const status = String(patient.status || "").toLowerCase().trim();
+  const isVoided = Boolean(patient.deleted) || status === "cancelled" || status === "deleted";
+
+  return {
+    originalBalance,
+    displayedBalance: isVoided ? 0 : originalBalance,
+    isVoided,
+  };
+};
+
+const renderPatientBalanceContent = (patient: Patient) => {
+  const { originalBalance, displayedBalance, isVoided } = getPatientBalanceDisplay(patient);
+
+  if (isVoided && originalBalance > 0) {
+    return (
+      <>
+        <span className="text-red-500 line-through decoration-red-400 decoration-2">
+          {formatPatientBalance(originalBalance)}
+        </span>
+        <span className="ml-1 text-emerald-600">{formatPatientBalance(0)}</span>
+      </>
+    );
+  }
+
+  return formatPatientBalance(displayedBalance);
+};
+
 const PATIENT_STATUS_FILTERS = [
   { value: "all", label: "All Statuses" },
   { value: "active", label: "Active" },
@@ -598,8 +629,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className={(patient.balance ?? 0) > 0 ? "border-red-100 bg-red-50 text-red-600" : "border-emerald-100 bg-emerald-50 text-emerald-700"}>
-                          ₱{(patient.balance ?? 0).toLocaleString()}
+                        <Badge variant="outline" className={getPatientBalanceDisplay(patient).displayedBalance > 0 ? "border-red-100 bg-red-50 text-red-600" : "border-emerald-100 bg-emerald-50 text-emerald-700"}>
+                          {renderPatientBalanceContent(patient)}
                         </Badge>
                       </div>
 
@@ -704,8 +735,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-1">
-                          <span className={`font-bold text-sm ${ (patient.balance ?? 0) > 0 ? "text-red-500" : "text-emerald-600" }`}>
-                            ₱{(patient.balance ?? 0).toLocaleString()}
+                          <span className={`font-bold text-sm ${ getPatientBalanceDisplay(patient).displayedBalance > 0 ? "text-red-500" : "text-emerald-600" }`}>
+                            {renderPatientBalanceContent(patient)}
                           </span>
                           <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Current</span>
                         </div>

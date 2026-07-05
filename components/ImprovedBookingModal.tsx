@@ -40,6 +40,7 @@ import useSharedBookingLogic, {
   getBookingCancellationConfig,
   getBookingConflictWarnings,
   getBookingDoctorSelectValue,
+  getBookingDoctorPayload,
   getBookingDoctorValue,
   getBookingCreateDate,
   getBookingCreateTime,
@@ -53,6 +54,7 @@ import useSharedBookingLogic, {
   normalizeBookingPaymentDate,
   isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
+  isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
@@ -75,13 +77,18 @@ import useSharedBookingLogic, {
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
+import { BookingPaymentPage } from "./PaymentModal";
+import { SelectDoctorModal } from "./SelectDoctorModal";
+import { SelectPatientModal } from "./SelectPatientModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors, type DoctorOption } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
-import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
+import type { BookingCreationMode, BookingInitialStep, BookingMode } from "./sharedBookingLogic";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 
 type ImprovedBookingStep = "patient" | "schedule" | "doctor" | "treatment" | "payment";
@@ -412,12 +419,13 @@ interface BookingModalProps {
   title?: string; // optional override for dialog title
   bookingMode?: BookingMode;
   appointmentCreationMode?: BookingCreationMode;
+  initialStep?: BookingInitialStep;
 }
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard", initialStep }: BookingModalProps) {
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
-  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
+  const { doctors, reloadDoctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, deleteAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
@@ -499,6 +507,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [isPaymentDatePickerOpen, setIsPaymentDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
   const [activeTourStepId, setActiveTourStepId] = useState(getCurrentTourStepId);
   const bookingTreatmentOptions = useMemo(
@@ -1788,7 +1797,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Set the modal step based on isPaymentFlow flag or if we are editing
       // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
       // or if we are viewing/editing an existing appointment
-      setModalStep(isPaymentFlow || appointmentToEdit ? 'payment' : 'patient');
+      const requestedInitialStep =
+        initialStep && initialStep !== "details" ? (initialStep as ImprovedBookingStep) : undefined;
+      setModalStep(requestedInitialStep || (isPaymentFlow || appointmentToEdit ? 'payment' : 'patient'));
       setIsRescheduling(false);
     } else {
       autoPreselectedScheduleRef.current = null;
@@ -1818,9 +1829,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset the flag when opening for new appointment
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      setModalStep('patient');
+      setModalStep(initialStep && initialStep !== "details" ? (initialStep as ImprovedBookingStep) : 'patient');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username, isPastAppointmentMode]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username, isPastAppointmentMode, initialStep]);
 
   const bookingMemoryKey = useMemo(
     () =>
@@ -1979,6 +1990,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const displayDoctor = formatDoctorName(scheduleDoctorName);
   const selectedDoctorForSchedule = getBookingDoctorValue(selectedDoctor);
   const selectedDoctorForBooking = getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
+  const bookingDoctorPayload = getBookingDoctorPayload(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorSelectValue = selectedDoctor ? getBookingDoctorSelectValue(selectedDoctor) : undefined;
   const showDoctorStep = !isDoctorSelectionLocked;
   const visibleBookingSteps: Array<{ id: ImprovedBookingStep; label: string; icon: string }> = [
@@ -2117,6 +2129,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const discountedPrice = Math.max(0, finalPrice - discountAmount);
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = parseFloat(amountToPay) || 0;
+  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === appointmentType);
   const selectedTreatmentName = appointmentType === "Other"
@@ -2191,7 +2204,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const validatePaymentDateForAmount = (amount: number) => {
-    if (amount <= 0) return true;
+    if (isBookingPaymentDateDisabled(amount, paymentMethod)) return true;
 
     const normalizedDate = normalizeBookingPaymentDate(paymentDate);
     if (!normalizedDate) {
@@ -2486,7 +2499,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || appointmentToEdit.patientName || selectedPatient,
               publicPatient: selectedPatientRecord || appointmentToEdit.publicPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -2508,7 +2521,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           : await updateAppointment(appointmentToEdit.id, {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -2575,7 +2588,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             const followUpPayload: any = {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: followUpDateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -2662,7 +2675,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               price: finalPrice,
@@ -2692,7 +2705,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctorForBooking,
+                ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
@@ -2735,7 +2748,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   duration: bookingDuration,
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                  doctor: selectedDoctorForBooking,
+                  ...bookingDoctorPayload,
                   notes: originalAppointmentNotes,
                   ...treatmentNotesUpdate,
                   price: finalPrice,
@@ -2758,7 +2771,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctorForBooking,
+                ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 price: finalPrice,
@@ -2776,7 +2789,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newApt = await addAppointment({
             patientId: selectedPatient,
             patientName: selectedPatientRecord?.name || selectedPatient,
-            doctor: selectedDoctorForBooking,
+            ...bookingDoctorPayload,
             date: dateStr,
             time: selectedTime,
             type: getAppointmentTypeIndex(appointmentType),
@@ -2817,7 +2830,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             const followUpPayload: any = {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: followUpDateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -3075,15 +3088,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const openPaymentDatePicker = () => {
-    const input = paymentDateInputRef.current;
-    if (!input) return;
+    if (isPaymentDateDisabled) return;
 
-    input.focus();
-    try {
-      (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-    } catch {
-      // Some browsers only allow showPicker from direct user activation; focus still keeps the input usable.
-    }
+    setIsPaymentDatePickerOpen(true);
+  };
+
+  useEffect(() => {
+    if (isPaymentDateDisabled) setIsPaymentDatePickerOpen(false);
+  }, [isPaymentDateDisabled]);
+
+  const handlePaymentDateSelect = (date: Date) => {
+    if (isPaymentDateDisabled) return;
+
+    setPaymentDate(formatDateToYYYYMMDD(date));
+    setIsPaymentDatePickerOpen(false);
   };
 
   const handlePrimaryBookingAction = (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -3245,7 +3263,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               
               {/* STEP 1: PATIENT */}
               {modalStep === 'patient' && (
-                <div data-tour-id="booking-patient-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <SelectPatientModal>
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Stethoscope className="h-7 w-7" />
@@ -3282,12 +3300,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </SelectPatientModal>
               )}
 
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
-                <div data-tour-id="booking-schedule-step" className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                <SelectScheduleModal>
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <CalendarIcon className="h-7 w-7" />
@@ -3351,12 +3369,23 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     </button>
                   </div>
-                </div>
+                </SelectScheduleModal>
               )}
 
               {/* STEP 3: DOCTOR */}
               {modalStep === 'doctor' && showDoctorStep && (
-                <div data-tour-id="booking-doctor-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <SelectDoctorModal
+                  showAddDoctorButton={!isPublicBookingMode}
+                  onDoctorAdded={(staff) => {
+                    const addedDoctorName =
+                      staff && typeof staff === "object" ? String((staff as { name?: unknown }).name || "").trim() : "";
+                    if (addedDoctorName) {
+                      autoPreselectedDoctorRef.current = null;
+                      setSelectedDoctor(addedDoctorName);
+                    }
+                    void reloadDoctors();
+                  }}
+                >
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Award className="h-7 w-7" />
@@ -3467,12 +3496,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       );
                     })}
                   </div>
-                </div>
+                </SelectDoctorModal>
               )}
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div data-tour-id="booking-treatment-step" className="mx-auto max-w-5xl space-y-2.5 animate-in fade-in slide-in-from-bottom-4 sm:space-y-4">
+                <SelectTreatmentModal>
                   <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
                     <Label htmlFor="improved-booking-treatment-select" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
                         Treatment Service
@@ -3764,12 +3793,38 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
                   </div>
 
-                </div>
+                </SelectTreatmentModal>
               )}
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
                 <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-5 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <BookingPaymentPage
+                    selectedTreatmentName={selectedTreatmentName || "Selected Treatment"}
+                    totalBilled={discountedPrice}
+                    totalPaid={previouslyPaidAmount}
+                    currentBalanceDue={remainingBalance}
+                    amount={amountToPay}
+                    onAmountChange={setAmountToPay}
+                    paymentDate={paymentDate}
+                    onPaymentDateChange={setPaymentDate}
+                    paymentDateDisabled={isPaymentDateDisabled}
+                    paymentMethod={paymentMethod}
+                    onPaymentMethodChange={setPaymentMethod}
+                    projectedRemainingBalance={projectedRemainingBalance}
+                    onPayFull={() => setAmountToPay(String(remainingBalance))}
+                    payFullDisabled={remainingBalance <= 0}
+                    paymentDateInputRef={paymentDateInputRef}
+                    maxPaymentDate={getDefaultBookingPaymentDate()}
+                    onOpenPaymentDatePicker={openPaymentDatePicker}
+                    paymentDateHelp={formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
+                    methodOptions={[
+                      { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
+                      { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-violet-600", shadow: "shadow-violet-100" },
+                      ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
+                    ]}
+                  />
+                  <div className="hidden">
                   <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
                     <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.35rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100 sm:h-16 sm:w-16 sm:rounded-[1.25rem]">
                       <CreditCard className="h-8 w-8" />
@@ -3876,13 +3931,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               max={getDefaultBookingPaymentDate()}
                               onChange={(e: any) => setPaymentDate(e.target.value)}
                               onClick={openPaymentDatePicker}
-                              className="h-20 rounded-2xl border-2 border-slate-200 bg-white px-6 pr-20 text-3xl font-black tracking-tight text-slate-950 shadow-none focus:border-blue-500 focus:bg-white focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0"
+                              disabled={isPaymentDateDisabled}
+                              aria-disabled={isPaymentDateDisabled}
+                              className={`h-20 rounded-2xl border-2 px-6 pr-20 text-3xl font-black tracking-tight shadow-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                isPaymentDateDisabled
+                                  ? "pointer-events-none cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70"
+                                  : "border-slate-200 bg-white text-slate-950 focus:border-blue-500 focus:bg-white"
+                              }`}
                             />
                             <button
                               type="button"
                               onClick={openPaymentDatePicker}
+                              disabled={isPaymentDateDisabled}
+                              aria-disabled={isPaymentDateDisabled}
                               aria-label="Open payment date calendar"
-                              className="absolute right-5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-950 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className={`absolute right-5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                isPaymentDateDisabled
+                                  ? "cursor-not-allowed text-slate-300"
+                                  : "text-slate-950 hover:bg-slate-100"
+                              }`}
                             >
                               <CalendarIcon className="h-6 w-6" />
                             </button>
@@ -3929,6 +3996,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
                   </div>
 
+                  </div>
                 </div>
               )}
             </div>
@@ -4095,6 +4163,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       />
 
       <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={handleManualDateSelect} doctorName={selectedDoctorForSchedule} patientId={selectedPatient} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <DatePickerModal
+        open={isPaymentDatePickerOpen}
+        onOpenChange={setIsPaymentDatePickerOpen}
+        selectedDate={parseLocalDateOnly(paymentDate) || new Date()}
+        onDateSelect={handlePaymentDateSelect}
+        title="Select Payment Date"
+        subtitle="Choose the date this payment was made."
+      />
       
       <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctorForSchedule} duration={duration} onTimeSelect={handleManualTimeSelect} onDateChange={handleManualDateSelect} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
     </>

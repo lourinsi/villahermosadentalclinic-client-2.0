@@ -67,7 +67,7 @@ export const isBillableAppointment = (appointment: PatientAggregateAppointment) 
   if (appointment.deleted) return false;
 
   const status = normalizeAppointmentStatus(appointment.status);
-  return status !== "cancelled" && !isCartAppointmentStatus(status);
+  return status !== "cancelled" && status !== "deleted" && !isCartAppointmentStatus(status);
 };
 
 export const getAppointmentOutstandingBalance = (appointment: PatientAggregateAppointment) => {
@@ -127,6 +127,7 @@ export const getNextAppointmentDate = (
         appointmentDate >= todayStr &&
         status !== "completed" &&
         status !== "cancelled" &&
+        status !== "deleted" &&
         !isCartAppointmentStatus(status)
       );
     })

@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ interface OverpaymentConfirmDialogProps {
   onAdjustedPriceChange: (value: string) => void;
   onKeepPrice: () => void;
   onAdjustPrice: () => void;
+  loadingAction?: "keep" | "adjust" | null;
 }
 
 const money = (value: number) => `PHP ${Math.max(0, Number(value) || 0).toLocaleString()}`;
@@ -29,12 +30,17 @@ export default function OverpaymentConfirmDialog({
   onAdjustedPriceChange,
   onKeepPrice,
   onAdjustPrice,
+  loadingAction = null,
 }: OverpaymentConfirmDialogProps) {
   const nextTotalPaid = Math.max(0, previousPaidAmount + paymentAmount);
   const overpaidBy = Math.max(0, nextTotalPaid - currentTotalDue);
+  const isWorking = Boolean(loadingAction);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (isWorking && !nextOpen) return;
+      onOpenChange(nextOpen);
+    }}>
       <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden">
         <DialogHeader className="border-b bg-amber-50 px-6 py-5 text-left">
           <div className="flex items-start gap-3">
@@ -72,7 +78,7 @@ export default function OverpaymentConfirmDialog({
 
           <div className="space-y-2">
             <Label htmlFor="overpaymentAdjustedPrice" className="text-sm font-bold text-slate-800">
-              Adjusted treatment total
+              Adjusted treatment price
             </Label>
             <Input
               id="overpaymentAdjustedPrice"
@@ -80,6 +86,7 @@ export default function OverpaymentConfirmDialog({
               min="0"
               value={adjustedPrice}
               onChange={(event) => onAdjustedPriceChange(event.target.value)}
+              disabled={isWorking}
               className="h-12 rounded-xl text-lg font-black"
             />
             <p className="text-xs font-medium text-slate-500">
@@ -89,11 +96,13 @@ export default function OverpaymentConfirmDialog({
         </div>
 
         <DialogFooter className="gap-2 border-t bg-slate-50 px-6 py-4 sm:justify-between">
-          <Button type="button" variant="outline" onClick={onKeepPrice} className="h-11 rounded-xl font-bold">
-            Keep Current Total
+          <Button type="button" variant="outline" onClick={onKeepPrice} disabled={isWorking} className="h-11 rounded-xl font-bold">
+            {loadingAction === "keep" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {loadingAction === "keep" ? "Recording..." : "Keep Current Total"}
           </Button>
-          <Button type="button" onClick={onAdjustPrice} className="h-11 rounded-xl bg-emerald-600 font-bold text-white hover:bg-emerald-700">
-            Adjust Total & Continue
+          <Button type="button" onClick={onAdjustPrice} disabled={isWorking} className="h-11 rounded-xl bg-emerald-600 font-bold text-white hover:bg-emerald-700">
+            {loadingAction === "adjust" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {loadingAction === "adjust" ? "Recording..." : "Adjust Total & Continue"}
           </Button>
         </DialogFooter>
       </DialogContent>

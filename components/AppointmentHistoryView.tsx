@@ -1,19 +1,30 @@
 import React, { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
-import { getAppointmentTypeName } from "@/lib/appointmentTypes";
+import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
+import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
+import type { Appointment } from "@/hooks/useAppointments";
 import { formatWordyDate } from "@/lib/utils";
 import {
   formatBookingHistoryStatusLabel,
@@ -21,7 +32,10 @@ import {
   formatBookingPaymentAdjustmentAmountLabel,
   getBookingPaymentAdjustment,
   getBookingTreatmentNotesValue,
+  getBookingToothNumberEntries,
   getBookingToothNumbersValue,
+  normalizeBookingDuration,
+  normalizeBookingToothNumbers,
   normalizeBookingPaymentMethod,
   normalizeBookingHistoryStatus,
 } from "./sharedBookingLogic";
@@ -29,6 +43,8 @@ import {
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
+import { SelectDoctorModal } from "./SelectDoctorModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -127,7 +143,7 @@ const resolveDoctorName = (doctor: any) => {
 
 const normalizeDoctorName = (doctor: any) => {
   const normalized = normalizeDoctorIdentity(resolveDoctorName(doctor));
-  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(normalized) ? "" : normalized;
+  return /^(none|null|undefined|unassigned|no doctor assigned|n\/a|n\.a\.?|na|-)$/.test(normalized) ? "" : normalized;
 };
 
 const shortDoctorLabel = (fullName?: string, prefix = "From") => {
@@ -328,21 +344,55 @@ const isPatientChange = (snapshot: any) => {
   return Boolean(pPrev && pNext && pPrev !== pNext);
 };
 
+const getInitials = (name?: string) =>
+  String(name || "Doctor")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "DR";
+
+const getEditablePaymentId = (payment: any) => {
+  const explicitPaymentId = payment?.paymentId || payment?.paymentRecordId || payment?.id;
+  return explicitPaymentId ? String(explicitPaymentId).trim() : "";
+};
+
+const getManagementBasePath = (pathname: string | null) => {
+  if (pathname?.startsWith("/receptionist")) return "/receptionist";
+  if (pathname?.startsWith("/admin")) return "/admin";
+  if (pathname?.startsWith("/doctor")) return "/doctor";
+  return "/admin";
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true }: AppointmentHistoryViewProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
+  const [isAssignDoctorOpen, setIsAssignDoctorOpen] = useState(false);
+  const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
+  const [isOpeningPaymentEdit, setIsOpeningPaymentEdit] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestPaymentLogDate, setLatestPaymentLogDate] = useState<string>("");
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
-  const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
+  const [isChangeTreatmentOpen, setIsChangeTreatmentOpen] = useState(false);
+  const [isSavingTreatmentChange, setIsSavingTreatmentChange] = useState(false);
+  const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
+  const [customTreatmentName, setCustomTreatmentName] = useState("");
+  const [selectedTreatmentPrice, setSelectedTreatmentPrice] = useState("");
+  const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
+  const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(open);
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
   // Appointment action helpers (approve/reject) using central appointment modal hook
-  const { updateAppointment } = useAppointmentModal();
+  const { updateAppointment, openEditModalById } = useAppointmentModal();
+  const { openPaymentFor, openEditPaymentModal } = usePaymentModal();
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
@@ -363,6 +413,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   useEffect(() => {
     if (!open) {
       setSnapshotHistory([]);
+      setIsChangeTreatmentOpen(false);
+      setSelectedTreatmentId(null);
+      setCustomTreatmentName("");
+      setSelectedTreatmentPrice("");
+      setTreatmentToothNumberEntries([""]);
     }
   }, [open]);
 
@@ -776,6 +831,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const latestToothNumbersText = latestStateForComparison
     ? getBookingToothNumbersValue(latestStateForComparison)
     : undefined;
+  const activeTreatmentOptions = treatmentOptions.filter((option) => option.isActive !== false);
+  const selectedTreatmentOption = activeTreatmentOptions.find((option) => option.id === selectedTreatmentId) || null;
+  const isCustomSelectedTreatment = selectedTreatmentOption?.id === OTHER_APPOINTMENT_TYPE_INDEX;
 
   const statusCurrentChange = createCurrentFieldChange(
     "status",
@@ -911,7 +969,24 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
 
   const appointmentId = displayedAppointmentId;
-  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && onOpenAppointment && !isAppointmentOpen);
+  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
+  const canUseSnapshotActions = Boolean(!actionsDisabled && appointmentId);
+  const managementBasePath = getManagementBasePath(pathname);
+  const patientRouteName = isIgnorablePatientName(patientName) ? "" : patientName;
+  const doctorRouteName = displayedDoctorName || "";
+  const canGoToPatient = Boolean(patientRouteName);
+  const canGoToDoctor = Boolean(doctorRouteName);
+  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
+  const canChangeTreatment = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
+  const canSaveTreatmentChange = Boolean(
+    canChangeTreatment &&
+    selectedTreatmentOption &&
+    (!isCustomSelectedTreatment || customTreatmentName.trim()) &&
+    Number.isFinite(Number(selectedTreatmentPrice)) &&
+    Number(selectedTreatmentPrice) >= 0 &&
+    !isSavingTreatmentChange &&
+    !isLoadingTreatmentOptions
+  );
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
   const canShowSnapshotActions = Boolean(
     snapshotState === "current" &&
@@ -923,6 +998,268 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const actionNoteText = nextStatusNorm === "tbd"
     ? "Accept to mark this appointment as completed or cancel it if needed."
     : "Accept to confirm this schedule or cancel the appointment request.";
+
+  const getAppointmentForPayment = (): Appointment => ({
+    ...displayedSnapshot,
+    id: String(appointmentId),
+    patientId: String(displayedPatientId || displayedSnapshot?.patientId || ""),
+    patientName,
+    date: String(displayedSnapshot?.date || ""),
+    time: String(displayedSnapshot?.time || ""),
+    type: Number.isFinite(Number(displayedSnapshot?.type)) ? Number(displayedSnapshot.type) : 0,
+    customType: displayedSnapshot?.customType,
+    price: Number(displayedBasePrice) || 0,
+    discount: Number(displayedDiscountAmount) || 0,
+    doctor: displayedDoctorName || resolveDoctorName(displayedSnapshot?.doctor || displayedSnapshot?.doctorName || ""),
+    doctorId: displayedSnapshot?.doctorId,
+    doctorName: displayedDoctorName || displayedSnapshot?.doctorName,
+    duration: Number(displayedSnapshot?.duration) || undefined,
+    notes: displayedSnapshot?.notes || "",
+    treatmentNotes: displayedTreatmentNotesComparisonText || displayedSnapshot?.treatmentNotes,
+    toothNumbers: displayedToothNumbersText || displayedSnapshot?.toothNumbers,
+    serviceType: displayedSnapshot?.serviceType,
+    status: displayedSnapshot?.status || "scheduled",
+    paymentStatus: displayedSnapshot?.paymentStatus,
+    paymentMethod: displayedSnapshot?.paymentMethod,
+    paymentDate: displayedSnapshot?.paymentDate,
+    balance: displayedBalanceNumeric ?? undefined,
+    totalPaid: Number(totalPaidAmount) || 0,
+    patient: displayedSnapshot?.patient,
+  } as Appointment);
+
+  const handleOpenAppointment = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    if (onOpenAppointment) {
+      onOpenAppointment(String(appointmentId), displayedSnapshot);
+      return;
+    }
+
+    try {
+      await openEditModalById(String(appointmentId));
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open appointment:", error);
+      toast.error("Failed to open appointment");
+    }
+  };
+
+  const handleAddPayment = () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    openPaymentFor(getAppointmentForPayment(), String(displayedPatientId || ""), patientName);
+  };
+
+  const handleEditPayment = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    setIsOpeningPaymentEdit(true);
+    try {
+      const response = await fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(String(appointmentId))}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json().catch(() => null);
+      const payments = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+      const latestEditablePayment = payments.find((payment: any) => getEditablePaymentId(payment));
+
+      if (!latestEditablePayment) {
+        toast.error("No editable payment found for this appointment");
+        return;
+      }
+
+      openEditPaymentModal(
+        getEditablePaymentId(latestEditablePayment),
+        latestEditablePayment,
+        String(displayedPatientId || latestEditablePayment.patientId || ""),
+        [getAppointmentForPayment()]
+      );
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open payment edit:", error);
+      toast.error("Failed to open payment editor");
+    } finally {
+      setIsOpeningPaymentEdit(false);
+    }
+  };
+
+  const closeChangeTreatmentModal = (force = false) => {
+    if (isSavingTreatmentChange && !force) return;
+
+    setIsChangeTreatmentOpen(false);
+    setSelectedTreatmentId(null);
+    setCustomTreatmentName("");
+    setSelectedTreatmentPrice("");
+    setTreatmentToothNumberEntries([""]);
+  };
+
+  const openChangeTreatmentModal = () => {
+    if (!canChangeTreatment) {
+      toast.error("This snapshot cannot be edited");
+      return;
+    }
+
+    const normalizeTreatmentLabel = (value: unknown) =>
+      String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const numericType =
+      typeof displayedSnapshot?.type === "number"
+        ? displayedSnapshot.type
+        : typeof displayedSnapshot?.type === "string" && displayedSnapshot.type.trim()
+          ? Number(displayedSnapshot.type)
+          : NaN;
+    const normalizedCurrentName = normalizeTreatmentLabel(typeName);
+    const matchedTreatment = activeTreatmentOptions.find((option) =>
+      option.id === numericType ||
+      normalizeTreatmentLabel(option.label) === normalizedCurrentName ||
+      normalizeTreatmentLabel(option.value) === normalizedCurrentName
+    );
+    const nextSelectedTreatmentId = matchedTreatment?.id ?? OTHER_APPOINTMENT_TYPE_INDEX;
+    const currentPrice = pickNumericValue(displayedSnapshot.price, displayedBasePrice, matchedTreatment?.price) ?? 0;
+
+    setSelectedTreatmentId(nextSelectedTreatmentId);
+    setCustomTreatmentName(
+      nextSelectedTreatmentId === OTHER_APPOINTMENT_TYPE_INDEX
+        ? String(displayedSnapshot.customType || typeName || "").trim()
+        : ""
+    );
+    setSelectedTreatmentPrice(String(Math.max(0, Number(currentPrice) || 0)));
+    setTreatmentToothNumberEntries(getBookingToothNumberEntries(displayedToothNumbersText));
+    setIsChangeTreatmentOpen(true);
+  };
+
+  const handleSaveTreatmentChange = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    if (!selectedTreatmentOption) {
+      toast.error("Please select a treatment");
+      return;
+    }
+
+    const isCustomTreatment = selectedTreatmentOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
+    const customType = isCustomTreatment ? customTreatmentName.trim() : "";
+    if (isCustomTreatment && !customType) {
+      toast.error("Custom treatment name is required");
+      return;
+    }
+
+    const nextPrice = Number(selectedTreatmentPrice);
+    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
+      toast.error("Enter a valid treatment price");
+      return;
+    }
+
+    const previousDuration = normalizeBookingDuration(displayedSnapshot.duration || selectedTreatmentOption.duration || 30);
+    const nextDuration = isCustomTreatment
+      ? previousDuration
+      : normalizeBookingDuration(selectedTreatmentOption.duration || 30);
+    const nextToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
+
+    setIsSavingTreatmentChange(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), {
+        type: selectedTreatmentOption.id,
+        customType: isCustomTreatment ? customType : undefined,
+        duration: nextDuration,
+        price: Math.max(0, nextPrice),
+        toothNumbers: nextToothNumbers,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        type: updated?.type ?? selectedTreatmentOption.id,
+        customType: isCustomTreatment ? customType : updated?.customType,
+        duration: updated?.duration ?? nextDuration,
+        price: updated?.price ?? Math.max(0, nextPrice),
+        toothNumbers: updated?.toothNumbers ?? nextToothNumbers,
+      }));
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Treatment updated");
+      closeChangeTreatmentModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update treatment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update treatment");
+    } finally {
+      setIsSavingTreatmentChange(false);
+    }
+  };
+
+  const goToPatient = () => {
+    if (!canGoToPatient) {
+      toast.error("No patient profile available");
+      return;
+    }
+
+    if (managementBasePath === "/doctor") {
+      router.push("/doctor/patients");
+      return;
+    }
+
+    router.push(`${managementBasePath}/patients/${encodeURIComponent(patientRouteName)}`);
+  };
+
+  const goToDoctor = () => {
+    if (!canGoToDoctor) {
+      toast.error("No doctor profile available");
+      return;
+    }
+
+    const doctorBasePath = managementBasePath === "/doctor" ? "/doctors" : `${managementBasePath}/doctors`;
+    router.push(`${doctorBasePath}/${encodeURIComponent(doctorRouteName)}`);
+  };
+
+  const handleAssignDoctor = async (doctor: any) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    setIsAssigningDoctor(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), {
+        doctor: doctor.name,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        doctor: doctor.name,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+        doctorProfile: doctor.profilePicture || doctor.profilePictureUrl || current?.doctorProfile,
+        doctorProfilePicture: doctor.profilePicture || doctor.profilePictureUrl || current?.doctorProfilePicture,
+      }));
+      setLatestComparisonSnapshot(null);
+      setIsAssignDoctorOpen(false);
+      toast.success("Doctor assigned");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to assign doctor:", error);
+      toast.error("Failed to assign doctor");
+    } finally {
+      setIsAssigningDoctor(false);
+    }
+  };
 
   const viewLatestSnapshot = () => {
     if (!displayedSnapshot) return;
@@ -1092,26 +1429,28 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[92dvh] max-h-[92dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[92vh] sm:w-[min(34rem,calc(100vw-2rem))] sm:max-w-[34rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[2rem]"
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[94dvh] max-h-[94dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-[0_28px_90px_rgba(15,23,42,0.22)] data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[94vh] sm:w-[min(68rem,calc(100vw-2rem))] sm:max-w-[68rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
         >
-          <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 shadow-sm sm:px-6">
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <DialogHeader className="shrink-0 bg-white px-5 pb-4 pt-3 sm:px-8 sm:pb-5 sm:pt-8">
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 flex-1 items-start gap-4">
                 {snapshotHistory.length > 0 ? (
-                  <Button size="icon" variant="ghost" className="mt-0.5 h-8 w-8 shrink-0 rounded-full text-slate-600 hover:bg-slate-100" title="Go back to previous snapshot" onClick={goBackSnapshot}>
-                    <ArrowLeft className="h-4 w-4" />
+                  <Button size="icon" variant="ghost" className="mt-1 h-11 w-11 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" title="Go back to previous snapshot" onClick={goBackSnapshot}>
+                    <ArrowLeft className="h-5 w-5" />
                   </Button>
                 ) : null}
-                <div className="min-w-0">
-                  <DialogTitle className="flex flex-wrap items-center gap-2 text-violet-600">
-                    <Clock className="h-5 w-5 shrink-0" />
-                    <span className="text-xl font-black tracking-tight">Snapshot</span>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-violet-600 bg-white text-violet-700">
+                  <Clock className="h-6 w-6" />
+                </div>
+                <div className="min-w-0 pt-1">
+                  <DialogTitle className="flex flex-wrap items-center gap-x-5 gap-y-2 text-slate-950">
+                    <span className="text-2xl font-black tracking-tight sm:text-[2rem]">Snapshot</span>
                     {showsLogSnapshotState ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                            <StateIcon className="h-3.5 w-3.5" />
+                          <span className={`inline-flex cursor-help items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
+                            <StateIcon className="h-4 w-4" />
                             {stateLabel}
                           </span>
                         </TooltipTrigger>
@@ -1120,205 +1459,449 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                        <StateIcon className="h-3.5 w-3.5" />
+                      <span className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
+                        <StateIcon className="h-4 w-4" />
                         {stateLabel}
                       </span>
                     )}
                   </DialogTitle>
-                  <DialogDescription className="mt-1 truncate text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  <DialogDescription className="mt-3 line-clamp-2 text-left text-sm font-semibold leading-6 text-slate-500 sm:text-base">
                     {timestampPrefix} {snapshotDate}{changeSuffix ? ` - ${changeSuffix}` : ""}
                   </DialogDescription>
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 items-center gap-3 lg:justify-end">
                 {canOpenAppointment ? (
-                  <Button className="h-10 rounded-full bg-blue-600 px-4 text-sm font-black text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700 active:scale-95" title="Open this appointment" onClick={() => onOpenAppointment?.(String(appointmentId), displayedSnapshot)}>
-                    <CalendarIcon className="mr-2 h-4 w-4" />
+                  <Button className="h-12 rounded-xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-200 transition-all hover:bg-violet-700 active:scale-95 sm:h-14 sm:px-7 sm:text-base" title="Open this appointment" onClick={handleOpenAppointment}>
+                    <CalendarIcon className="mr-2 h-5 w-5" />
                     Open
                   </Button>
                 ) : null}
                 {showsLogSnapshotState ? (
-                  <Button className="h-10 rounded-full bg-slate-100 px-3 text-xs font-black text-slate-600 shadow-none transition-all hover:bg-slate-200 active:scale-95" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
-                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isFetchingLogs ? "animate-spin" : ""}`} />
+                  <Button className="h-12 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 shadow-none transition-all hover:bg-amber-100 active:scale-95 sm:h-14" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isFetchingLogs ? "animate-spin" : ""}`} />
                     Latest
                   </Button>
                 ) : null}
-                <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-10 w-10 rounded-full text-slate-600 hover:bg-slate-100" aria-label="Close snapshot">
-                  <X className="h-5 w-5" />
+                {canUseSnapshotActions ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" size="icon" className="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14" aria-label="More appointment actions">
+                        <EllipsisVertical className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onSelect={handleOpenAppointment}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        Open
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={openChangeTreatmentModal} disabled={!canChangeTreatment || isLoadingTreatmentOptions}>
+                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Stethoscope className="mr-2 h-4 w-4" />}
+                        Change treatment
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
+                        {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                        Edit payment
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleAddPayment}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add payment
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={goToPatient} disabled={!canGoToPatient}>
+                        <User className="mr-2 h-4 w-4" />
+                        Go to patient
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={goToDoctor} disabled={!canGoToDoctor}>
+                        <Stethoscope className="mr-2 h-4 w-4" />
+                        Go to doctor
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+                <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-xl text-slate-600 hover:bg-slate-100 sm:h-14 sm:w-14" aria-label="Close snapshot">
+                  <X className="h-7 w-7" />
                 </Button>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
-            <div className="mx-auto grid max-w-[31rem] gap-3.5">
-              <div className="grid grid-cols-2 gap-3 max-[360px]:grid-cols-1">
-                <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Status</Label>
-                    <CurrentChangeIndicator change={statusCurrentChange} />
-                  </div>
-                  <span className={`inline-flex w-fit rounded-full px-3 py-1 text-sm font-black uppercase tracking-wider ${displayedStatusColors.bgColor} ${displayedStatusColors.textColor}`}>
-                    {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
-                  </span>
-                  {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
-                    <p className="mt-2 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
-                  ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Payment</Label>
-                    <CurrentChangeIndicator change={paymentStatusCurrentChange} />
-                  </div>
-                  <span className={`inline-flex w-fit rounded-full px-3 py-1 text-sm font-black uppercase tracking-wider ${displayedPaymentStatusColors.bgColor} ${displayedPaymentStatusColors.textColor}`}>
-                    {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus)}
-                  </span>
-                  {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
-                    <p className="mt-2 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="relative overflow-hidden rounded-2xl border border-violet-100 bg-white p-4 shadow-sm">
-                <div className="absolute right-4 top-4 opacity-[0.04]"><Banknote className="h-16 w-16 text-violet-600" /></div>
-                <div className="relative z-10 flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-100 bg-violet-50 text-violet-600"><Banknote className="h-5 w-5" /></div>
-                    <div className="min-w-0">
-                      <Label className="block text-[11px] font-black uppercase tracking-widest text-violet-400">Balance</Label>
-                      <p className="mt-1 text-sm font-bold text-slate-500">To be settled</p>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 pb-5 custom-scrollbar sm:px-8 sm:pb-7">
+            <div className="grid gap-4">
+              <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+                <div className="flex flex-wrap gap-3">
+                  <div className="min-w-[11.5rem] rounded-full border border-emerald-100 bg-emerald-50/70 px-4 py-3 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                        <CalendarIcon className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`truncate text-base font-black ${displayedStatusColors.textColor}`}>
+                            {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
+                          </p>
+                          <CurrentChangeIndicator change={statusCurrentChange} />
+                        </div>
+                        {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
+                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5 text-right">
-                    <p className="text-2xl font-black tracking-tight text-violet-600">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
-                    <CurrentChangeIndicator change={balanceCurrentChange} />
-                  </div>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-0 overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm max-[420px]:grid-cols-1">
-                <div className="flex min-w-0 items-center gap-3 p-4">
-                  <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-12 w-12 shrink-0 rounded-2xl border border-slate-100 shadow-sm" sizeClass="h-12 w-12 rounded-2xl" />
-                  <div className="min-w-0">
-                    <Label className="block text-[11px] font-black uppercase tracking-widest text-slate-400">Patient</Label>
-                    <div className="mt-1 flex min-w-0 items-center gap-1">
-                      <p className="truncate text-base font-black leading-tight text-slate-900">{patientName}</p>
-                      <CurrentChangeIndicator change={patientCurrentChange} />
+                  <div className="min-w-[10.5rem] rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-600 shadow-sm ring-1 ring-slate-200">
+                        <WalletCards className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`truncate text-base font-black ${displayedPaymentStatusColors.textColor}`}>
+                            {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus)}
+                          </p>
+                          <CurrentChangeIndicator change={paymentStatusCurrentChange} />
+                        </div>
+                        {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
+                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center gap-3 border-l border-slate-100 p-4 max-[420px]:border-l-0 max-[420px]:border-t">
-                  <Avatar className="h-12 w-12 shrink-0 rounded-2xl border border-slate-100 shadow-sm">
-                    <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
-                    <AvatarFallback className="rounded-2xl bg-blue-50 text-blue-600"><Stethoscope className="h-5 w-5" /></AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <Label className="block text-[11px] font-black uppercase tracking-widest text-slate-400">Doctor</Label>
-                    <div className="mt-1 flex min-w-0 items-center gap-1">
-                      <p className="truncate text-base font-black leading-tight text-slate-900">{displayedDoctorName || "Unassigned"}</p>
-                      <CurrentChangeIndicator change={doctorCurrentChange} />
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 max-[360px]:grid-cols-1">
-                <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center gap-2"><CalendarIcon className="h-4 w-4 text-blue-600" /><Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Date</Label></div>
-                  <div className="flex items-start gap-1.5"><p className="text-base font-black leading-tight text-slate-900">{formattedDate}</p><CurrentChangeIndicator change={dateCurrentChange} /></div>
-                </div>
-                <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center gap-2"><Clock className="h-4 w-4 text-amber-500" /><Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Time Slot</Label></div>
-                  <div className="flex items-start gap-1.5"><p className="text-base font-black leading-tight text-slate-900">{displayedTimeLabel}</p><CurrentChangeIndicator change={timeCurrentChange} /></div>
-                </div>
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><Stethoscope className="h-5 w-5" /></div>
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <p className="truncate text-lg font-black leading-tight text-slate-900">{typeName}</p>
-                      <CurrentChangeIndicator change={serviceCurrentChange} />
-                    </div>
-                  </div>
-                  {displayedToothNumbersText ? (
-                    <span className="inline-flex max-w-full shrink-0 items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
-                      Tooth # {displayedToothNumbersText}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="space-y-4 p-4">
+                <div className="rounded-[1.35rem] border border-violet-100 bg-white p-4 shadow-[0_10px_30px_rgba(79,70,229,0.08)] sm:p-5">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-slate-400">Price<CurrentChangeIndicator change={priceCurrentChange} /></span>
-                    <div className="text-right">
-                      {displayedDiscountAmount > 0 ? (
-                        <>
-                          <div className="text-xs font-bold text-slate-300 line-through">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
-                          <div className="text-lg font-black text-slate-900">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
-                        </>
-                      ) : (
-                        <span className="text-lg font-black text-slate-900">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
-                      )}
+                    <div className="flex min-w-0 items-center gap-4">
+                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 ring-1 ring-violet-200">
+                        <Banknote className="h-6 w-6" />
+                      </span>
+                      <div className="min-w-0">
+                        <Label className="block text-xs font-black uppercase tracking-widest text-violet-700">Balance</Label>
+                        <p className="mt-1 text-sm font-bold text-slate-500">To be settled</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-right">
+                      <p className="text-3xl font-black tracking-tight text-violet-700 sm:text-4xl">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
+                      <CurrentChangeIndicator change={balanceCurrentChange} />
                     </div>
                   </div>
-                  {shouldShowPaymentLine ? (
-                    <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
-                      <span className="text-[11px] font-black uppercase tracking-widest text-emerald-600/80">{snapshotPaymentLabel}</span>
-                      <div className="text-right">
-                        <div className="text-base font-black text-emerald-600">{snapshotPaymentAmountLabel}</div>
-                        <div className="text-[11px] font-bold text-slate-400">
-                          {snapshotPaymentMethodLabel}{snapshotPaymentDateLabel ? ` - ${snapshotPaymentDateLabel}` : ""}
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.08fr_1fr]">
+                <div className="grid gap-4">
+                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                    <div className="flex items-center gap-3 text-violet-700">
+                      <Users className="h-6 w-6" />
+                      <Label className="text-sm font-black uppercase tracking-wide">People</Label>
+                    </div>
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                      <button
+                        type="button"
+                        onClick={canGoToPatient ? goToPatient : undefined}
+                        tabIndex={canGoToPatient ? 0 : -1}
+                        aria-disabled={!canGoToPatient}
+                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 px-4 py-3 text-left transition-colors ${canGoToPatient ? "hover:bg-slate-50" : "cursor-default"}`}
+                      >
+                        <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm" sizeClass="h-14 w-14 rounded-full" />
+                        <div className="min-w-0 flex-1">
+                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Patient</Label>
+                          <div className="mt-1 flex min-w-0 items-center gap-2">
+                            <p className="truncate text-lg font-black leading-tight text-slate-950">{patientName}</p>
+                            <CurrentChangeIndicator change={patientCurrentChange} />
+                          </div>
+                        </div>
+                        <ChevronRight className={`h-6 w-6 shrink-0 ${canGoToPatient ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={canAssignDoctor ? () => setIsAssignDoctorOpen(true) : canGoToDoctor ? goToDoctor : undefined}
+                        tabIndex={canAssignDoctor || canGoToDoctor ? 0 : -1}
+                        aria-disabled={!canAssignDoctor && !canGoToDoctor}
+                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 border-t border-slate-200 px-4 py-3 text-left transition-colors ${canAssignDoctor || canGoToDoctor ? "hover:bg-slate-50" : "cursor-default"}`}
+                      >
+                        <Avatar className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm">
+                          <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
+                          <AvatarFallback className="rounded-full bg-violet-50 text-violet-700"><Stethoscope className="h-6 w-6" /></AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Doctor</Label>
+                          <div className="mt-1 flex min-w-0 items-center gap-2">
+                            <p className={`truncate text-lg font-black leading-tight ${canAssignDoctor ? "text-violet-700" : "text-slate-950"}`}>{canAssignDoctor ? "Assign doctor" : displayedDoctorName || "Unassigned"}</p>
+                            <CurrentChangeIndicator change={doctorCurrentChange} />
+                          </div>
+                        </div>
+                        <ChevronRight className={`h-6 w-6 shrink-0 ${canAssignDoctor || canGoToDoctor ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                    <div className="flex items-center gap-3 text-violet-700">
+                      <CalendarIcon className="h-6 w-6" />
+                      <Label className="text-sm font-black uppercase tracking-wide">Schedule</Label>
+                    </div>
+                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                      <div className="min-w-0 sm:border-r sm:border-slate-200 sm:pr-6">
+                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Date</Label>
+                        <div className="mt-2 flex items-start gap-2">
+                          <p className="break-words text-lg font-black leading-tight text-slate-950">{formattedDate}</p>
+                          <CurrentChangeIndicator change={dateCurrentChange} />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Time Slot</Label>
+                        <div className="mt-2 flex items-start gap-2">
+                          <p className="break-words text-lg font-black leading-tight text-slate-950">{displayedTimeLabel}</p>
+                          <CurrentChangeIndicator change={timeCurrentChange} />
                         </div>
                       </div>
                     </div>
-                  ) : null}
-                  <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                    <div className="mb-2 flex items-center gap-2"><History className="h-4 w-4 text-blue-500" /><Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Treatment Notes</Label><CurrentChangeIndicator change={treatmentNotesCurrentChange} /></div>
-                    <p className={`max-h-28 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-medium leading-relaxed custom-scrollbar ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-400"}`}>{displayedTreatmentNotesText}</p>
-                  </div>
+                  </section>
+
+                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
+                      <div className="flex items-center gap-3">
+                        <Stethoscope className="h-6 w-6" />
+                        <Label className="text-sm font-black uppercase tracking-wide">Service</Label>
+                      </div>
+                      {displayedToothNumbersText ? (
+                        <span className="inline-flex max-w-full shrink-0 items-center rounded-full bg-violet-100 px-4 py-1.5 text-sm font-black text-violet-700">
+                          Tooth # {displayedToothNumbersText}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+                          <Stethoscope className="h-7 w-7" />
+                        </span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
+                          <CurrentChangeIndicator change={serviceCurrentChange} />
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={openChangeTreatmentModal}
+                        disabled={!canChangeTreatment || isLoadingTreatmentOptions}
+                        className="h-11 rounded-full border-violet-100 bg-violet-50 px-6 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                        Change
+                      </Button>
+                    </div>
+                  </section>
                 </div>
+
+                <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm lg:min-h-[28.25rem]">
+                  <div className="flex items-center gap-3 text-violet-700">
+                    <WalletCards className="h-6 w-6" />
+                    <Label className="text-sm font-black uppercase tracking-wide">Payment</Label>
+                  </div>
+                  <div className="mt-12">
+                    <div className="flex items-center gap-2">
+                      <Label className="block text-sm font-bold uppercase tracking-wide text-slate-500">Price</Label>
+                      <CurrentChangeIndicator change={priceCurrentChange} />
+                    </div>
+                    <div className="mt-4">
+                      {displayedDiscountAmount > 0 ? (
+                        <>
+                          <div className="text-lg font-bold text-slate-300 line-through">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
+                          <div className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
+                        </>
+                      ) : (
+                        <span className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-10 border-t border-slate-200 pt-8">
+                    <div className="flex items-center gap-3 text-slate-500">
+                      <History className="h-5 w-5" />
+                      <Label className="text-sm font-black uppercase tracking-wide">Latest Payment</Label>
+                    </div>
+                    {shouldShowPaymentLine ? (
+                      <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+                        <p className="text-xs font-black uppercase tracking-widest text-emerald-700">{snapshotPaymentLabel}</p>
+                        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                          <p className="text-2xl font-black text-emerald-700">{snapshotPaymentAmountLabel}</p>
+                          <p className="text-sm font-bold text-emerald-700/70">
+                            {snapshotPaymentMethodLabel}{snapshotPaymentDateLabel ? ` - ${snapshotPaymentDateLabel}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-5 max-w-[18rem] text-base font-semibold italic leading-7 text-slate-500">
+                        No payment recorded for this snapshot.
+                      </p>
+                    )}
+                  </div>
+                </section>
               </div>
 
-              {(displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason) || displayedNotesComparisonText ? (
-                <div className="space-y-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  {displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason ? (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-500" /><Label className="text-[11px] font-black uppercase tracking-widest text-red-500">Cancellation Reason</Label><CurrentChangeIndicator change={cancellationReasonCurrentChange} /></div>
-                      <p className="border-l-2 border-red-100 pl-3 text-sm font-bold leading-relaxed text-red-700/80">{displayedSnapshot.cancellationReason}</p>
-                    </div>
-                  ) : null}
-                  {displayedNotesComparisonText ? (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2"><History className="h-4 w-4 text-slate-300" /><Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">Remarks</Label><CurrentChangeIndicator change={notesCurrentChange} /></div>
-                      <p className="whitespace-pre-wrap border-l-2 border-slate-100 py-0.5 pl-3 text-sm font-medium italic leading-relaxed text-slate-500">{displayedNotesText}</p>
-                    </div>
-                  ) : null}
+              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-center gap-3 text-violet-700">
+                  <FileText className="h-6 w-6" />
+                  <Label className="text-sm font-black uppercase tracking-wide">Treatment Notes</Label>
+                  <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
                 </div>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                </div>
+              </section>
+
+              {displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason ? (
+                <section className="rounded-[1.25rem] border border-red-100 bg-red-50/60 p-4 shadow-sm sm:p-5">
+                  <div className="flex items-center gap-3 text-red-600">
+                    <AlertTriangle className="h-6 w-6" />
+                    <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
+                    <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap break-words rounded-xl border border-red-100 bg-white px-4 py-3 text-base font-bold leading-7 text-red-700/80">{displayedSnapshot.cancellationReason}</p>
+                </section>
               ) : null}
+
+              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-center gap-3 text-violet-700">
+                  <FileText className="h-6 w-6" />
+                  <Label className="text-sm font-black uppercase tracking-wide">Remarks</Label>
+                  <CurrentChangeIndicator change={notesCurrentChange} />
+                </div>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                </div>
+              </section>
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 !flex-col gap-3 border-t border-slate-100 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:px-6">
+          <DialogFooter className="shrink-0 !flex-col !items-stretch !justify-center gap-3 border-t border-slate-200 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm sm:px-8">
             {canShowSnapshotActions ? (
-              <div className="-mx-5 -mt-4 mb-1 border-b border-amber-100 bg-amber-50/70 px-5 py-3 sm:-mx-6 sm:px-6">
+              <div className="-mx-5 -mt-4 mb-1 border-b border-amber-100 bg-amber-50/70 px-5 py-3 sm:-mx-8 sm:px-8">
                 <p className="flex items-start justify-center gap-2 text-center text-sm font-semibold leading-5 text-amber-700"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{actionNoteText}</p>
               </div>
             ) : null}
             {canShowSnapshotActions ? (
-              <>
-                <Button className="h-14 w-full rounded-full bg-emerald-600 text-base font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-5 w-5" />Accept</Button>
-                <Button className="h-14 w-full rounded-full border-red-200 bg-white text-base font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-5 w-5" />Decline</Button>
-              </>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button className="h-12 w-full rounded-xl bg-emerald-600 text-base font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-5 w-5" />Accept</Button>
+                <Button className="h-12 w-full rounded-xl border-red-200 bg-white text-base font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-5 w-5" />Decline</Button>
+              </div>
             ) : null}
             {canRestoreNotification ? (
-              <Button className="h-12 w-full rounded-full bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
+              <Button className="h-12 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
             ) : null}
-            <Button onClick={() => onOpenChange(false)} variant="ghost" className="h-11 w-full rounded-full text-sm font-black text-slate-400 transition-all hover:bg-slate-50 hover:text-slate-600">Close</Button>
+            <div className="flex justify-center">
+              <Button onClick={() => onOpenChange(false)} variant="outline" className="h-14 min-w-[11rem] rounded-xl border-slate-200 bg-white px-8 text-base font-black text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900">Close</Button>
+            </div>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SelectTreatmentModal
+        open={isChangeTreatmentOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeChangeTreatmentModal();
+        }}
+        title="Change Treatment"
+        description={patientName ? `${typeName} for ${patientName}` : typeName}
+        treatments={activeTreatmentOptions}
+        selectedTreatmentId={selectedTreatmentId}
+        currentTreatmentLabel={typeName}
+        customTreatmentName={customTreatmentName}
+        selectedPrice={selectedTreatmentPrice}
+        toothNumberEntries={treatmentToothNumberEntries}
+        onCustomTreatmentNameChange={setCustomTreatmentName}
+        onSelectedPriceChange={setSelectedTreatmentPrice}
+        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
+        onTreatmentSelect={(treatment) => {
+          setSelectedTreatmentId(treatment.id);
+          setSelectedTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
+          if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
+            setCustomTreatmentName("");
+          } else if (!customTreatmentName.trim()) {
+            setCustomTreatmentName(typeName);
+          }
+        }}
+        onSave={handleSaveTreatmentChange}
+        onCancel={() => closeChangeTreatmentModal()}
+        isSaving={isSavingTreatmentChange}
+        canSave={canSaveTreatmentChange}
+        saveLabel="Save Treatment"
+      />
+
+      <Dialog open={isAssignDoctorOpen} onOpenChange={(nextOpen) => !isAssigningDoctor && setIsAssignDoctorOpen(nextOpen)}>
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
+        >
+          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <Stethoscope className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
+                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
+                    {patientName ? `${typeName} for ${patientName}` : typeName}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setIsAssignDoctorOpen(false)} disabled={isAssigningDoctor} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close assign doctor">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
+              {isLoadingDoctors ? (
+                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+                  Loading doctors
+                </div>
+              ) : doctors.length === 0 ? (
+                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-black text-slate-900">No doctors available</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this appointment.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {doctors.map((doctor: any) => {
+                    const doctorAvatar = resolveImageSource(pickImageSource(doctor.profilePicture, doctor.profilePictureUrl));
+
+                    return (
+                      <button
+                        key={doctor.id || doctor.name}
+                        type="button"
+                        onClick={() => handleAssignDoctor(doctor)}
+                        disabled={isAssigningDoctor}
+                        className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
+                          {doctorAvatar ? <AvatarImage src={doctorAvatar} alt={doctor.name} className="object-cover" /> : null}
+                          <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
+                            {getInitials(doctor.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black leading-tight text-slate-950">{resolveDoctorName(doctor.name)}</p>
+                          <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
+                        </div>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                          {isAssigningDoctor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </SelectDoctorModal>
+          </div>
         </DialogContent>
       </Dialog>
 

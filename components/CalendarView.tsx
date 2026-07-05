@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 
@@ -144,6 +145,20 @@ export function CalendarView({
   const lastCalendarFiltersRef = useRef<AppointmentFilters | undefined>(undefined);
   
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const { effectiveRole } = useAdminViewMode();
+  const canSeeDeletedAppointments = effectiveRole === "admin";
+  const visibleAppointmentStatuses = useMemo(
+    () => APPOINTMENT_STATUSES.filter((status) =>
+      canSeeDeletedAppointments || normalizeAppointmentStatus(status.value) !== "deleted"
+    ),
+    [APPOINTMENT_STATUSES, canSeeDeletedAppointments]
+  );
+
+  useEffect(() => {
+    if (!canSeeDeletedAppointments && normalizeAppointmentStatus(selectedStatus) === "deleted") {
+      setSelectedStatus("my-calendar");
+    }
+  }, [canSeeDeletedAppointments, selectedStatus]);
 
   useEffect(() => {
     const toolbar = toolbarRef.current;
@@ -346,6 +361,7 @@ export function CalendarView({
     
     let filtered = displayedAppointments
       .map((a) => ({ ...a, status: normalizeAppointmentStatus(a.status) }))
+      .filter((a) => canSeeDeletedAppointments || a.status !== "deleted")
       .filter((a) => a.status !== 'cancelled')
       .filter((a) => statusesToFilter.map(normalizeAppointmentStatus).includes(a.status));
     
@@ -355,7 +371,7 @@ export function CalendarView({
     }
     
     return filtered;
-  }, [displayedAppointments, selectedStatus, statusFilterList, portal, user]);
+  }, [canSeeDeletedAppointments, displayedAppointments, selectedStatus, statusFilterList, portal, user]);
 
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
@@ -1280,7 +1296,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="my-calendar">My Calendar</SelectItem>
-                          {APPOINTMENT_STATUSES.map((status) => (
+                          {visibleAppointmentStatuses.map((status) => (
                             <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1385,7 +1401,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           >
                             My Calendar
                           </DropdownMenuItem>
-                          {APPOINTMENT_STATUSES.map((status) => (
+                          {visibleAppointmentStatuses.map((status) => (
                             <DropdownMenuItem
                               key={status.key}
                               className={activeMenuItemClass(selectedStatus === status.value)}

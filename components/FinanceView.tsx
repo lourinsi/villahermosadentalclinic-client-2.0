@@ -4,6 +4,7 @@ import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import ConfirmDialog from "./ConfirmDialog";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
@@ -70,7 +71,16 @@ import {
   Gift,
   CreditCard,
   CheckCircle2,
-  Menu
+  AlertTriangle,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Clock,
+  Menu,
+  Search,
+  ShieldCheck,
+  Trash2
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -245,6 +255,25 @@ const formatTransactionTimestamp = (value?: string) => {
 const formatFinanceDate = (value?: string) =>
   formatWordyDate(value, { fallback: value || "-" });
 
+const getFinanceTimelineDateParts = (value?: string | null) => {
+  const fallback = { month: "---", day: "--", year: "" };
+  if (!value) return fallback;
+
+  const rawValue = String(value);
+  const normalizedValue = /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+    ? `${rawValue}T00:00:00`
+    : rawValue;
+  const parsed = new Date(normalizedValue);
+
+  if (Number.isNaN(parsed.getTime())) return fallback;
+
+  return {
+    month: parsed.toLocaleDateString("en-US", { month: "short" }).toUpperCase(),
+    day: parsed.toLocaleDateString("en-US", { day: "2-digit" }),
+    year: parsed.toLocaleDateString("en-US", { year: "numeric" }),
+  };
+};
+
 const hasTimeComponent = (value?: string) =>
   Boolean(value && !/^\d{4}-\d{2}-\d{2}$/.test(value));
 
@@ -354,6 +383,9 @@ export interface DetailedExpense {
   status: string;
   recurring: boolean;
   createdAt?: string;
+  updatedAt?: string;
+  deleted?: boolean;
+  deletedAt?: string;
   inventoryItemId?: string;
   inventoryQuantity?: number;
   notes?: string;
@@ -502,6 +534,8 @@ export interface RecentTransaction {
   method: string;
   transactionId?: string;
   appointmentId?: string;
+  appointmentDate?: string;
+  appointmentType?: string;
   appointmentSnapshot?: any;
   paymentDate?: string;
   paymentAmount?: number;
@@ -511,11 +545,150 @@ export interface RecentTransaction {
   logDate?: string;
   changedByName?: string;
   changedByAvatar?: string;
+  doctor?: string;
+  doctorName?: string;
   source?: string;
   patientId?: string;
+  patientName?: string;
   paymentId?: string;
   paymentRecordId?: string;
 }
+
+type TransactionLedgerMode = "all" | "patients" | "doctors";
+type TransactionFilterValue = "all" | "income" | "expense" | "patients" | "doctors";
+type SortDirection = "asc" | "desc";
+
+type FinanceAppointmentGroup = {
+  key: string;
+  appointmentId: string;
+  patientId: string;
+  patientName: string;
+  doctorName: string;
+  appointmentDate: string;
+  appointmentType: string;
+  transactions: RecentTransaction[];
+};
+
+type FinancePatientGroup = {
+  patientName: string;
+  appointments: FinanceAppointmentGroup[];
+};
+
+type FinanceDoctorGroup = {
+  doctorName: string;
+  appointments: FinanceAppointmentGroup[];
+};
+
+const getFinanceDateTimestamp = (value?: string | null) => {
+  const date = toDateOnly(value);
+  if (!date) return 0;
+
+  const parsed = new Date(`${date}T00:00:00`).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const getFinanceTransactionSortDate = (
+  transaction: RecentTransaction,
+  linkedExpense?: DetailedExpense | null
+) => {
+  if (transaction.type === "expense" && linkedExpense) {
+    return getExpenseReportingDate(linkedExpense);
+  }
+
+  return getTransactionReportingDate(transaction);
+};
+
+const getFinanceSnapshot = (transaction: RecentTransaction) =>
+  transaction.appointmentSnapshot && typeof transaction.appointmentSnapshot === "object"
+    ? transaction.appointmentSnapshot
+    : {};
+
+const getFinancePatientIdentity = (transaction: RecentTransaction) => {
+  const snapshot = getFinanceSnapshot(transaction);
+  const patient = snapshot.patient && typeof snapshot.patient === "object" ? snapshot.patient : {};
+  const firstLast = [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim();
+  const patientId = String(
+    transaction.patientId ||
+    snapshot.patientId ||
+    patient.id ||
+    snapshot.patient?._id ||
+    ""
+  ).trim();
+  const patientName = String(
+    transaction.patientName ||
+    snapshot.patientName ||
+    patient.name ||
+    patient.fullName ||
+    firstLast ||
+    ""
+  ).trim();
+
+  return {
+    id: patientId,
+    name: patientName || "Unassigned Patient",
+  };
+};
+
+const getFinanceDoctorName = (transaction: RecentTransaction) => {
+  const snapshot = getFinanceSnapshot(transaction);
+  const doctor = snapshot.doctor && typeof snapshot.doctor === "object" ? snapshot.doctor : {};
+  return String(
+    transaction.doctorName ||
+    transaction.doctor ||
+    snapshot.doctorName ||
+    doctor.name ||
+    doctor.fullName ||
+    doctor.username ||
+    snapshot.doctor ||
+    ""
+  ).trim() || "Unassigned Doctor";
+};
+
+const getFinanceDoctorOptionValue = (name?: string) =>
+  normalizeFilterValue(name || "Unassigned Doctor") || "unassigneddoctor";
+
+const getFinanceTransactionAppointmentId = (transaction: RecentTransaction) =>
+  String(
+    transaction.appointmentId ||
+    getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
+    getAppointmentIdFromDescription(transaction.description) ||
+    ""
+  ).trim();
+
+const isFinanceAppointmentPaymentTransaction = (transaction: RecentTransaction) =>
+  transaction.type === "income" &&
+  Number(transaction.amount || 0) > 0 &&
+  (
+    transaction.source === "payment" ||
+    transaction.source === "appointment-log" ||
+    Boolean(getFinanceTransactionAppointmentId(transaction)) ||
+    Boolean(transaction.appointmentSnapshot)
+  );
+
+const getFinanceAppointmentDate = (transaction: RecentTransaction) => {
+  const snapshot = getFinanceSnapshot(transaction);
+  return toDateOnly(
+    transaction.appointmentDate ||
+    snapshot.appointmentDate ||
+    snapshot.date ||
+    snapshot.scheduledDate ||
+    snapshot.appointment?.date ||
+    ""
+  );
+};
+
+const getFinanceAppointmentType = (transaction: RecentTransaction) => {
+  const snapshot = getFinanceSnapshot(transaction);
+  return String(
+    transaction.appointmentType ||
+    snapshot.appointmentType ||
+    snapshot.typeLabel ||
+    snapshot.treatmentName ||
+    snapshot.procedure ||
+    snapshot.type ||
+    "Appointment"
+  );
+};
 
 export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
@@ -527,6 +700,7 @@ export function FinanceView() {
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
+  const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
@@ -556,6 +730,9 @@ export function FinanceView() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
   const [timePeriodFilter, setTimePeriodFilter] = useState("all");
   const [transactionTypeFilter, setTransactionTypeFilter] = useState("all");
+  const [transactionSearchFilter, setTransactionSearchFilter] = useState("");
+  const [transactionLedgerMode, setTransactionLedgerMode] = useState<TransactionLedgerMode>("all");
+  const [transactionDateSortDirection, setTransactionDateSortDirection] = useState<SortDirection>("desc");
   const [metricPeriod, setMetricPeriod] = useState<FinanceMetricPeriod>("day");
   
   // State for fetched data
@@ -572,6 +749,7 @@ export function FinanceView() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
   const [isSavingExpensePayment, setIsSavingExpensePayment] = useState(false);
+  const [isDeletingExpense, setIsDeletingExpense] = useState(false);
   const [isSavingInventory, setIsSavingInventory] = useState(false);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
   const [isSavingPayroll, setIsSavingPayroll] = useState(false);
@@ -738,22 +916,245 @@ export function FinanceView() {
     [detailedExpenses]
   );
 
-  const filteredRecentTransactions = useMemo(() => (
-    recentTransactions.filter((transaction) => {
-      const linkedExpense =
-        transaction.type === "expense" || transaction.source === "expense"
-          ? detailedExpenseById.get(String(transaction.id || ""))
-          : undefined;
-      const reportingDate = linkedExpense
-        ? getExpenseReportingDate(linkedExpense)
-        : getTransactionReportingDate(transaction);
+  useEffect(() => {
+    if (transactionLedgerMode !== "all" && transactionTypeFilter === "expense") {
+      setTransactionTypeFilter("all");
+    }
+  }, [transactionLedgerMode, transactionTypeFilter]);
 
-      if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
-      if (startDate && reportingDate < startDate) return false;
-      if (endDate && reportingDate > endDate) return false;
-      return true;
-    })
-  ), [detailedExpenseById, endDate, recentTransactions, startDate, transactionTypeFilter]);
+  const filteredRecentTransactions = useMemo(() => (
+    recentTransactions
+      .filter((transaction) => {
+        const search = transactionSearchFilter.trim().toLowerCase();
+        const linkedExpense =
+          transaction.type === "expense" || transaction.source === "expense"
+            ? detailedExpenseById.get(String(transaction.id || ""))
+            : undefined;
+        const reportingDate = getFinanceTransactionSortDate(transaction, linkedExpense);
+        const patientIdentity = getFinancePatientIdentity(transaction);
+        const doctorName = getFinanceDoctorName(transaction);
+        const appointmentDate = getFinanceAppointmentDate(transaction);
+        const appointmentType = getFinanceAppointmentType(transaction);
+        const isAppointmentPayment = isFinanceAppointmentPaymentTransaction(transaction);
+
+        if (transactionLedgerMode !== "all" && !isAppointmentPayment) return false;
+        if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
+        if (startDate && reportingDate < startDate) return false;
+        if (endDate && reportingDate > endDate) return false;
+
+        if (search) {
+          const searchText = [
+            transaction.description,
+            transaction.type,
+            transaction.method,
+            transaction.transactionId,
+            transaction.appointmentId,
+            transaction.changedByName,
+            transaction.amount,
+            reportingDate,
+            linkedExpense?.category,
+            linkedExpense?.vendor,
+            linkedExpense?.status,
+            patientIdentity.name,
+            doctorName,
+            appointmentDate,
+            appointmentType,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          if (!searchText.includes(search)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aLinkedExpense = a.type === "expense" || a.source === "expense"
+          ? detailedExpenseById.get(String(a.id || ""))
+          : undefined;
+        const bLinkedExpense = b.type === "expense" || b.source === "expense"
+          ? detailedExpenseById.get(String(b.id || ""))
+          : undefined;
+        const dateDiff =
+          getFinanceDateTimestamp(getFinanceTransactionSortDate(a, aLinkedExpense)) -
+          getFinanceDateTimestamp(getFinanceTransactionSortDate(b, bLinkedExpense));
+
+        if (dateDiff !== 0) {
+          return transactionDateSortDirection === "asc" ? dateDiff : -dateDiff;
+        }
+
+        const keyDiff = String(a.id || a.transactionId || a.description).localeCompare(String(b.id || b.transactionId || b.description));
+        return transactionDateSortDirection === "asc" ? keyDiff : -keyDiff;
+      })
+  ), [
+    detailedExpenseById,
+    endDate,
+    recentTransactions,
+    startDate,
+    transactionDateSortDirection,
+    transactionLedgerMode,
+    transactionSearchFilter,
+    transactionTypeFilter,
+  ]);
+
+  const transactionSummary = useMemo(() => (
+    filteredRecentTransactions.reduce(
+      (summary, transaction) => {
+        const amount = Math.abs(Number(transaction.amount) || 0);
+
+        if (transaction.type === "income") {
+          summary.income += amount;
+        } else {
+          summary.expenses += amount;
+        }
+
+        summary.net = summary.income - summary.expenses;
+        return summary;
+      },
+      { income: 0, expenses: 0, net: 0 }
+    )
+  ), [filteredRecentTransactions]);
+
+  const hasTransactionFilters =
+    Boolean(transactionSearchFilter.trim()) ||
+    transactionLedgerMode !== "all" ||
+    transactionTypeFilter !== "all" ||
+    Boolean(startDate) ||
+    Boolean(endDate);
+
+  const clearTransactionFilters = () => {
+    setTransactionSearchFilter("");
+    setTransactionLedgerMode("all");
+    setTransactionTypeFilter("all");
+    setStartDate("");
+    setEndDate("");
+  };
+
+  const transactionFilterValue: TransactionFilterValue =
+    transactionLedgerMode === "patients" || transactionLedgerMode === "doctors"
+      ? transactionLedgerMode
+      : (transactionTypeFilter as TransactionFilterValue);
+
+  const handleTransactionFilterChange = (value: TransactionFilterValue) => {
+    if (value === "patients" || value === "doctors") {
+      setTransactionLedgerMode(value);
+      setTransactionTypeFilter("all");
+      return;
+    }
+
+    setTransactionLedgerMode("all");
+    setTransactionTypeFilter(value);
+  };
+
+  const transactionAppointmentGroups = useMemo(() => {
+    const groups = new Map<string, FinanceAppointmentGroup>();
+
+    filteredRecentTransactions
+      .filter(isFinanceAppointmentPaymentTransaction)
+      .forEach((transaction) => {
+        const appointmentId = getFinanceTransactionAppointmentId(transaction);
+        const patientIdentity = getFinancePatientIdentity(transaction);
+        const doctorName = getFinanceDoctorName(transaction);
+        const appointmentDate = getFinanceAppointmentDate(transaction);
+        const appointmentType = getFinanceAppointmentType(transaction);
+        const key = appointmentId || [
+          patientIdentity.id || normalizeFilterValue(patientIdentity.name),
+          normalizeFilterValue(doctorName),
+          appointmentDate || getFinanceTransactionSortDate(transaction),
+          normalizeFilterValue(appointmentType),
+        ].join("|");
+        const currentGroup = groups.get(key);
+
+        if (currentGroup) {
+          currentGroup.transactions.push(transaction);
+          if (!currentGroup.appointmentDate && appointmentDate) currentGroup.appointmentDate = appointmentDate;
+          return;
+        }
+
+        groups.set(key, {
+          key,
+          appointmentId,
+          patientId: patientIdentity.id,
+          patientName: patientIdentity.name,
+          doctorName,
+          appointmentDate,
+          appointmentType,
+          transactions: [transaction],
+        });
+      });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        transactions: [...group.transactions].sort((a, b) => {
+          const dateDiff =
+            getFinanceDateTimestamp(getFinanceTransactionSortDate(a)) -
+            getFinanceDateTimestamp(getFinanceTransactionSortDate(b));
+
+          if (dateDiff !== 0) {
+            return transactionDateSortDirection === "asc" ? dateDiff : -dateDiff;
+          }
+
+          const keyDiff = String(a.id || a.transactionId || a.description).localeCompare(String(b.id || b.transactionId || b.description));
+          return transactionDateSortDirection === "asc" ? keyDiff : -keyDiff;
+        }),
+      }))
+      .sort((a, b) => {
+        const dateDiff =
+          getFinanceDateTimestamp(a.appointmentDate || getFinanceTransactionSortDate(a.transactions[0])) -
+          getFinanceDateTimestamp(b.appointmentDate || getFinanceTransactionSortDate(b.transactions[0]));
+
+        if (dateDiff !== 0) {
+          return transactionDateSortDirection === "asc" ? dateDiff : -dateDiff;
+        }
+
+        return `${a.patientName} ${a.doctorName}`.localeCompare(`${b.patientName} ${b.doctorName}`);
+      });
+  }, [filteredRecentTransactions, transactionDateSortDirection]);
+
+  const transactionPatientGroups = useMemo(() => {
+    const groups = new Map<string, FinancePatientGroup>();
+
+    transactionAppointmentGroups.forEach((appointment) => {
+      const patientName = appointment.patientName || "Unassigned Patient";
+      const key = normalizeFilterValue(patientName) || "unassignedpatient";
+      const currentGroup = groups.get(key);
+
+      if (currentGroup) {
+        currentGroup.appointments.push(appointment);
+        return;
+      }
+
+      groups.set(key, {
+        patientName,
+        appointments: [appointment],
+      });
+    });
+
+    return Array.from(groups.values()).sort((a, b) => a.patientName.localeCompare(b.patientName));
+  }, [transactionAppointmentGroups]);
+
+  const transactionDoctorGroups = useMemo(() => {
+    const groups = new Map<string, FinanceDoctorGroup>();
+
+    transactionAppointmentGroups.forEach((appointment) => {
+      const doctorName = appointment.doctorName || "Unassigned Doctor";
+      const key = getFinanceDoctorOptionValue(doctorName);
+      const currentGroup = groups.get(key);
+
+      if (currentGroup) {
+        currentGroup.appointments.push(appointment);
+        return;
+      }
+
+      groups.set(key, {
+        doctorName,
+        appointments: [appointment],
+      });
+    });
+
+    return Array.from(groups.values()).sort((a, b) => a.doctorName.localeCompare(b.doctorName));
+  }, [transactionAppointmentGroups]);
 
   const metricPeriodRange = useMemo(() => getMetricPeriodRange(metricPeriod), [metricPeriod]);
   const metricRevenue = useMemo(() => (
@@ -848,6 +1249,10 @@ export function FinanceView() {
     setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
   };
 
+  const openExpenseDeleteDialog = (expense: DetailedExpense) => {
+    setExpenseToDelete(expense);
+  };
+
   const handleSaveExpense = async () => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
@@ -924,6 +1329,28 @@ export function FinanceView() {
       toast.error(error instanceof Error ? error.message : "Failed to mark expense paid");
     } finally {
       setIsSavingExpensePayment(false);
+    }
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!expenseToDelete) return;
+
+    setIsDeletingExpense(true);
+    try {
+      await fetchApiData<null>(
+        `/api/finance/detailed-expenses/${encodeURIComponent(expenseToDelete.id)}`,
+        "expense deletion",
+        { method: "DELETE" }
+      );
+
+      toast.success("Expense deleted");
+      setExpenseToDelete(null);
+      await fetchData();
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete expense");
+    } finally {
+      setIsDeletingExpense(false);
     }
   };
 
@@ -1852,6 +2279,104 @@ export function FinanceView() {
     }
   };
 
+  const renderFinanceAppointmentGroup = (group: FinanceAppointmentGroup) => {
+    const firstTransaction = group.transactions[0];
+    const groupDateSource = group.appointmentDate || (firstTransaction ? getFinanceTransactionSortDate(firstTransaction) : "");
+    const dateParts = getFinanceTimelineDateParts(groupDateSource);
+
+    return (
+      <div key={group.key} className="relative">
+        <span className="absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white bg-violet-600 shadow-md shadow-violet-200 sm:-left-[3rem]" />
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
+                <div className="text-center sm:w-24">
+                  <div className="text-lg font-black leading-none text-violet-600">{dateParts.month}</div>
+                  <div className="mt-1 text-5xl font-black leading-none text-slate-950">{dateParts.day}</div>
+                  <div className="mt-2 text-lg font-bold leading-none text-slate-500">{dateParts.year}</div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <h4 className="truncate text-lg font-black text-slate-950">{group.appointmentType || "Appointment"}</h4>
+                <p className="mt-1 truncate text-base font-medium text-slate-500">{group.patientName}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
+                  <span className="inline-flex items-center gap-2">
+                    <User className="h-4 w-4 text-slate-600" />
+                    Patient: {group.patientName}
+                  </span>
+                  <span className="inline-flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-slate-600" />
+                    Doctor: {group.doctorName}
+                  </span>
+                  <span className="inline-flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-slate-600" />
+                    Appointment: {formatFinanceDate(group.appointmentDate)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <Badge variant="outline" className="w-fit rounded-md border-violet-100 bg-violet-50 px-3 py-1 text-sm font-bold text-violet-700">
+              {group.transactions.length} payment{group.transactions.length === 1 ? "" : "s"}
+            </Badge>
+          </div>
+
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="mb-3 text-xs font-black uppercase tracking-widest text-slate-400">Payments</div>
+            <div className="space-y-3">
+              {group.transactions.map((payment) => {
+                const appointmentId = getTransactionAppointmentId(payment);
+                const transactionLoadingKey = appointmentId || payment.id;
+                const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
+                const paymentDate = getFinanceTransactionSortDate(payment);
+                const canEditPayment = isEditablePaymentTransaction(payment);
+
+                return (
+                  <div key={payment.id || payment.transactionId} className="flex flex-col gap-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-semibold text-slate-600">
+                        <span>Payment Date: {formatFinanceDate(paymentDate)}</span>
+                        <span>Method: {payment.method || "N/A"}</span>
+                        <span>Ref No.: {payment.transactionId || payment.id || "N/A"}</span>
+                      </div>
+                      {payment.changedByName ? (
+                        <div className="mt-1 text-xs font-medium text-slate-400">Saved by {payment.changedByName}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                      <div className="text-xl font-black text-emerald-600">{formatCurrency(Math.abs(payment.amount))}</div>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-700 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                        disabled={isLoadingThisAppointment}
+                        title={appointmentId || payment.appointmentSnapshot ? "View appointment snapshot" : "No details linked"}
+                        onClick={() => handleViewTransaction(payment)}
+                      >
+                        <Eye className="h-4 w-4" />
+                        <span className="sr-only">View transaction details</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className={`h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-700 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
+                        title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(payment)}
+                        onClick={() => handleEditPaymentTransaction(payment)}
+                      >
+                        <Edit className="h-4 w-4" />
+                        <span className="sr-only">Edit Payment</span>
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div data-tour-id="finance-page" className="space-y-6 p-4 sm:p-6">
       <div className="space-y-5">
@@ -2233,6 +2758,17 @@ export function FinanceView() {
                                       Pay
                                     </Button>
                                   )}
+                                  {canManageExpenseStatus && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                      onClick={() => openExpenseDeleteDialog(expense)}
+                                    >
+                                      <Trash2 className="h-3 w-3 mr-1" />
+                                      Delete
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -2528,53 +3064,227 @@ export function FinanceView() {
         )}
 
         <TabsContent value="transactions" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Recent Transactions</CardTitle>
-                <div className="flex space-x-2">
-                  <Select value={transactionTypeFilter} onValueChange={setTransactionTypeFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Filter" />
+          <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+            <CardHeader className="space-y-6 p-5 sm:p-7">
+              <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+                <div>
+                  <CardTitle className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                    Recent Transactions
+                  </CardTitle>
+                  <p className="mt-2 text-sm font-medium text-slate-500">
+                    View and manage finance activity
+                  </p>
+                </div>
+                <div className="text-sm font-medium text-slate-400 lg:pt-2">
+                  Total Transactions: <span className="font-bold text-slate-600">{filteredRecentTransactions.length}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1.4fr)_minmax(12rem,1fr)_minmax(10rem,0.9fr)_minmax(10rem,0.9fr)_auto_auto]">
+                  <div className="relative min-w-0">
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={transactionSearchFilter}
+                      onChange={(event) => setTransactionSearchFilter(event.target.value)}
+                      placeholder="Search transactions..."
+                      className="h-12 rounded-lg border-slate-200 bg-white pl-11 text-sm font-medium shadow-none placeholder:text-slate-400"
+                    />
+                  </div>
+                  <Select value={transactionFilterValue} onValueChange={(value) => handleTransactionFilterChange(value as TransactionFilterValue)}>
+                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                      <SelectValue placeholder="All Transactions" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Transactions</SelectItem>
                       <SelectItem value="income">Income Only</SelectItem>
                       <SelectItem value="expense">Expenses Only</SelectItem>
+                      <SelectItem value="patients">Patients</SelectItem>
+                      <SelectItem value="doctors">Doctors</SelectItem>
                     </SelectContent>
                   </Select>
-                  <div className="flex items-center space-x-2">
+                  <div className="relative min-w-0">
+                    <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <Input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
+                      className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
+                      aria-label="Start date"
                     />
+                  </div>
+                  <div className="relative min-w-0">
+                    <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <Input
                       type="date"
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
+                      className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
+                      aria-label="End date"
                     />
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                    onClick={() => setTransactionDateSortDirection((direction) => direction === "desc" ? "asc" : "desc")}
+                    title="Sort by payment date"
+                  >
+                    {transactionDateSortDirection === "desc" ? (
+                      <ChevronDown className="mr-2 h-4 w-4 text-violet-600" />
+                    ) : (
+                      <ChevronUp className="mr-2 h-4 w-4 text-violet-600" />
+                    )}
+                    {transactionDateSortDirection === "desc" ? "Newest Paid" : "Oldest Paid"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50"
+                    onClick={clearTransactionFilters}
+                    disabled={!hasTransactionFilters}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Clear Filters
+                  </Button>
                 </div>
               </div>
             </CardHeader>
 
-            <CardContent>
-              {isLoading ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
-                    Loading transactions...
+            <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                      <Wallet className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Total Income</p>
+                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
+                        {formatCurrency(transactionSummary.income)}
+                      </p>
+                    </div>
+                  </div>
+                  <CheckCircle2 className="h-8 w-8 shrink-0 text-emerald-600" />
+                </div>
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                      <AlertTriangle className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Total Expenses</p>
+                      <p className="mt-1 truncate text-2xl font-black text-red-600">
+                        {formatCurrency(transactionSummary.expenses)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                </div>
+                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                      <FileText className="h-7 w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-500">Net Total</p>
+                      <p className={`mt-1 truncate text-2xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>
+                        {formatCurrency(transactionSummary.net)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-violet-600 bg-white text-violet-600">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-950">
+                      {transactionLedgerMode === "patients"
+                        ? "Patient Appointment Ledger"
+                        : transactionLedgerMode === "doctors"
+                          ? "Doctor Appointment Ledger"
+                          : "Transaction Timeline"}
+                    </h3>
+                    <p className="text-sm font-medium text-slate-500">
+                      {isLoading
+                        ? "Loading transactions"
+                        : transactionLedgerMode === "patients"
+                          ? `${transactionPatientGroups.length} patient${transactionPatientGroups.length === 1 ? "" : "s"} found`
+                          : transactionLedgerMode === "doctors"
+                            ? `${transactionDoctorGroups.length} doctor${transactionDoctorGroups.length === 1 ? "" : "s"} found`
+                            : `${filteredRecentTransactions.length} transaction${filteredRecentTransactions.length === 1 ? "" : "s"} found`}
+                    </p>
                   </div>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredRecentTransactions.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No recent transactions found.
+
+                {isLoading ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-12 text-center text-sm font-bold text-slate-500">
+                    <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-b-violet-600" />
+                    Loading transactions...
+                  </div>
+                ) : filteredRecentTransactions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-12 text-center text-sm font-medium text-slate-500">
+                    No recent transactions found.
+                  </div>
+                ) : transactionLedgerMode === "patients" ? (
+                  transactionPatientGroups.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-12 text-center text-sm font-medium text-slate-500">
+                      No appointment payments found for patients.
                     </div>
                   ) : (
-                    filteredRecentTransactions.map((transaction) => {
+                    <div className="space-y-6">
+                      {transactionPatientGroups.map((patientGroup) => (
+                        <div key={patientGroup.patientName} className="space-y-4">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-5 py-4">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <h4 className="text-lg font-black text-slate-950">{patientGroup.patientName}</h4>
+                              <div className="text-sm font-bold text-slate-500">
+                                {patientGroup.appointments.length} appointment{patientGroup.appointments.length === 1 ? "" : "s"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="relative space-y-5 pl-8 sm:pl-12">
+                            <div className="absolute bottom-8 left-[15px] top-0 border-l border-dashed border-slate-200 sm:left-[15px]" />
+                            {patientGroup.appointments.map(renderFinanceAppointmentGroup)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : transactionLedgerMode === "doctors" ? (
+                  transactionDoctorGroups.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-12 text-center text-sm font-medium text-slate-500">
+                      No appointment payments found for doctors.
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {transactionDoctorGroups.map((doctorGroup) => (
+                        <div key={doctorGroup.doctorName} className="space-y-4">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-5 py-4">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <h4 className="text-lg font-black text-slate-950">{doctorGroup.doctorName}</h4>
+                              <div className="text-sm font-bold text-slate-500">
+                                {doctorGroup.appointments.length} appointment{doctorGroup.appointments.length === 1 ? "" : "s"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="relative space-y-5 pl-8 sm:pl-12">
+                            <div className="absolute bottom-8 left-[15px] top-0 border-l border-dashed border-slate-200 sm:left-[15px]" />
+                            {doctorGroup.appointments.map(renderFinanceAppointmentGroup)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <div className="relative space-y-5 pl-8 sm:pl-12">
+                    <div className="absolute bottom-8 left-[15px] top-0 border-l border-dashed border-slate-200 sm:left-[15px]" />
+                    {filteredRecentTransactions.map((transaction) => {
                       const appointmentId = getTransactionAppointmentId(transaction);
                       const transactionLoadingKey = appointmentId || transaction.id;
                       const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
@@ -2584,6 +3294,7 @@ export function FinanceView() {
                           ? getExpenseReportingDate(expenseForTransaction)
                           : getTransactionReportingDate(transaction);
                       const transactionDateLabel = formatFinanceDate(transactionReportingDate);
+                      const transactionDateParts = getFinanceTimelineDateParts(transactionReportingDate || transaction.date);
                       const canViewExpense =
                         transaction.type === "expense" &&
                         (Boolean(expenseForTransaction) || transaction.source === "expense");
@@ -2593,109 +3304,133 @@ export function FinanceView() {
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
+                      const statusLabel = transaction.type === "income"
+                        ? "Paid"
+                        : formatOptionLabel(expenseForTransaction?.status || transaction.type, EXPENSE_STATUS_OPTIONS);
+                      const amountPrefix = transaction.type === "income" ? "+" : "-";
 
-                      // Resolve avatar src: prefer explicit changedByAvatar, then look for admin/user who made the change
-                      // Only fall back to patient image if no changedByName (meaning it's a patient-initiated action)
+                      // Resolve avatar src: prefer explicit changedByAvatar, then look for admin/user who made the change.
                       const snap = transaction.appointmentSnapshot as any;
                       const snapPatientId = snap?.patientId || snap?.patient?.id || snap?.patientId;
                       const avatarSrc =
                         transaction.changedByAvatar ||
                         (transaction.changedByName ? getAvatarFromSnapshot(snap, transaction.changedByName) : undefined) ||
-                        // Only show patient image if no changedByName (patient action) or no snapshot
                         (!transaction.changedByName ? (
                           getAnyImageFromSnapshot(snap) ||
                           (snapPatientId ? patientImages[String(snapPatientId)] : undefined)
                         ) : undefined);
 
                       return (
-                        <div
-                          key={transaction.id}
-                          className="flex items-center justify-between gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="flex min-w-0 flex-1 items-center space-x-4">
-                            <div
-                              className={`w-10 h-10 rounded-full flex flex-shrink-0 items-center justify-center ${
-                                transaction.type === "income"
-                                  ? "bg-green-100"
-                                  : "bg-red-100"
-                              }`}
-                            >
-                              {transaction.type === "income" ? (
-                                <ArrowUpRight className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <ArrowDownRight className="h-5 w-5 text-red-600" />
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate text-gray-900">{transaction.description}</div>
-                              <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                <span>{transaction.type === "expense" ? "Expense Date" : "Payment Date"}: {transactionDateLabel}</span>
-                                <span>•</span>
-                                <span>{transaction.method}</span>
-                              </div>
-                              {savedAtLabel ? (
-                                <div className="mt-2 flex items-center gap-2">
-                                  <Avatar className="h-8 w-8 border rounded-md overflow-hidden">
-                                    <AvatarImage src={avatarSrc} alt={transaction.changedByName} className="object-cover" />
-                                    <AvatarFallback className="bg-violet-100 text-[10px] text-violet-700 rounded-md">
-                                      {transaction.changedByName ? transaction.changedByName.split(' ').map(n => n[0]).join('').toUpperCase() : <User className="h-3 w-3" />}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div className="text-xs text-muted-foreground">
-                                    <span className="font-medium text-gray-700">{transaction.changedByName || "System"}</span>
-                                    <span className="mx-1">•</span>
-                                    <span>Saved {savedAtLabel}</span>
+                        <div key={transaction.id} className="relative">
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${transaction.type === "income" ? "bg-violet-600 shadow-violet-200" : "bg-red-500 shadow-red-100"}`} />
+                          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5">
+                            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+                                <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
+                                  <div className="text-center sm:w-24">
+                                    <div className={`text-lg font-black leading-none ${transaction.type === "income" ? "text-violet-600" : "text-red-600"}`}>
+                                      {transactionDateParts.month}
+                                    </div>
+                                    <div className="mt-1 text-5xl font-black leading-none text-slate-950">{transactionDateParts.day}</div>
+                                    <div className="mt-2 text-lg font-bold leading-none text-slate-500">{transactionDateParts.year}</div>
                                   </div>
                                 </div>
-                              ) : null}
+                                <div className="min-w-0">
+                                  <h4 className="truncate text-lg font-black text-slate-950">{transaction.description}</h4>
+                                  <p className="mt-1 truncate text-base font-medium text-slate-500">
+                                    {transaction.type === "income" ? "Income transaction" : "Expense transaction"}
+                                  </p>
+                                  <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
+                                    <span className="inline-flex items-center gap-2">
+                                      <Calendar className="h-4 w-4 text-slate-600" />
+                                      {transaction.type === "expense" ? "Expense Date" : "Payment Date"}: {transactionDateLabel}
+                                    </span>
+                                    <span className="inline-flex items-center gap-2">
+                                      <CreditCard className="h-4 w-4 text-slate-600" />
+                                      Payment Method: {transaction.method || "N/A"}
+                                    </span>
+                                    <span className="inline-flex items-center gap-2">
+                                      <FileText className="h-4 w-4 text-slate-600" />
+                                      Ref No.: {transaction.transactionId || transaction.id || "N/A"}
+                                    </span>
+                                  </div>
+                                  {savedAtLabel ? (
+                                    <div className="mt-3 flex items-center gap-2">
+                                      <Avatar className="h-8 w-8 overflow-hidden rounded-md border border-slate-200">
+                                        <AvatarImage src={avatarSrc} alt={transaction.changedByName || "User"} className="object-cover" />
+                                        <AvatarFallback className="rounded-md bg-violet-100 text-[10px] font-black text-violet-700">
+                                          {transaction.changedByName ? transaction.changedByName.split(" ").map((name) => name[0]).join("").toUpperCase() : <User className="h-3 w-3" />}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="text-xs font-medium text-slate-500">
+                                        <span className="font-bold text-slate-700">{transaction.changedByName || "System"}</span>
+                                        <span> saved {savedAtLabel}</span>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
+                                <div className="sm:text-right">
+                                  <div className={`text-2xl font-black ${transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
+                                    {amountPrefix}{formatCurrency(Math.abs(transaction.amount))}
+                                  </div>
+                                  <div className="mt-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={`rounded-md px-3 py-1 text-sm font-bold ${transaction.type === "income" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-red-100 bg-red-50 text-red-700"}`}
+                                    >
+                                      {statusLabel}
+                                      {transaction.type === "income" ? <CheckCircle2 className="ml-1.5 h-3.5 w-3.5" /> : null}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                    disabled={isLoadingThisAppointment}
+                                    title={
+                                      canViewExpense
+                                        ? "View expense details"
+                                        : canViewAppointmentSnapshot
+                                          ? "View appointment snapshot"
+                                          : "No details linked"
+                                    }
+                                    onClick={() => handleViewTransaction(transaction)}
+                                  >
+                                    <Eye className="h-5 w-5" />
+                                    <span className="sr-only">View transaction details</span>
+                                  </Button>
+                                  {shouldShowPaymentEdit && (
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
+                                      title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
+                                      onClick={() => handleEditPaymentTransaction(transaction)}
+                                    >
+                                      <Edit className="h-5 w-5" />
+                                      <span className="sr-only">Edit Payment</span>
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex flex-shrink-0 items-center gap-4">
-                            <div
-                              className={`text-right text-lg font-bold ${
-                                transaction.type === "income"
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }`}
-                            >
-                              {transaction.type === "income" ? "+" : "-"}
-                              {formatCurrency(Math.abs(transaction.amount))}
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-violet-600"
-                              disabled={isLoadingThisAppointment}
-                              title={
-                                canViewExpense
-                                  ? "View expense details"
-                                  : canViewAppointmentSnapshot
-                                    ? "View appointment snapshot"
-                                    : "No details linked"
-                              }
-                              onClick={() => handleViewTransaction(transaction)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {shouldShowPaymentEdit && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={`h-8 w-8 text-muted-foreground hover:text-violet-600 ${canEditPayment ? "" : "opacity-60"}`}
-                                title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
-                                onClick={() => handleEditPaymentTransaction(transaction)}
-                              >
-                                <Edit className="h-4 w-4" />
-                                <span className="sr-only">Edit Payment</span>
-                              </Button>
-                            )}
                           </div>
                         </div>
                       );
-                    })
-                  )}
-                </div>
-              )}
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 text-sm font-medium text-slate-400">
+                <ShieldCheck className="h-5 w-5 text-violet-600" />
+                All transactions are secure and encrypted.
+              </div>
             </CardContent>
           </Card>
 
@@ -2727,6 +3462,19 @@ export function FinanceView() {
         onOpenChange={(open) => !open && setExpenseToPay(null)}
         onPaymentMethodChange={setExpensePaymentMethod}
         onConfirm={handlePayExpense}
+      />
+      <ConfirmDialog
+        open={Boolean(expenseToDelete)}
+        onOpenChange={(open) => !open && setExpenseToDelete(null)}
+        title="Delete Expense"
+        message={
+          expenseToDelete?.inventoryItemId
+            ? "This will remove the expense and reverse its linked stock quantity. The audit history will stay available."
+            : "This will remove the expense from finance reports. The audit history will stay available."
+        }
+        confirmLabel="Delete"
+        loading={isDeletingExpense}
+        onConfirm={handleDeleteExpense}
       />
       <FinanceInventoryModal
         open={Boolean(inventoryModalMode)}

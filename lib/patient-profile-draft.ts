@@ -17,6 +17,8 @@ export type PatientProfileDraft = {
   questionnaireAnswers: Record<string, boolean>;
   savedQuestionnaireAnswers: Record<string, boolean>;
   patientQuestionnaireData: Record<string, any>;
+  physicianInformation?: Record<string, any>;
+  savedPhysicianInformation?: Record<string, any>;
   questionnaireQuestions: Array<{
     id: string;
     text: string;
@@ -61,6 +63,14 @@ export const parsePatientProfileDraft = (raw: string | null): PatientProfileDraf
         draft.patientQuestionnaireData && typeof draft.patientQuestionnaireData === "object"
           ? draft.patientQuestionnaireData
           : {},
+      physicianInformation:
+        draft.physicianInformation && typeof draft.physicianInformation === "object"
+          ? draft.physicianInformation
+          : undefined,
+      savedPhysicianInformation:
+        draft.savedPhysicianInformation && typeof draft.savedPhysicianInformation === "object"
+          ? draft.savedPhysicianInformation
+          : undefined,
       consentForm:
         draft.consentForm && typeof draft.consentForm === "object"
           ? draft.consentForm

@@ -163,12 +163,17 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     handleViewAppointment,
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot([...appointments, ...requests, ...history]);
-  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment) => {
     const appointment = [...appointments, ...requests, ...history].find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    if (appointment) {
-      openEditModal(appointment);
+    const snapshotMatchesAppointment = appointmentSnapshotToOpen?.id && String(appointmentSnapshotToOpen.id) === String(appointmentId);
+    const appointmentToOpen = snapshotMatchesAppointment
+      ? { ...(appointment || {}), ...appointmentSnapshotToOpen, status: normalizeAppointmentStatus(appointmentSnapshotToOpen.status) }
+      : appointment;
+
+    if (appointmentToOpen) {
+      openEditModal(appointmentToOpen);
       return;
     }
 
@@ -651,25 +656,47 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     if (hasLoadedHistory) refreshHistory();
   }, [hasLoadedHistory, refreshHistory, refreshRequests]);
 
+  const mergeAppointmentIntoLists = useCallback((updatedAppointment: Appointment) => {
+    const normalizedAppointment = {
+      ...updatedAppointment,
+      status: normalizeAppointmentStatus(updatedAppointment.status),
+    };
+
+    const mergeUpdatedAppointment = (items: Appointment[]) =>
+      items.map((appointment) =>
+        String(appointment.id) === String(normalizedAppointment.id)
+          ? { ...appointment, ...normalizedAppointment }
+          : appointment
+      );
+
+    setRequests(mergeUpdatedAppointment);
+    setHistory(mergeUpdatedAppointment);
+
+    return normalizedAppointment;
+  }, []);
+
+  const publishAppointmentUpdate = useCallback((updatedAppointment: Appointment) => {
+    const normalizedAppointment = mergeAppointmentIntoLists(updatedAppointment);
+
+    try {
+      window.dispatchEvent(new CustomEvent('appointments:updated', {
+        detail: {
+          appointment: normalizedAppointment,
+          appointmentId: normalizedAppointment.id,
+          newStatus: normalizedAppointment.status,
+        },
+      }));
+    } catch {}
+
+    return normalizedAppointment;
+  }, [mergeAppointmentIntoLists]);
+
   useEffect(() => {
     const handleAppointmentsUpdated = (event: Event) => {
       const updatedAppointment = (event as CustomEvent<{ appointment?: Appointment }>).detail?.appointment;
 
       if (updatedAppointment?.id) {
-        const normalizedAppointment = {
-          ...updatedAppointment,
-          status: normalizeAppointmentStatus(updatedAppointment.status),
-        };
-
-        const mergeUpdatedAppointment = (items: Appointment[]) =>
-          items.map((appointment) =>
-            String(appointment.id) === String(normalizedAppointment.id)
-              ? { ...appointment, ...normalizedAppointment }
-              : appointment
-          );
-
-        setRequests(mergeUpdatedAppointment);
-        setHistory(mergeUpdatedAppointment);
+        mergeAppointmentIntoLists(updatedAppointment);
       }
 
       refreshAppointmentLists();
@@ -680,7 +707,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return () => {
       window.removeEventListener("appointments:updated", handleAppointmentsUpdated as EventListener);
     };
-  }, [refreshAppointmentLists]);
+  }, [mergeAppointmentIntoLists, refreshAppointmentLists]);
 
   const handleApprove = async (appointment: Appointment) => {
     setPendingApproveAppointment(appointment);
@@ -782,7 +809,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
 
     try {
-      await updateAppointment(appointmentId, { status: newStatus as any });
+      const updatedAppointment = await updateAppointment(appointmentId, { status: newStatus as any });
+      publishAppointmentUpdate(updatedAppointment);
       toast.success(`Status updated to ${newStatus}`);
       refreshAppointmentLists();
       setTimeout(() => {
@@ -798,8 +826,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     
     const { appointment, newStatus } = pendingStatusChange;
     try {
-      await updateAppointment(appointment.id, { status: newStatus });
-      toast.success(`Status for ${getCurrentPatientName(appointment)} updated to ${newStatus}`);
+      const updatedAppointment = await updateAppointment(appointment.id, { status: newStatus });
+      const normalizedAppointment = publishAppointmentUpdate(updatedAppointment);
+      toast.success(`Status for ${getCurrentPatientName(normalizedAppointment)} updated to ${normalizedAppointment.status}`);
       // Refresh appointments and notifications to show the new status change notification
       refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available

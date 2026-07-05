@@ -19,7 +19,6 @@ import {
   employmentTypeOptions,
   staffDepartmentOptions,
   staffPasswordManagerIgnoreProps,
-  staffRoleOptions,
   staffStatusOptions,
   useSharedAddStaffLogic,
 } from "./sharedAddStaffLogic";
@@ -73,7 +72,7 @@ export default function AddStaffModal(props: AddStaffModalProps) {
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
                   <SelectContent>
-                    {staffRoleOptions.map((option) => (
+                    {staffLogic.roleOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
