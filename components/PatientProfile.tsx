@@ -54,7 +54,9 @@ import {
   ClipboardList,
   Loader2,
   Save,
-  ArrowLeft
+  ArrowLeft,
+  Stethoscope,
+  X
 } from "lucide-react";
 
 import {
@@ -67,6 +69,7 @@ import {
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
@@ -96,6 +99,7 @@ import {
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
+import { SelectDoctorModal } from "./SelectDoctorModal";
 
 export interface Patient {
   id?: string;
@@ -134,6 +138,7 @@ export interface Patient {
   isPrimary?: boolean;
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
+  deleted?: boolean;
 }
 
 const CONSENT_VERSION = "focused-informed-consent-v1";
@@ -829,6 +834,7 @@ interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transa
   type: string;
   date: string;
   transactions: RecentTransaction[];
+  deleted?: boolean;
 }
 
 type PaymentRow = RecentTransaction & {
@@ -1027,6 +1033,20 @@ const normalizeComparableText = (value: unknown) =>
 const normalizeComparableDoctor = (value: unknown) =>
   normalizeComparableText(value).replace(/^dr\.?\s+/, "");
 
+const isUnassignedDoctorValue = (value: unknown) => {
+  const normalized = normalizeComparableDoctor(value);
+  return !normalized || /^(none|null|undefined|unassigned|no doctor assigned|n\/a|n\.a\.?|na|-)$/.test(normalized);
+};
+
+const getVisitDoctorName = (appointment: Partial<Appointment> | HistoryAppointment | null | undefined) => {
+  if (!appointment) return "";
+  const rawDoctor = typeof appointment.doctor === "object"
+    ? (appointment.doctor as any)?.name || (appointment.doctor as any)?.fullName || (appointment.doctor as any)?.username || (appointment.doctor as any)?.id
+    : appointment.doctor || (appointment as any).doctorName || (appointment as any).doctorId;
+
+  return isUnassignedDoctorValue(rawDoctor) ? "" : String(rawDoctor || "").trim();
+};
+
 const normalizeComparableNumber = (value: unknown) => {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value === "number" && Number.isFinite(value)) return Math.round(value * 100) / 100;
@@ -1217,12 +1237,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   onOpenBookingModal,
   dataRefreshKey = 0
 }, ref) => {
-  const { refreshPatients, appointments, refreshAppointments, openCreateModal, refreshTrigger } = useAppointmentModal();
+  const { refreshPatients, appointments, refreshAppointments, openCreateModal, updateAppointment, refreshTrigger } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const [activeTab, setActiveTab] = useState("info");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
-  const { doctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -1255,6 +1275,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [isSaving, setIsSaving] = useState(false);
   const [isPreparingPatientPhoto, setIsPreparingPatientPhoto] = useState(false);
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
+  const [assignDoctorAppointment, setAssignDoctorAppointment] = useState<HistoryAppointment | null>(null);
+  const [isAssigningVisitDoctor, setIsAssigningVisitDoctor] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [parentPatient, setParentPatient] = useState<Patient | null>(null);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
@@ -1914,7 +1936,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   // New state for filters
   const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
-  const [historyAppointmentStatusFilter, setHistoryAppointmentStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
   const [historySearchFilter, setHistorySearchFilter] = useState('');
@@ -2142,6 +2163,48 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     handleOpenSnapshot(appointment, transaction);
   };
 
+  const handleAssignVisitDoctor = async (doctor: any) => {
+    const appointmentId = String(assignDoctorAppointment?.id || "");
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    setIsAssigningVisitDoctor(true);
+    try {
+      const updated = await updateAppointment(appointmentId, {
+        doctor: doctor.name,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+      } as Partial<Appointment>);
+
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId
+          ? ({
+              ...apt,
+              ...updated,
+              doctor: doctor.name,
+              doctorId: doctor.id,
+              doctorName: doctor.name,
+              doctorProfile: doctor.profilePicture || doctor.profilePictureUrl || (apt as any).doctorProfile,
+              doctorProfilePicture: doctor.profilePicture || doctor.profilePictureUrl || (apt as any).doctorProfilePicture,
+            } as Appointment)
+          : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      setAssignDoctorAppointment(null);
+      toast.success("Doctor assigned");
+    } catch (error) {
+      console.error("[PatientProfile] Failed to assign doctor:", error);
+      toast.error("Failed to assign doctor");
+    } finally {
+      setIsAssigningVisitDoctor(false);
+    }
+  };
+
   const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
     if (isPaymentLogTransaction(transaction)) {
       return { label: "Log", className: "bg-gray-100 text-gray-700 border-gray-200", isLog: true };
@@ -2151,7 +2214,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const uniqueDoctors = React.useMemo(() => {
-    const doctors = new Set(mockAppointmentHistoryLocal.map(apt => apt.doctor).filter(Boolean));
+    const doctors = new Set(
+      mockAppointmentHistoryLocal
+        .map((apt) => getVisitDoctorName(apt))
+        .filter(Boolean)
+    );
     return ['all', ...Array.from(doctors)];
   }, [mockAppointmentHistoryLocal]);
 
@@ -2173,8 +2240,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
         if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
-        if (historyAppointmentStatusFilter !== 'all' && apt.status !== historyAppointmentStatusFilter) return false;
-        if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
+        if (historyDoctorFilter !== 'all' && getVisitDoctorName(apt) !== historyDoctorFilter) return false;
         if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
         
         if (historySearchFilter) {
@@ -2188,7 +2254,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         return true;
     });
-  }, [mappedHistory, historyPaymentStatusFilter, historyAppointmentStatusFilter, historyDoctorFilter, historyProcedureFilter, historySearchFilter]);
+  }, [mappedHistory, historyPaymentStatusFilter, historyDoctorFilter, historyProcedureFilter, historySearchFilter]);
 
   // Filters for Payments tab
   const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
@@ -3675,35 +3741,63 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <CardHeader className="border-b border-slate-100 px-4 py-4 sm:px-6">
-              <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <CardHeader className="border-b border-slate-100 px-4 py-5 sm:px-6">
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <CardTitle className="text-2xl font-black text-slate-950">Visit History</CardTitle>
-                  <p className="mt-1 text-sm font-medium text-slate-500">All patient appointments and visits</p>
+                    <p className="mt-1 text-sm font-medium text-slate-500">All past appointments and visits</p>
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(240px,1fr)_150px_150px_150px_150px_44px_170px] 2xl:w-[1040px]">
-                  <div className="relative sm:col-span-2 lg:col-span-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
+                    className="h-10 rounded-xl bg-violet-600 px-4 font-bold text-white shadow-md shadow-violet-100 hover:bg-violet-700"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Appointment
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <Input
-                      placeholder="Search visits..."
+                      placeholder="Search visits"
                       value={historySearchFilter}
                       onChange={(e) => setHistorySearchFilter(e.target.value)}
-                      className="h-10 rounded-xl border-slate-200 bg-white pl-9 text-sm shadow-sm"
+                      className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-sm font-medium shadow-sm"
                     />
                   </div>
-                  <Select value={historyAppointmentStatusFilter} onValueChange={setHistoryAppointmentStatusFilter}>
-                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
-                      <SelectValue placeholder="All Statuses" />
+
+                  <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                      <SelectValue placeholder="All Services" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      {APPOINTMENT_STATUSES.map(status => (
-                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                      {uniqueProcedures.map(proc => (
+                        <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Services' : proc}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+
+                  {!doctorFilter ? (
+                    <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                        <SelectValue placeholder="All Providers" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniqueDoctors.map(doctor => (
+                          <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Providers' : doctor}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="hidden md:block" />
+                  )}
+
                   <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
-                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                       <SelectValue placeholder="All Payments" />
                     </SelectTrigger>
                     <SelectContent>
@@ -3713,53 +3807,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       ))}
                     </SelectContent>
                   </Select>
-                  {!doctorFilter && (
-                    <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
-                      <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
-                        <SelectValue placeholder="All Doctors" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {uniqueDoctors.map(doctor => (
-                          <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                    <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white shadow-sm">
-                      <SelectValue placeholder="All Procedures" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniqueProcedures.map(proc => (
-                        <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-full rounded-xl border-slate-200 bg-white shadow-sm lg:w-11"
-                    onClick={() => {
-                      setHistorySearchFilter("");
-                      setHistoryAppointmentStatusFilter("all");
-                      setHistoryPaymentStatusFilter("all");
-                      setHistoryDoctorFilter("all");
-                      setHistoryProcedureFilter("all");
-                    }}
-                  >
-                    <History className="h-4 w-4" />
-                    <span className="sr-only">Reset visit filters</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    type="button"
-                    onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
-                    className="h-10 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 font-bold text-white shadow-md shadow-violet-200 hover:from-violet-700 hover:to-blue-700 sm:col-span-2 lg:col-span-1"
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Appointment
-                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -3772,114 +3819,106 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 <div className="space-y-3">
                   {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                     const appointmentId = String(appointment.id || `apt-${index}`);
-                    const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
-                      .sort(comparePaymentTransactionsDesc);
-                    const isExpanded = expandedTransactions.has(appointmentId);
-                    const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
                     const appointmentBalance = Number((appointment as any).balance);
                     const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
                     const storedDisplayedBalance = Number.isFinite(appointmentBalance)
                       ? appointmentBalance
                       : computedOutstandingBalance;
-                    const isCancelledAppointment = normalizeAppointmentStatus(String(appointment.status || "")) === "cancelled";
-                    const originalDisplayedBalance = isCancelledAppointment
+                    const appointmentStatus = normalizeAppointmentStatus(String(appointment.status || ""));
+                    const isVoidedAppointment = appointment.deleted || appointmentStatus === "cancelled" || appointmentStatus === "deleted";
+                    const originalDisplayedBalance = isVoidedAppointment
                       ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
                       : storedDisplayedBalance;
-                    const displayedBalance = isCancelledAppointment ? 0 : originalDisplayedBalance;
+                    const displayedBalance = isVoidedAppointment ? 0 : originalDisplayedBalance;
                     const dateParts = getPatientHistoryDateParts(appointment.date);
                     const appointmentTime = formatPatientHistoryTime(appointment.date, (appointment as any).time);
                     const patientDisplayName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Patient";
-                    const patientImage = resolveImageSource(formData.profilePicture || patient.profilePicture || "");
-                    const patientInitials = getInitials(patientDisplayName);
                     const notesText = String(appointment.notes || "").trim() || "No notes";
                     const isPaid = displayedBalance <= 0 && Number(appointment.price || 0) > 0;
+                    const doctorName = getVisitDoctorName(appointment);
+                    const isDoctorUnassigned = !doctorName;
+                    const serviceName = String(appointment.type || "Appointment");
 
                     const resolveDoctorImageFor = (apt: any) => {
                       let img = getDoctorImageFromSnapshot(apt);
                       if (!img && Array.isArray(doctors) && doctors.length) {
-                        const doctorName = String(apt.doctor || '').toLowerCase().trim();
-                        const matched = doctors.find((d) => (d.name || '').toLowerCase().trim() === doctorName) || doctors.find((d) => doctorName && (d.name || '').toLowerCase().includes(doctorName));
+                        const normalizedDoctorName = normalizeComparableDoctor(getVisitDoctorName(apt));
+                        const matched = doctors.find((d) => normalizeComparableDoctor(d.name) === normalizedDoctorName) || doctors.find((d) => normalizedDoctorName && normalizeComparableDoctor(d.name).includes(normalizedDoctorName));
                         if (matched && matched.profilePicture) img = resolveImageSource(matched.profilePicture);
                       }
                       return img;
                     };
 
-                    const doctorImage = resolveDoctorImageFor(appointment as any);
-                    const doctorName = String(appointment.doctor || "To assign later");
+                    const doctorImage = isDoctorUnassigned ? undefined : resolveDoctorImageFor(appointment as any);
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
 
                     return (
-                      <div key={appointmentId} className="grid gap-3 xl:grid-cols-[8.5rem_minmax(0,1fr)]">
+                      <div key={appointmentId} className="grid gap-3 xl:grid-cols-[7.5rem_minmax(0,1fr)]">
                         <div className="relative hidden xl:flex">
-                          <div className="absolute left-6 top-12 h-[calc(100%+0.75rem)] w-px bg-slate-200" />
+                          <div className="absolute left-6 top-10 h-[calc(100%+0.75rem)] w-px bg-slate-200" />
                           <div className="relative z-10 flex w-full items-start gap-3">
-                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600 shadow-sm">
+                            <div className="mt-1 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600 shadow-sm ring-4 ring-white">
                               <Calendar className="h-5 w-5" />
                             </div>
                             <div className="pt-1 text-slate-900">
                               <div className="text-xs font-black uppercase tracking-widest text-slate-500">{dateParts.month}</div>
                               <div className="text-3xl font-black leading-none">{dateParts.day}</div>
                               <div className="mt-1 text-xs font-bold text-slate-500">{dateParts.year}</div>
-                              <div className="text-xs font-black text-slate-500">{dateParts.weekday}</div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
                           <div className="mb-3 flex items-center gap-3 xl:hidden">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                               <Calendar className="h-5 w-5" />
                             </div>
                             <div>
                               <div className="text-sm font-black text-slate-900">{formatPatientLogDate(appointment.date)}</div>
-                              <div className="text-xs font-semibold text-slate-500">{dateParts.weekday || "Visit"} at {appointmentTime}</div>
+                              <div className="text-xs font-semibold text-slate-500">{appointmentTime}</div>
                             </div>
                           </div>
 
-                          <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_36px] 2xl:items-start">
-                            <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)]">
-                              <div className="flex min-w-0 items-center gap-3">
-                                <Avatar className="h-12 w-12 flex-none overflow-hidden rounded-full border border-slate-200">
-                                  {patientImage ? (
-                                    <AvatarImage src={patientImage} alt={patientDisplayName} className="object-cover" />
-                                  ) : (
-                                    <AvatarFallback className="bg-slate-100 text-base font-bold text-slate-700">{patientInitials}</AvatarFallback>
-                                  )}
-                                </Avatar>
-                                <div className="min-w-0">
-                                  <div className="truncate text-base font-black text-slate-950">{doctorName}</div>
-                                  <div className="truncate text-sm font-semibold text-slate-500">{appointment.type}</div>
-                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
-                                    <span className="inline-flex items-center gap-1">
-                                      <Clock className="h-3.5 w-3.5" />
-                                      {appointmentTime}
-                                    </span>
-                                    {getAppointmentStatusBadge(String(appointment.status || ''))}
-                                    {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
-                                  </div>
-                                </div>
-                              </div>
+                          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px_190px_36px] xl:items-center">
+                            <div className="flex min-w-0 items-start gap-4">
+                              <Avatar className="h-14 w-14 flex-none overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                                {doctorImage ? (
+                                  <AvatarImage src={doctorImage} alt={doctorName} className="object-cover" />
+                                ) : (
+                                  <AvatarFallback className="bg-blue-50 text-blue-600">
+                                    {isDoctorUnassigned ? <Stethoscope className="h-5 w-5" /> : getInitials(doctorName)}
+                                  </AvatarFallback>
+                                )}
+                              </Avatar>
 
-                              <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-                                <Avatar className="h-10 w-10 overflow-hidden rounded-full border border-white shadow-sm">
-                                  {doctorImage ? (
-                                    <AvatarImage src={doctorImage} alt={doctorName} className="object-cover" />
-                                  ) : (
-                                    <AvatarFallback className="bg-violet-100 text-sm font-bold text-violet-700">{getInitials(doctorName)}</AvatarFallback>
-                                  )}
-                                </Avatar>
-                                <div className="min-w-0">
-                                  <div className="text-xs font-black uppercase tracking-wider text-slate-400">Doctor</div>
-                                  <div className="truncate text-sm font-black text-slate-900">{doctorName}</div>
-                                  <div className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-500">
-                                    <Calendar className="h-3.5 w-3.5" />
+                              <div className="min-w-0 flex-1">
+                                {isDoctorUnassigned ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAssignDoctorAppointment(appointment)}
+                                    className="block max-w-full truncate text-left text-sm font-black uppercase tracking-wider text-blue-600 underline-offset-2 transition-colors hover:text-blue-700 hover:underline sm:text-base"
+                                  >
+                                    Assign doctor
+                                  </button>
+                                ) : (
+                                  <div className="truncate text-base font-black text-slate-950">{doctorName}</div>
+                                )}
+                                <div className="truncate text-sm font-semibold text-slate-500">{serviceName}</div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    {appointmentTime}
+                                  </span>
+                                  {getAppointmentStatusBadge(String(appointment.status || ''))}
+                                  <span className="inline-flex min-w-0 items-center gap-1 text-slate-500">
+                                    <FileText className="h-3.5 w-3.5 shrink-0" />
                                     <span className="truncate">{notesText}</span>
-                                  </div>
+                                  </span>
                                 </div>
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm 2xl:grid-cols-1">
+                            <div className="grid gap-2 border-slate-200 text-sm sm:grid-cols-3 xl:grid-cols-1 xl:border-l xl:pl-5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Total</span>
                                 <span className="font-black text-slate-900">{formatPatientHistoryCurrency(appointment.price)}</span>
@@ -3890,10 +3929,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Balance</span>
-                                {isCancelledAppointment && originalDisplayedBalance > 0 ? (
+                                {isVoidedAppointment && originalDisplayedBalance > 0 ? (
                                   <span className="font-black">
                                     <span className="text-red-500 line-through decoration-red-400 decoration-2">{formatPatientHistoryCurrency(originalDisplayedBalance)}</span>
-                                    <span className="ml-2 text-emerald-600">₱0</span>
+                                    <span className="ml-2 text-emerald-600">PHP 0</span>
                                   </span>
                                 ) : (
                                   <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}>{formatPatientHistoryCurrency(displayedBalance)}</span>
@@ -3901,29 +3940,41 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2 2xl:grid-cols-1">
+                            <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
                               {displayedBalance > 0 ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="h-10 rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50"
+                                  className="h-9 rounded-xl border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
                                   onClick={() => openPaymentModal(String(patient.id || ""), patientDisplayName, mockAppointmentHistoryLocal, appointmentId)}
                                 >
                                   <DollarSign className="mr-2 h-4 w-4" />
                                   Record Payment
                                 </Button>
                               ) : (
-                                <div className="flex h-10 items-center justify-center rounded-xl bg-emerald-50 text-sm font-black text-emerald-700">
+                                <div className="flex h-9 items-center justify-center rounded-xl bg-emerald-50 text-sm font-black text-emerald-700">
                                   <CheckCircle className="mr-2 h-4 w-4" />
                                   Paid
                                 </div>
                               )}
+                              {originalAppointment && onOpenBookingModal ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
+                                  onClick={() => onOpenBookingModal(originalAppointment)}
+                                >
+                                  <Calendar className="mr-2 h-4 w-4" />
+                                  Reschedule
+                                </Button>
+                              ) : null}
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="h-10 rounded-xl border-slate-200 text-slate-800 hover:bg-slate-50"
+                                className="h-9 rounded-xl border-slate-200 text-slate-800 hover:bg-slate-50"
                                 onClick={() => handleOpenSnapshot(appointment)}
                               >
                                 <Eye className="mr-2 h-4 w-4" />
@@ -3952,85 +4003,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   <Calendar className="mr-2 h-4 w-4" />
                                   Open Appointment
                                 </DropdownMenuItem>
+                                {isDoctorUnassigned ? (
+                                  <DropdownMenuItem onClick={() => setAssignDoctorAppointment(appointment)}>
+                                    <Stethoscope className="mr-2 h-4 w-4" />
+                                    Assign Doctor
+                                  </DropdownMenuItem>
+                                ) : null}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
-
-                          {sortedTransactions.length > 0 && (
-                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                              <div className="mb-2 flex items-center justify-between gap-3">
-                                <div className="text-sm font-black text-slate-900">Payment Details</div>
-                                {sortedTransactions.length > 1 && (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 gap-1 px-2 text-xs font-bold text-slate-600 hover:text-slate-900"
-                                    onClick={() => toggleExpandTransactions(appointmentId)}
-                                  >
-                                    {isExpanded ? (
-                                      <>
-                                        <ChevronUp className="h-4 w-4" />
-                                        See less
-                                      </>
-                                    ) : (
-                                      <>
-                                        <ChevronDown className="h-4 w-4" />
-                                        See more
-                                      </>
-                                    )}
-                                  </Button>
-                                )}
-                              </div>
-                              <div className="space-y-2">
-                                {visibleTransactions.map((txn: RecentTransaction, transactionIndex: number) => {
-                                  const isLatestPayment = transactionIndex === 0;
-
-                                  return (
-                                    <div key={txn.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                                      <div className="flex min-w-0 items-center gap-3">
-                                        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                                          {getPaymentMethodIcon(txn.method)}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <div className="flex flex-wrap items-center gap-2 font-black text-slate-900">
-                                            <span>{txn.method} · {formatPatientHistoryCurrency(txn.amount)}</span>
-                                            {isLatestPayment && (
-                                              <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-700">
-                                                Latest
-                                              </Badge>
-                                            )}
-                                          </div>
-                                          <div className="truncate text-xs font-medium text-slate-500">{formatPatientLogDate(txn.date)} · {txn.transactionId}</div>
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center justify-end gap-1">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 w-8 rounded-lg p-0"
-                                          onClick={() => handleOpenSnapshot(appointment, txn)}
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                          <span className="sr-only">View Appointment Snapshot</span>
-                                        </Button>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className={`h-8 w-8 rounded-lg p-0 ${getEditablePaymentId(txn) ? "" : "opacity-60"}`}
-                                          title={getEditablePaymentId(txn) ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                          onClick={() => handleEditPaymentTransaction(txn)}
-                                        >
-                                          <Edit className="h-4 w-4" />
-                                          <span className="sr-only">Edit Payment</span>
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
@@ -4040,6 +4021,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </CardContent>
           </Card>
         </TabsContent>
+
 
         <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto w-full max-w-[1680px] space-y-4">
           <Card className={cardClass}>
@@ -4264,6 +4246,78 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
           </div>
       </Tabs>
+      <Dialog open={Boolean(assignDoctorAppointment)} onOpenChange={(nextOpen) => !isAssigningVisitDoctor && !nextOpen && setAssignDoctorAppointment(null)}>
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
+        >
+          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <Stethoscope className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
+                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
+                    {assignDoctorAppointment ? `${String(assignDoctorAppointment.type || "Visit")} for ${patientDisplayName}` : "Choose a provider for this visit"}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setAssignDoctorAppointment(null)} disabled={isAssigningVisitDoctor} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close assign doctor">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]">
+              {isLoadingDoctors ? (
+                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+                  Loading doctors
+                </div>
+              ) : doctors.length === 0 ? (
+                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-black text-slate-900">No doctors available</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this visit.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {doctors.map((doctor: any) => {
+                    const doctorAvatar = resolveImageSource(doctor.profilePicture || doctor.profilePictureUrl || "");
+
+                    return (
+                      <button
+                        key={doctor.id || doctor.name}
+                        type="button"
+                        onClick={() => handleAssignVisitDoctor(doctor)}
+                        disabled={isAssigningVisitDoctor}
+                        className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
+                          {doctorAvatar ? <AvatarImage src={doctorAvatar} alt={doctor.name} className="object-cover" /> : null}
+                          <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
+                            {getInitials(doctor.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black leading-tight text-slate-950">{doctor.name}</p>
+                          <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
+                        </div>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                          {isAssigningVisitDoctor ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </SelectDoctorModal>
+          </div>
+        </DialogContent>
+      </Dialog>
       <PatientUnsavedChangesDialog
         open={isRecoveryDialogOpen}
         onOpenChange={setIsRecoveryDialogOpen}

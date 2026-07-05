@@ -1,10 +1,18 @@
 import React, { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, MoreHorizontal, Eye, Pencil, Plus, User, Loader2, Check } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -14,6 +22,8 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
+import type { Appointment } from "@/hooks/useAppointments";
 import { formatWordyDate } from "@/lib/utils";
 import {
   formatBookingHistoryStatusLabel,
@@ -29,6 +39,7 @@ import {
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
+import { SelectDoctorModal } from "./SelectDoctorModal";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -127,7 +138,7 @@ const resolveDoctorName = (doctor: any) => {
 
 const normalizeDoctorName = (doctor: any) => {
   const normalized = normalizeDoctorIdentity(resolveDoctorName(doctor));
-  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(normalized) ? "" : normalized;
+  return /^(none|null|undefined|unassigned|no doctor assigned|n\/a|n\.a\.?|na|-)$/.test(normalized) ? "" : normalized;
 };
 
 const shortDoctorLabel = (fullName?: string, prefix = "From") => {
@@ -328,21 +339,48 @@ const isPatientChange = (snapshot: any) => {
   return Boolean(pPrev && pNext && pPrev !== pNext);
 };
 
+const getInitials = (name?: string) =>
+  String(name || "Doctor")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "DR";
+
+const getEditablePaymentId = (payment: any) => {
+  const explicitPaymentId = payment?.paymentId || payment?.paymentRecordId || payment?.id;
+  return explicitPaymentId ? String(explicitPaymentId).trim() : "";
+};
+
+const getManagementBasePath = (pathname: string | null) => {
+  if (pathname?.startsWith("/receptionist")) return "/receptionist";
+  if (pathname?.startsWith("/admin")) return "/admin";
+  if (pathname?.startsWith("/doctor")) return "/doctor";
+  return "/admin";
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true }: AppointmentHistoryViewProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
+  const [isAssignDoctorOpen, setIsAssignDoctorOpen] = useState(false);
+  const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
+  const [isOpeningPaymentEdit, setIsOpeningPaymentEdit] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestPaymentLogDate, setLatestPaymentLogDate] = useState<string>("");
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
-  const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
+  const { doctors, isLoadingDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
   // Appointment action helpers (approve/reject) using central appointment modal hook
-  const { updateAppointment } = useAppointmentModal();
+  const { updateAppointment, openEditModalById } = useAppointmentModal();
+  const { openPaymentFor, openEditPaymentModal } = usePaymentModal();
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
@@ -911,7 +949,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
 
   const appointmentId = displayedAppointmentId;
-  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && onOpenAppointment && !isAppointmentOpen);
+  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
+  const canUseSnapshotActions = Boolean(!actionsDisabled && appointmentId);
+  const managementBasePath = getManagementBasePath(pathname);
+  const patientRouteName = isIgnorablePatientName(patientName) ? "" : patientName;
+  const doctorRouteName = displayedDoctorName || "";
+  const canGoToPatient = Boolean(patientRouteName);
+  const canGoToDoctor = Boolean(doctorRouteName);
+  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
   const canShowSnapshotActions = Boolean(
     snapshotState === "current" &&
@@ -923,6 +968,155 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const actionNoteText = nextStatusNorm === "tbd"
     ? "Accept to mark this appointment as completed or cancel it if needed."
     : "Accept to confirm this schedule or cancel the appointment request.";
+
+  const getAppointmentForPayment = (): Appointment => ({
+    ...displayedSnapshot,
+    id: String(appointmentId),
+    patientId: String(displayedPatientId || displayedSnapshot?.patientId || ""),
+    patientName,
+    date: String(displayedSnapshot?.date || ""),
+    time: String(displayedSnapshot?.time || ""),
+    type: Number.isFinite(Number(displayedSnapshot?.type)) ? Number(displayedSnapshot.type) : 0,
+    customType: displayedSnapshot?.customType,
+    price: Number(displayedBasePrice) || 0,
+    discount: Number(displayedDiscountAmount) || 0,
+    doctor: displayedDoctorName || resolveDoctorName(displayedSnapshot?.doctor || displayedSnapshot?.doctorName || ""),
+    doctorId: displayedSnapshot?.doctorId,
+    doctorName: displayedDoctorName || displayedSnapshot?.doctorName,
+    duration: Number(displayedSnapshot?.duration) || undefined,
+    notes: displayedSnapshot?.notes || "",
+    treatmentNotes: displayedTreatmentNotesComparisonText || displayedSnapshot?.treatmentNotes,
+    toothNumbers: displayedToothNumbersText || displayedSnapshot?.toothNumbers,
+    serviceType: displayedSnapshot?.serviceType,
+    status: displayedSnapshot?.status || "scheduled",
+    paymentStatus: displayedSnapshot?.paymentStatus,
+    paymentMethod: displayedSnapshot?.paymentMethod,
+    paymentDate: displayedSnapshot?.paymentDate,
+    balance: displayedBalanceNumeric ?? undefined,
+    totalPaid: Number(totalPaidAmount) || 0,
+    patient: displayedSnapshot?.patient,
+  } as Appointment);
+
+  const handleOpenAppointment = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    if (onOpenAppointment) {
+      onOpenAppointment(String(appointmentId), displayedSnapshot);
+      return;
+    }
+
+    try {
+      await openEditModalById(String(appointmentId));
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open appointment:", error);
+      toast.error("Failed to open appointment");
+    }
+  };
+
+  const handleAddPayment = () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    openPaymentFor(getAppointmentForPayment(), String(displayedPatientId || ""), patientName);
+  };
+
+  const handleEditPayment = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    setIsOpeningPaymentEdit(true);
+    try {
+      const response = await fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(String(appointmentId))}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json().catch(() => null);
+      const payments = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+      const latestEditablePayment = payments.find((payment: any) => getEditablePaymentId(payment));
+
+      if (!latestEditablePayment) {
+        toast.error("No editable payment found for this appointment");
+        return;
+      }
+
+      openEditPaymentModal(
+        getEditablePaymentId(latestEditablePayment),
+        latestEditablePayment,
+        String(displayedPatientId || latestEditablePayment.patientId || ""),
+        [getAppointmentForPayment()]
+      );
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open payment edit:", error);
+      toast.error("Failed to open payment editor");
+    } finally {
+      setIsOpeningPaymentEdit(false);
+    }
+  };
+
+  const goToPatient = () => {
+    if (!canGoToPatient) {
+      toast.error("No patient profile available");
+      return;
+    }
+
+    if (managementBasePath === "/doctor") {
+      router.push("/doctor/patients");
+      return;
+    }
+
+    router.push(`${managementBasePath}/patients/${encodeURIComponent(patientRouteName)}`);
+  };
+
+  const goToDoctor = () => {
+    if (!canGoToDoctor) {
+      toast.error("No doctor profile available");
+      return;
+    }
+
+    const doctorBasePath = managementBasePath === "/doctor" ? "/doctors" : `${managementBasePath}/doctors`;
+    router.push(`${doctorBasePath}/${encodeURIComponent(doctorRouteName)}`);
+  };
+
+  const handleAssignDoctor = async (doctor: any) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    setIsAssigningDoctor(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), {
+        doctor: doctor.name,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        doctor: doctor.name,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+        doctorProfile: doctor.profilePicture || doctor.profilePictureUrl || current?.doctorProfile,
+        doctorProfilePicture: doctor.profilePicture || doctor.profilePictureUrl || current?.doctorProfilePicture,
+      }));
+      setLatestComparisonSnapshot(null);
+      setIsAssignDoctorOpen(false);
+      toast.success("Doctor assigned");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to assign doctor:", error);
+      toast.error("Failed to assign doctor");
+    } finally {
+      setIsAssigningDoctor(false);
+    }
+  };
 
   const viewLatestSnapshot = () => {
     if (!displayedSnapshot) return;
@@ -1134,7 +1328,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
               <div className="flex shrink-0 items-center gap-2">
                 {canOpenAppointment ? (
-                  <Button className="h-10 rounded-full bg-blue-600 px-4 text-sm font-black text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700 active:scale-95" title="Open this appointment" onClick={() => onOpenAppointment?.(String(appointmentId), displayedSnapshot)}>
+                  <Button className="h-10 rounded-full bg-blue-600 px-4 text-sm font-black text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700 active:scale-95" title="Open this appointment" onClick={handleOpenAppointment}>
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     Open
                   </Button>
@@ -1144,6 +1338,38 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                     <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isFetchingLogs ? "animate-spin" : ""}`} />
                     Latest
                   </Button>
+                ) : null}
+                {canUseSnapshotActions ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full text-slate-600 hover:bg-slate-100" aria-label="More appointment actions">
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onSelect={handleOpenAppointment}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        Open
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
+                        {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                        Edit payment
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleAddPayment}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add payment
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={goToPatient} disabled={!canGoToPatient}>
+                        <User className="mr-2 h-4 w-4" />
+                        Go to patient
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={goToDoctor} disabled={!canGoToDoctor}>
+                        <Stethoscope className="mr-2 h-4 w-4" />
+                        Go to doctor
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 ) : null}
                 <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-10 w-10 rounded-full text-slate-600 hover:bg-slate-100" aria-label="Close snapshot">
                   <X className="h-5 w-5" />
@@ -1218,7 +1444,17 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <div className="min-w-0">
                     <Label className="block text-[11px] font-black uppercase tracking-widest text-slate-400">Doctor</Label>
                     <div className="mt-1 flex min-w-0 items-center gap-1">
-                      <p className="truncate text-base font-black leading-tight text-slate-900">{displayedDoctorName || "Unassigned"}</p>
+                      {canAssignDoctor ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsAssignDoctorOpen(true)}
+                          className="truncate text-left text-[11px] font-black uppercase leading-tight tracking-wider text-blue-600 underline-offset-2 transition-colors hover:text-blue-700 hover:underline"
+                        >
+                          Assign doctor
+                        </button>
+                      ) : (
+                        <p className="truncate text-base font-black leading-tight text-slate-900">{displayedDoctorName || "Unassigned"}</p>
+                      )}
                       <CurrentChangeIndicator change={doctorCurrentChange} />
                     </div>
                   </div>
@@ -1319,6 +1555,79 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             ) : null}
             <Button onClick={() => onOpenChange(false)} variant="ghost" className="h-11 w-full rounded-full text-sm font-black text-slate-400 transition-all hover:bg-slate-50 hover:text-slate-600">Close</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAssignDoctorOpen} onOpenChange={(nextOpen) => !isAssigningDoctor && setIsAssignDoctorOpen(nextOpen)}>
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
+        >
+          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <Stethoscope className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
+                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
+                    {patientName ? `${typeName} for ${patientName}` : typeName}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setIsAssignDoctorOpen(false)} disabled={isAssigningDoctor} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close assign doctor">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]">
+              {isLoadingDoctors ? (
+                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+                  Loading doctors
+                </div>
+              ) : doctors.length === 0 ? (
+                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-black text-slate-900">No doctors available</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this appointment.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {doctors.map((doctor: any) => {
+                    const doctorAvatar = resolveImageSource(pickImageSource(doctor.profilePicture, doctor.profilePictureUrl));
+
+                    return (
+                      <button
+                        key={doctor.id || doctor.name}
+                        type="button"
+                        onClick={() => handleAssignDoctor(doctor)}
+                        disabled={isAssigningDoctor}
+                        className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
+                          {doctorAvatar ? <AvatarImage src={doctorAvatar} alt={doctor.name} className="object-cover" /> : null}
+                          <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
+                            {getInitials(doctor.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black leading-tight text-slate-950">{resolveDoctorName(doctor.name)}</p>
+                          <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
+                        </div>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                          {isAssigningDoctor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </SelectDoctorModal>
+          </div>
         </DialogContent>
       </Dialog>
 

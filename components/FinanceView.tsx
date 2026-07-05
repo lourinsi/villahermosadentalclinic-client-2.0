@@ -4,6 +4,7 @@ import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import ConfirmDialog from "./ConfirmDialog";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
@@ -70,7 +71,8 @@ import {
   Gift,
   CreditCard,
   CheckCircle2,
-  Menu
+  Menu,
+  Trash2
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -354,6 +356,9 @@ export interface DetailedExpense {
   status: string;
   recurring: boolean;
   createdAt?: string;
+  updatedAt?: string;
+  deleted?: boolean;
+  deletedAt?: string;
   inventoryItemId?: string;
   inventoryQuantity?: number;
   notes?: string;
@@ -527,6 +532,7 @@ export function FinanceView() {
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
+  const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
@@ -572,6 +578,7 @@ export function FinanceView() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
   const [isSavingExpensePayment, setIsSavingExpensePayment] = useState(false);
+  const [isDeletingExpense, setIsDeletingExpense] = useState(false);
   const [isSavingInventory, setIsSavingInventory] = useState(false);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
   const [isSavingPayroll, setIsSavingPayroll] = useState(false);
@@ -848,6 +855,10 @@ export function FinanceView() {
     setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
   };
 
+  const openExpenseDeleteDialog = (expense: DetailedExpense) => {
+    setExpenseToDelete(expense);
+  };
+
   const handleSaveExpense = async () => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
@@ -924,6 +935,28 @@ export function FinanceView() {
       toast.error(error instanceof Error ? error.message : "Failed to mark expense paid");
     } finally {
       setIsSavingExpensePayment(false);
+    }
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!expenseToDelete) return;
+
+    setIsDeletingExpense(true);
+    try {
+      await fetchApiData<null>(
+        `/api/finance/detailed-expenses/${encodeURIComponent(expenseToDelete.id)}`,
+        "expense deletion",
+        { method: "DELETE" }
+      );
+
+      toast.success("Expense deleted");
+      setExpenseToDelete(null);
+      await fetchData();
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete expense");
+    } finally {
+      setIsDeletingExpense(false);
     }
   };
 
@@ -2233,6 +2266,17 @@ export function FinanceView() {
                                       Pay
                                     </Button>
                                   )}
+                                  {canManageExpenseStatus && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                      onClick={() => openExpenseDeleteDialog(expense)}
+                                    >
+                                      <Trash2 className="h-3 w-3 mr-1" />
+                                      Delete
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -2727,6 +2771,19 @@ export function FinanceView() {
         onOpenChange={(open) => !open && setExpenseToPay(null)}
         onPaymentMethodChange={setExpensePaymentMethod}
         onConfirm={handlePayExpense}
+      />
+      <ConfirmDialog
+        open={Boolean(expenseToDelete)}
+        onOpenChange={(open) => !open && setExpenseToDelete(null)}
+        title="Delete Expense"
+        message={
+          expenseToDelete?.inventoryItemId
+            ? "This will remove the expense and reverse its linked stock quantity. The audit history will stay available."
+            : "This will remove the expense from finance reports. The audit history will stay available."
+        }
+        confirmLabel="Delete"
+        loading={isDeletingExpense}
+        onConfirm={handleDeleteExpense}
       />
       <FinanceInventoryModal
         open={Boolean(inventoryModalMode)}

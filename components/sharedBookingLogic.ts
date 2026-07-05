@@ -280,18 +280,42 @@ export function getBookingAppointmentTypeIndex(typeName: string): number {
   return typeMap[typeName] ?? 6;
 }
 
-export function isUnassignedBookingDoctor(value?: unknown) {
-  const normalized = String(value || "")
-    .replace(/^Dr\.\s+/i, "")
-    .toLowerCase()
+function getBookingDoctorText(value?: unknown): string {
+  if (value && typeof value === "object") {
+    const doctor = value as Record<string, unknown>;
+    const nestedDoctor =
+      doctor.doctor && typeof doctor.doctor === "object"
+        ? getBookingDoctorText(doctor.doctor)
+        : "";
+    const candidate = [
+      doctor.name,
+      doctor.fullName,
+      doctor.doctorName,
+      typeof doctor.doctor === "string" ? doctor.doctor : nestedDoctor,
+      doctor.username,
+      doctor.email,
+      doctor.id,
+    ].find((item) => String(item ?? "").trim());
+
+    return getBookingDoctorText(candidate);
+  }
+
+  return String(value ?? "")
+    .replace(/^Dr\.?\s+/i, "")
+    .replace(/\s*\((?:doctor|dentist|provider|staff)\)\s*$/i, "")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+export function isUnassignedBookingDoctor(value?: unknown) {
+  const normalized = getBookingDoctorText(value).toLowerCase();
 
   return /^(?:__assign_later__|n\/a|na|none|null|undefined|unassigned|no doctor assigned|to assign later|assign later)$/.test(normalized);
 }
 
 export function getBookingDoctorValue(value?: unknown) {
   if (isUnassignedBookingDoctor(value)) return UNASSIGNED_DOCTOR_NAME;
-  return String(value || "").trim();
+  return getBookingDoctorText(value);
 }
 
 export function getBookingDoctorSelectValue(value?: unknown) {
@@ -299,17 +323,18 @@ export function getBookingDoctorSelectValue(value?: unknown) {
   return getBookingDoctorValue(value) || UNASSIGNED_DOCTOR_VALUE;
 }
 
-export function formatBookingDoctorName(name?: string): string {
+export function formatBookingDoctorName(name?: unknown): string {
   if (isUnassignedBookingDoctor(name)) return UNASSIGNED_DOCTOR_LABEL;
   if (!name || name === "—" || name === "â€”") return "—";
-  const cleanName = name.replace(/^Dr\.\s+/i, "").trim();
+  const cleanName = getBookingDoctorText(name);
+  if (!cleanName) return "—";
   if (/^(none|null|undefined|unassigned|no doctor assigned)$/i.test(cleanName)) return UNASSIGNED_DOCTOR_LABEL;
   return `Dr. ${cleanName}`;
 }
 
-export function normalizeBookingDoctorName(name?: string) {
+export function normalizeBookingDoctorName(name?: unknown) {
   if (isUnassignedBookingDoctor(name)) return UNASSIGNED_DOCTOR_NAME.toLowerCase();
-  const cleanName = (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  const cleanName = getBookingDoctorText(name).toLowerCase();
   return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(cleanName) ? UNASSIGNED_DOCTOR_NAME.toLowerCase() : cleanName;
 }
 
@@ -483,8 +508,8 @@ export function getBookingHistoryNotes(log: any) {
   return "";
 }
 
-export function getBookingDoctorInitials(name?: string) {
-  const cleanName = (name || "Doctor").replace(/^Dr\.\s+/i, "").trim();
+export function getBookingDoctorInitials(name?: unknown) {
+  const cleanName = getBookingDoctorText(name) || "Doctor";
   return cleanName
     .split(/\s+/)
     .slice(0, 2)

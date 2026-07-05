@@ -75,6 +75,11 @@ import useSharedBookingLogic, {
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
+import { BookingPaymentPage } from "./PaymentModal";
+import { SelectDoctorModal } from "./SelectDoctorModal";
+import { SelectPatientModal } from "./SelectPatientModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
@@ -499,6 +504,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [isPaymentDatePickerOpen, setIsPaymentDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
   const [activeTourStepId, setActiveTourStepId] = useState(getCurrentTourStepId);
   const bookingTreatmentOptions = useMemo(
@@ -3075,15 +3081,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const openPaymentDatePicker = () => {
-    const input = paymentDateInputRef.current;
-    if (!input) return;
+    setIsPaymentDatePickerOpen(true);
+  };
 
-    input.focus();
-    try {
-      (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-    } catch {
-      // Some browsers only allow showPicker from direct user activation; focus still keeps the input usable.
-    }
+  const handlePaymentDateSelect = (date: Date) => {
+    setPaymentDate(formatDateToYYYYMMDD(date));
+    setIsPaymentDatePickerOpen(false);
   };
 
   const handlePrimaryBookingAction = (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -3245,7 +3248,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               
               {/* STEP 1: PATIENT */}
               {modalStep === 'patient' && (
-                <div data-tour-id="booking-patient-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <SelectPatientModal>
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Stethoscope className="h-7 w-7" />
@@ -3282,12 +3285,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </SelectPatientModal>
               )}
 
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
-                <div data-tour-id="booking-schedule-step" className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                <SelectScheduleModal>
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <CalendarIcon className="h-7 w-7" />
@@ -3351,12 +3354,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     </button>
                   </div>
-                </div>
+                </SelectScheduleModal>
               )}
 
               {/* STEP 3: DOCTOR */}
               {modalStep === 'doctor' && showDoctorStep && (
-                <div data-tour-id="booking-doctor-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <SelectDoctorModal>
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Award className="h-7 w-7" />
@@ -3467,12 +3470,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       );
                     })}
                   </div>
-                </div>
+                </SelectDoctorModal>
               )}
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div data-tour-id="booking-treatment-step" className="mx-auto max-w-5xl space-y-2.5 animate-in fade-in slide-in-from-bottom-4 sm:space-y-4">
+                <SelectTreatmentModal>
                   <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
                     <Label htmlFor="improved-booking-treatment-select" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
                         Treatment Service
@@ -3764,12 +3767,37 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
                   </div>
 
-                </div>
+                </SelectTreatmentModal>
               )}
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
                 <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-5 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <BookingPaymentPage
+                    selectedTreatmentName={selectedTreatmentName || "Selected Treatment"}
+                    totalBilled={discountedPrice}
+                    totalPaid={previouslyPaidAmount}
+                    currentBalanceDue={remainingBalance}
+                    amount={amountToPay}
+                    onAmountChange={setAmountToPay}
+                    paymentDate={paymentDate}
+                    onPaymentDateChange={setPaymentDate}
+                    paymentMethod={paymentMethod}
+                    onPaymentMethodChange={setPaymentMethod}
+                    projectedRemainingBalance={projectedRemainingBalance}
+                    onPayFull={() => setAmountToPay(String(remainingBalance))}
+                    payFullDisabled={remainingBalance <= 0}
+                    paymentDateInputRef={paymentDateInputRef}
+                    maxPaymentDate={getDefaultBookingPaymentDate()}
+                    onOpenPaymentDatePicker={openPaymentDatePicker}
+                    paymentDateHelp={formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
+                    methodOptions={[
+                      { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
+                      { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-violet-600", shadow: "shadow-violet-100" },
+                      ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
+                    ]}
+                  />
+                  <div className="hidden">
                   <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
                     <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.35rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100 sm:h-16 sm:w-16 sm:rounded-[1.25rem]">
                       <CreditCard className="h-8 w-8" />
@@ -3929,6 +3957,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
                   </div>
 
+                  </div>
                 </div>
               )}
             </div>
@@ -4095,6 +4124,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       />
 
       <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={handleManualDateSelect} doctorName={selectedDoctorForSchedule} patientId={selectedPatient} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <DatePickerModal
+        open={isPaymentDatePickerOpen}
+        onOpenChange={setIsPaymentDatePickerOpen}
+        selectedDate={parseLocalDateOnly(paymentDate) || new Date()}
+        onDateSelect={handlePaymentDateSelect}
+        title="Select Payment Date"
+        subtitle="Choose the date this payment was made."
+      />
       
       <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctorForSchedule} duration={duration} onTimeSelect={handleManualTimeSelect} onDateChange={handleManualDateSelect} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
     </>

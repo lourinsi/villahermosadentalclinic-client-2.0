@@ -13,6 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useAppointmentTypeOptions, type AppointmentTypeForm } from "@/hooks/useAppointmentTypeOptions";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope } from "lucide-react";
+import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 const emptyForm: AppointmentTypeForm = {
   label: "",
@@ -48,6 +49,11 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+const getServiceDraftBase = (service: ServiceCatalogItem): ServiceCatalogItem => ({
+  ...service,
+  duration: normalizeBookingDuration(service.duration),
+});
+
 export function ServicesView() {
   const { options, isLoading, refresh, saveService, createService } = useAppointmentTypeOptions(true);
   const [search, setSearch] = useState("");
@@ -65,13 +71,13 @@ export function ServicesView() {
     setDrafts((current) => ({
       ...current,
       [service.id]: {
-        ...(current[service.id] || service),
+        ...(current[service.id] || getServiceDraftBase(service)),
         ...updates,
       },
     }));
   };
 
-  const getDraft = (service: ServiceCatalogItem) => drafts[service.id] || service;
+  const getDraft = (service: ServiceCatalogItem) => drafts[service.id] || getServiceDraftBase(service);
 
   const hasDraftChanged = (service: ServiceCatalogItem) => {
     const draft = getDraft(service);
@@ -95,7 +101,7 @@ export function ServicesView() {
       await saveService({
         ...draft,
         price: Math.max(0, toNumber(draft.price)),
-        duration: Math.max(1, Math.round(toNumber(draft.duration))),
+        duration: normalizeBookingDuration(draft.duration),
       });
       setDrafts((current) => {
         const next = { ...current };
@@ -122,7 +128,7 @@ export function ServicesView() {
         label: newService.label.trim(),
         icon: newService.icon || "🦷",
         price: Math.max(0, toNumber(newService.price)),
-        duration: Math.max(1, Math.round(toNumber(newService.duration))),
+        duration: normalizeBookingDuration(newService.duration),
       });
       setNewService(emptyForm);
       toast.success("Service created");
@@ -197,13 +203,21 @@ export function ServicesView() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-service-duration">Duration</Label>
-              <Input
-                id="new-service-duration"
-                type="number"
-                min="1"
-                value={newService.duration}
-                onChange={(event) => setNewService((current) => ({ ...current, duration: toNumber(event.target.value) }))}
-              />
+              <Select
+                value={String(normalizeBookingDuration(newService.duration))}
+                onValueChange={(value) => setNewService((current) => ({ ...current, duration: normalizeBookingDuration(value) }))}
+              >
+                <SelectTrigger id="new-service-duration" className="h-10">
+                  <SelectValue placeholder="Select duration" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALLOWED_BOOKING_DURATIONS.map((duration) => (
+                    <SelectItem key={duration} value={String(duration)}>
+                      {duration} mins
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Button onClick={handleCreate} disabled={isCreating} className="gap-2">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -264,7 +278,7 @@ export function ServicesView() {
                         />
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:hidden">
                           <span className="rounded-full bg-gray-100 px-2 py-1">{draft.icon || "Icon"}</span>
-                          <span className="rounded-full bg-gray-100 px-2 py-1 sm:hidden">{draft.duration ?? 30} min</span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 sm:hidden">{normalizeBookingDuration(draft.duration)} min</span>
                           <Badge className="border-none bg-emerald-100 text-emerald-700 lg:hidden">
                             Active
                           </Badge>
@@ -299,12 +313,21 @@ export function ServicesView() {
                         <p className="mt-1 truncate text-[11px] text-muted-foreground sm:text-xs">{formatCurrency(draft.price)}</p>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <Input
-                          type="number"
-                          min="1"
-                          value={draft.duration ?? 30}
-                          onChange={(event) => updateDraft(service, { duration: toNumber(event.target.value) })}
-                        />
+                        <Select
+                          value={String(normalizeBookingDuration(draft.duration))}
+                          onValueChange={(value) => updateDraft(service, { duration: normalizeBookingDuration(value) })}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select duration" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ALLOWED_BOOKING_DURATIONS.map((duration) => (
+                              <SelectItem key={duration} value={String(duration)}>
+                                {duration} mins
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell className="hidden lg:table-cell">
                         <Badge className="border-none bg-emerald-100 text-emerald-700">

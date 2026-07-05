@@ -25,11 +25,20 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
-import { CreditCard, DollarSign, Edit, X } from "lucide-react";
+import { CreditCard, DollarSign, Edit, Loader2, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatWordyDate } from "@/lib/utils";
 import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
+import {
+  BookingPaymentPage,
+  getAdjustedAppointmentPrice,
+  getAppointmentPaid,
+  getAppointmentTotalDue,
+  toPaymentNumber,
+} from "./PaymentModal";
+import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 
 const getPaymentLookupCandidates = (paymentId?: string | null, paymentData?: any) => {
   const rawValues = [
@@ -104,7 +113,7 @@ export function EditPaymentModal() {
     appointmentId: contextAppointmentId,
     appointments: contextAppointments,
   } = usePaymentModal();
-  const { refreshPatients } = useAppointmentModal();
+  const { refreshPatients, updateAppointment } = useAppointmentModal();
 
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [amount, setAmount] = useState<string>("");
@@ -119,6 +128,11 @@ export function EditPaymentModal() {
   const [fetchedPaymentData, setFetchedPaymentData] = useState<any | null>(null);
   const [isFetchingPayment, setIsFetchingPayment] = useState(false);
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(null);
+  const [isOverpaymentDialogOpen, setIsOverpaymentDialogOpen] = useState(false);
+  const [overpaymentAdjustedPrice, setOverpaymentAdjustedPrice] = useState("");
+  const [pendingOverpaymentAmount, setPendingOverpaymentAmount] = useState(0);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [overpaymentLoadingAction, setOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);
   const modalMemoryPausedRef = useRef(false);
 
   const effectivePaymentData = fetchedPaymentData || paymentData;
@@ -389,23 +403,48 @@ export function EditPaymentModal() {
     }
   }, [isPaymentModalOpen]);
 
-  const handleSubmit = async () => {
+  const selectedAppointmentRecord = appointments.find(
+    (appointment: Appointment) => String(appointment.id) === String(selectedAppointment || currentAppointmentId)
+  );
+  const effectiveAppointmentForTotals = selectedAppointmentRecord || effectivePaymentData?.appointmentSnapshot || null;
+  const currentPaymentAmount = toPaymentNumber(effectivePaymentData?.amount ?? effectivePaymentData?.value);
+  const totalBilled = getAppointmentTotalDue(effectiveAppointmentForTotals);
+  const totalPaid = effectiveAppointmentForTotals ? getAppointmentPaid(effectiveAppointmentForTotals) : currentPaymentAmount;
+  const currentBalanceDue = Math.max(0, totalBilled - totalPaid);
+  const selectedTreatmentName = selectedAppointmentRecord
+    ? getAppointmentTypeName(selectedAppointmentRecord.type, selectedAppointmentRecord.customType)
+    : effectivePaymentData?.appointmentSnapshot?.customType || effectivePaymentData?.appointmentSnapshot?.type || "Selected appointment";
+
+  const performUpdatePayment = async ({ adjustedTotalDue }: { adjustedTotalDue?: number } = {}): Promise<boolean> => {
+    if (isSubmittingPayment) return false;
     const amt = parseFloat(amount) || 0;
     const paymentRecordId = resolvedPaymentId || effectivePaymentData?.id || paymentId;
     if (!paymentRecordId) {
       toast.error("Payment ID is missing");
-      return;
+      return false;
     }
     if (!amt || amt <= 0) {
       toast.error("Enter a valid amount");
-      return;
+      return false;
     }
     if (!selectedAppointment) {
       toast.error("Select an appointment");
-      return;
+      return false;
     }
 
+    setIsSubmittingPayment(true);
     try {
+      if (adjustedTotalDue !== undefined) {
+        if (!currentAppointmentId || !effectiveAppointmentForTotals) {
+          toast.error("Appointment details are missing");
+          return false;
+        }
+
+        await updateAppointment(currentAppointmentId, {
+          price: getAdjustedAppointmentPrice(effectiveAppointmentForTotals, adjustedTotalDue),
+        });
+      }
+
       const body = {
         amount: amt,
         method: normalizeBookingPaymentMethod(paymentMethod),
@@ -425,7 +464,7 @@ export function EditPaymentModal() {
       const json = await res.json();
       if (!res.ok) {
         toast.error(json?.message || "Failed to update payment");
-        return;
+        return false;
       }
       toast.success("Payment updated successfully");
       if (typeof window !== "undefined") {
@@ -435,10 +474,41 @@ export function EditPaymentModal() {
       refreshPatients();
       clearCompletedEditPaymentDraft();
       closePaymentModal();
+      return true;
     } catch (err) {
       console.error("Error updating payment", err);
       toast.error("Error updating payment");
+      return false;
+    } finally {
+      setIsSubmittingPayment(false);
     }
+  };
+
+  const handleSubmit = async () => {
+    const amt = parseFloat(amount) || 0;
+    const paymentRecordId = resolvedPaymentId || effectivePaymentData?.id || paymentId;
+    if (!paymentRecordId) {
+      toast.error("Payment ID is missing");
+      return;
+    }
+    if (!amt || amt <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    if (!selectedAppointment) {
+      toast.error("Select an appointment");
+      return;
+    }
+
+    const nextTotalPaid = Math.max(0, totalPaid - currentPaymentAmount + amt);
+    if (effectiveAppointmentForTotals && nextTotalPaid > totalBilled) {
+      setPendingOverpaymentAmount(amt);
+      setOverpaymentAdjustedPrice(String(nextTotalPaid));
+      setIsOverpaymentDialogOpen(true);
+      return;
+    }
+
+    await performUpdatePayment();
   };
 
   // Only show in edit mode.
@@ -447,10 +517,11 @@ export function EditPaymentModal() {
   }
 
   return (
+    <>
     <Dialog key={paymentId} open={isPaymentModalOpen} onOpenChange={closePaymentModal}>
       <DialogContent
         showCloseButton={false}
-        className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[86dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-lg sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+        className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(56rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
       >
         <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 shadow-sm sm:px-6">
           <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
@@ -471,7 +542,99 @@ export function EditPaymentModal() {
             </Button>
           </div>
         </DialogHeader>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-6">
+          <BookingPaymentPage
+            title="Edit Payment"
+            description="Update payment details and appointment link."
+            selectedTreatmentName={selectedTreatmentName}
+            totalBilled={totalBilled}
+            totalPaid={totalPaid}
+            currentBalanceDue={currentBalanceDue}
+            amount={amount}
+            onAmountChange={setAmount}
+            paymentDate={paymentDate}
+            onPaymentDateChange={setPaymentDate}
+            paymentMethod={paymentMethod || ""}
+            onPaymentMethodChange={(value) => setPaymentMethod(normalizeBookingPaymentMethod(value))}
+            projectedRemainingBalance={Math.max(0, currentBalanceDue - (parseFloat(amount) || 0))}
+            onPayFull={() => setAmount(String(currentBalanceDue.toFixed(2)))}
+            payFullDisabled={currentBalanceDue <= 0}
+            loadingMessage={isFetchingPayment && !effectivePaymentData ? (
+              <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 text-center text-sm font-semibold text-muted-foreground shadow-sm">
+                Loading payment record...
+              </div>
+            ) : null}
+            paymentIdSelector={(
+              <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm">
+                <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment ID</Label>
+                <Select
+                  value={resolvedPaymentId || getPaymentRecordId(effectivePaymentData) || paymentId || ""}
+                  onValueChange={(value) => {
+                    setResolvedPaymentId(value);
+                    setFetchedPaymentData(null);
+                  }}
+                  disabled={isFetchingPayment || isFetchingAppointmentPayments || appointmentPayments.length <= 1}
+                >
+                  <SelectTrigger className="mt-2 h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                    <SelectValue placeholder={isFetchingAppointmentPayments ? "Loading payment ids..." : "Select payment id"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {appointmentPayments.length > 0 ? (
+                      appointmentPayments.map((payment) => {
+                        const optionId = getPaymentRecordId(payment);
+                        if (!optionId) return null;
+
+                        return (
+                          <SelectItem key={optionId} value={optionId}>
+                            {getPaymentOptionLabel(payment)}
+                          </SelectItem>
+                        );
+                      })
+                    ) : (
+                      <SelectItem value={getPaymentRecordId(effectivePaymentData) || paymentId || "payment"} disabled>
+                        {getPaymentRecordId(effectivePaymentData) || paymentId || "No payment id"}
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            appointmentIdField={(
+              <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm">
+                <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Appointment ID</Label>
+                <Input
+                  value={currentAppointmentId || "N/A"}
+                  readOnly
+                  className="mt-2 h-12 rounded-xl border-slate-200 bg-slate-100 font-mono text-xs font-semibold text-slate-600 shadow-sm"
+                />
+              </div>
+            )}
+            transactionIdField={(
+              <div className="space-y-2">
+                <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Transaction ID</Label>
+                <Input
+                  value={transactionId}
+                  onChange={(e) => setTransactionId(e.target.value)}
+                  placeholder="Transaction ID"
+                  className="h-12 rounded-xl border-slate-200 bg-white font-semibold shadow-sm"
+                />
+              </div>
+            )}
+            notesField={(
+              <div className="space-y-2">
+                <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Transaction Notes (Optional)</Label>
+                <Textarea
+                  placeholder="Additional payment details..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className="rounded-xl border-slate-200 bg-white font-medium shadow-sm"
+                />
+              </div>
+            )}
+            showHeaderCard={false}
+          />
+          <div className="hidden">
           {isFetchingPayment && !effectivePaymentData ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
               Loading payment record...
@@ -619,6 +782,7 @@ export function EditPaymentModal() {
               />
             </div>
           </div>
+          </div>
         </div>
         <div className="shrink-0 border-t border-slate-100 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:px-6">
           <div className="grid grid-cols-2 gap-3">
@@ -628,14 +792,49 @@ export function EditPaymentModal() {
             <Button
               onClick={handleSubmit}
               className="h-12 rounded-full bg-violet-600 font-black text-white shadow-lg shadow-violet-100 hover:bg-violet-700"
-              disabled={isFetchingPayment || !paymentMethod || !amount || parseFloat(amount) <= 0}
+              disabled={isSubmittingPayment || isFetchingPayment || !paymentMethod || !amount || parseFloat(amount) <= 0}
             >
-              <Edit className="h-4 w-4 mr-2" />
-              Update
+              {isSubmittingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Edit className="h-4 w-4 mr-2" />}
+              {isSubmittingPayment ? "Updating..." : "Update"}
             </Button>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+    <OverpaymentConfirmDialog
+      open={isOverpaymentDialogOpen}
+      onOpenChange={setIsOverpaymentDialogOpen}
+      currentTotalDue={totalBilled}
+      previousPaidAmount={Math.max(0, totalPaid - currentPaymentAmount)}
+      paymentAmount={pendingOverpaymentAmount}
+      adjustedPrice={overpaymentAdjustedPrice}
+      onAdjustedPriceChange={setOverpaymentAdjustedPrice}
+      loadingAction={overpaymentLoadingAction}
+      onKeepPrice={() => {
+        setOverpaymentLoadingAction("keep");
+        void (async () => {
+          const didUpdate = await performUpdatePayment();
+          if (didUpdate) setIsOverpaymentDialogOpen(false);
+          setOverpaymentLoadingAction(null);
+        })();
+      }}
+      onAdjustPrice={() => {
+        const previousPaidAmount = Math.max(0, totalPaid - currentPaymentAmount);
+        const nextTotalPaid = previousPaidAmount + pendingOverpaymentAmount;
+        const parsedAdjustedPrice = Number(overpaymentAdjustedPrice);
+        const adjustedTotalDue = Number.isFinite(parsedAdjustedPrice)
+          ? Math.max(nextTotalPaid, parsedAdjustedPrice)
+          : nextTotalPaid;
+
+        setOverpaymentAdjustedPrice(String(adjustedTotalDue));
+        setOverpaymentLoadingAction("adjust");
+        void (async () => {
+          const didUpdate = await performUpdatePayment({ adjustedTotalDue });
+          if (didUpdate) setIsOverpaymentDialogOpen(false);
+          setOverpaymentLoadingAction(null);
+        })();
+      }}
+    />
+    </>
   );
 }
