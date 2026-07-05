@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -54,6 +64,75 @@ const getServiceDraftBase = (service: ServiceCatalogItem): ServiceCatalogItem =>
   duration: normalizeBookingDuration(service.duration),
 });
 
+const normalizeServiceNameForMatch = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getServiceNameDistance = (first: string, second: string) => {
+  const a = normalizeServiceNameForMatch(first);
+  const b = normalizeServiceNameForMatch(second);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array(b.length + 1).fill(0);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost
+      );
+    }
+
+    for (let j = 0; j <= b.length; j += 1) previous[j] = current[j];
+  }
+
+  return previous[b.length];
+};
+
+const getServiceSimilarityScore = (input: string, serviceName: string) => {
+  const normalizedInput = normalizeServiceNameForMatch(input);
+  const normalizedService = normalizeServiceNameForMatch(serviceName);
+  if (!normalizedInput || !normalizedService) return 0;
+  if (normalizedInput === normalizedService) return 1;
+
+  const maxLength = Math.max(normalizedInput.length, normalizedService.length);
+  const distanceScore = 1 - getServiceNameDistance(normalizedInput, normalizedService) / maxLength;
+  const inputWords = normalizedInput.split(" ").filter(Boolean);
+  const serviceWords = new Set(normalizedService.split(" ").filter(Boolean));
+  const sharedWords = inputWords.filter((word) => serviceWords.has(word)).length;
+  const wordScore = sharedWords / Math.max(1, Math.min(inputWords.length, serviceWords.size));
+  const containsScore =
+    maxLength >= 6 && (normalizedInput.includes(normalizedService) || normalizedService.includes(normalizedInput))
+      ? 0.88
+      : 0;
+
+  return Math.max(distanceScore, wordScore, containsScore);
+};
+
+const findSimilarService = (input: string, services: ServiceCatalogItem[]) => {
+  const normalizedInput = normalizeServiceNameForMatch(input);
+  if (!normalizedInput) return null;
+
+  const ranked = services
+    .filter((service) => service.isActive !== false)
+    .map((service) => ({
+      service,
+      score: getServiceSimilarityScore(normalizedInput, service.label),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const bestMatch = ranked[0];
+  return bestMatch && bestMatch.score >= 0.78 ? bestMatch.service : null;
+};
+
 export function ServicesView() {
   const { options, isLoading, refresh, saveService, createService } = useAppointmentTypeOptions(true);
   const [search, setSearch] = useState("");
@@ -61,6 +140,10 @@ export function ServicesView() {
   const [newService, setNewService] = useState<AppointmentTypeForm>(emptyForm);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [similarServicePrompt, setSimilarServicePrompt] = useState<{
+    draft: AppointmentTypeForm;
+    service: ServiceCatalogItem;
+  } | null>(null);
 
   const visibleOptions = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -116,19 +199,33 @@ export function ServicesView() {
     }
   };
 
-  const handleCreate = async () => {
-    if (!newService.label.trim()) {
+  const handleCreate = async (skipSimilarityCheck = false, overrideDraft?: AppointmentTypeForm) => {
+    const draft = {
+      ...(overrideDraft || newService),
+      label: (overrideDraft || newService).label.trim(),
+      duration: normalizeBookingDuration((overrideDraft || newService).duration),
+    };
+
+    if (!draft.label) {
       toast.error("Service name is required");
       return;
+    }
+
+    if (!skipSimilarityCheck) {
+      const similarService = findSimilarService(draft.label, options);
+      if (similarService) {
+        setSimilarServicePrompt({ draft, service: similarService });
+        return;
+      }
     }
 
     setIsCreating(true);
     try {
       await createService({
-        label: newService.label.trim(),
-        icon: newService.icon || "🦷",
-        price: Math.max(0, toNumber(newService.price)),
-        duration: normalizeBookingDuration(newService.duration),
+        label: draft.label,
+        icon: draft.icon || "🦷",
+        price: Math.max(0, toNumber(draft.price)),
+        duration: normalizeBookingDuration(draft.duration),
       });
       setNewService(emptyForm);
       toast.success("Service created");
@@ -137,6 +234,12 @@ export function ServicesView() {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleConfirmSimilarServiceCreate = async () => {
+    const pendingDraft = similarServicePrompt?.draft;
+    setSimilarServicePrompt(null);
+    if (pendingDraft) await handleCreate(true, pendingDraft);
   };
 
   return (
@@ -219,7 +322,7 @@ export function ServicesView() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleCreate} disabled={isCreating} className="gap-2">
+            <Button onClick={() => handleCreate()} disabled={isCreating} className="gap-2">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
             </Button>
@@ -375,6 +478,25 @@ export function ServicesView() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={Boolean(similarServicePrompt)} onOpenChange={(open) => !open && setSimilarServicePrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar service found</AlertDialogTitle>
+            <AlertDialogDescription>
+              {similarServicePrompt
+                ? `"${similarServicePrompt.draft.label}" looks similar to "${similarServicePrompt.service.label}". Are you sure you want to add it as a new service?`
+                : "This service looks similar to an existing service. Are you sure you want to add it?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCreating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSimilarServiceCreate} disabled={isCreating}>
+              Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

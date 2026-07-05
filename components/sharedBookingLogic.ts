@@ -27,7 +27,8 @@ export {
 type Toast = { error?: (msg: string) => void } | ((msg: string) => void);
 
 type BookingFlow = 'details-payment' | 'multi-step';
-type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
+export type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
+export type BookingInitialStep = BookingStep;
 type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | 'receptionist' | '';
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past' | 'edit';
@@ -316,6 +317,16 @@ export function isUnassignedBookingDoctor(value?: unknown) {
 export function getBookingDoctorValue(value?: unknown) {
   if (isUnassignedBookingDoctor(value)) return UNASSIGNED_DOCTOR_NAME;
   return getBookingDoctorText(value);
+}
+
+export function getBookingDoctorPayload(value?: unknown) {
+  const doctor = getBookingDoctorValue(value);
+  const isUnassigned = isUnassignedBookingDoctor(value) || isUnassignedBookingDoctor(doctor);
+
+  return {
+    doctor: isUnassigned ? UNASSIGNED_DOCTOR_NAME : doctor,
+    doctorId: null,
+  };
 }
 
 export function getBookingDoctorSelectValue(value?: unknown) {

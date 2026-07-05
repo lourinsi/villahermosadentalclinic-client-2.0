@@ -12,7 +12,7 @@
 import { useBookingModalMode } from '@/hooks/useBookingModalMode';
 import BookingModalSimple from './ImprovedBookingModal';
 import BookingModalPro from './BookingModal';
-import type { BookingCreationMode, BookingMode } from './sharedBookingLogic';
+import type { BookingCreationMode, BookingInitialStep, BookingMode } from './sharedBookingLogic';
 
 export interface BookingModalProps {
   open: boolean;
@@ -27,6 +27,7 @@ export interface BookingModalProps {
   title?: string;
   bookingMode?: BookingMode;
   appointmentCreationMode?: BookingCreationMode;
+  initialStep?: BookingInitialStep;
 }
 
 export default function BookingModalWrapper(props: BookingModalProps) {

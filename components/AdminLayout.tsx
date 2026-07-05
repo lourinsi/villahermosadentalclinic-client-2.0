@@ -194,6 +194,9 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
     const showIncompletePatientToast = async () => {
       try {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        if (cancelled) return;
+
         const response = await fetch(apiUrl("/api/patients?page=1&limit=1&status=all"), {
           credentials: "include",
           headers: getAuthHeaders(),

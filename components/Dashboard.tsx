@@ -565,6 +565,7 @@ export function Dashboard({ portal }: DashboardProps) {
             handleViewAppointment(apt);
           }}
           onViewAll={handleViewAll}
+          onBookAppointment={() => openCreateModal()}
           showHeader={true}
         />
       </div>

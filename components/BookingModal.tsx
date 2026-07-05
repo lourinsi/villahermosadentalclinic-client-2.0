@@ -37,6 +37,7 @@ import useSharedBookingLogic, {
   getBookingCancellationConfig,
   getBookingConflictWarnings,
   getBookingDoctorSelectValue,
+  getBookingDoctorPayload,
   getBookingDoctorValue,
   getBookingCreateDate,
   getBookingCreateTime,
@@ -1413,6 +1414,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const displayDoctor = formatDoctorName(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorForSchedule = getBookingDoctorValue(selectedDoctor);
   const selectedDoctorForBooking = getBookingDoctorValue(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
+  const bookingDoctorPayload = getBookingDoctorPayload(selectedDoctor || appointmentToEdit?.doctor || appointmentToEdit?.doctorName || doctorName);
   const selectedDoctorSelectValue = selectedDoctor ? getBookingDoctorSelectValue(selectedDoctor) : undefined;
   
   // Calculate remaining balance for display in payment step
@@ -1797,7 +1799,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || appointmentToEdit.patientName || selectedPatient,
               publicPatient: selectedPatientRecord || appointmentToEdit.publicPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -1819,7 +1821,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           : await updateAppointment(appointmentToEdit.id, {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -1933,7 +1935,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               duration: bookingDuration,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              doctor: selectedDoctorForBooking,
+              ...bookingDoctorPayload,
               notes: originalAppointmentNotes,
               ...treatmentNotesUpdate,
               price: finalPrice,
@@ -1963,7 +1965,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctorForBooking,
+                ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
@@ -2006,7 +2008,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   duration: bookingDuration,
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                  doctor: selectedDoctorForBooking,
+                  ...bookingDoctorPayload,
                   notes: originalAppointmentNotes,
                   ...treatmentNotesUpdate,
                   price: finalPrice,
@@ -2029,7 +2031,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-                doctor: selectedDoctorForBooking,
+                ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
                 ...treatmentNotesUpdate,
                 price: finalPrice,
@@ -2047,7 +2049,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newApt = await addAppointment({
             patientId: selectedPatient,
             patientName: selectedPatientRecord?.name || selectedPatient,
-            doctor: selectedDoctorForBooking,
+            ...bookingDoctorPayload,
             date: dateStr,
             time: selectedTime,
             type: getAppointmentTypeIndex(appointmentType),

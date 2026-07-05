@@ -76,9 +76,11 @@ import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
+import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import { DatePickerModal } from "./DatePickerModal";
+import { TimePickerModal } from "./TimePickerModal";
 import {
   getAppointmentStatusOptionWithColors,
   getPaymentStatusOptionWithColors,
@@ -98,8 +100,9 @@ import {
   type QuestionnaireQuestion,
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
-import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
+import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL, type BookingInitialStep } from "./sharedBookingLogic";
 import { SelectDoctorModal } from "./SelectDoctorModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
 
 export interface Patient {
   id?: string;
@@ -309,6 +312,10 @@ export type PatientDetailsRef = {
   changedFields: Record<string, { old: any; new: any }>;
 };
 
+type OpenBookingModalOptions = {
+  initialStep?: BookingInitialStep;
+};
+
 interface PatientProfileProps {
   patient: Patient | null;
   detailsRef: React.Ref<PatientDetailsRef>;
@@ -317,7 +324,7 @@ interface PatientProfileProps {
   setIsModified: (isModified: boolean) => void;
   doctorFilter?: string;
   openBookingAppointmentId?: string | null;
-  onOpenBookingModal?: (appointment: Appointment) => void;
+  onOpenBookingModal?: (appointment: Appointment, options?: OpenBookingModalOptions) => void;
   onBackToPatients?: () => void;
 }
 
@@ -1225,7 +1232,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   setIsModified: (isModified: boolean) => void;
   doctorFilter?: string;
   openBookingAppointmentId?: string | null;
-  onOpenBookingModal?: (appointment: Appointment) => void;
+  onOpenBookingModal?: (appointment: Appointment, options?: OpenBookingModalOptions) => void;
   dataRefreshKey?: number;
 }>(({
   patient,
@@ -1277,6 +1284,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
   const [assignDoctorAppointment, setAssignDoctorAppointment] = useState<HistoryAppointment | null>(null);
   const [isAssigningVisitDoctor, setIsAssigningVisitDoctor] = useState(false);
+  const [rescheduleAppointment, setRescheduleAppointment] = useState<Appointment | HistoryAppointment | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState<Date | null>(null);
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [isRescheduleDatePickerOpen, setIsRescheduleDatePickerOpen] = useState(false);
+  const [isRescheduleTimePickerOpen, setIsRescheduleTimePickerOpen] = useState(false);
+  const [isRescheduleSaving, setIsRescheduleSaving] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [parentPatient, setParentPatient] = useState<Patient | null>(null);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
@@ -2151,6 +2164,91 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     onOpenBookingModal?.(appointment as Appointment);
   };
 
+  const openRescheduleModal = (appointment: Appointment | HistoryAppointment) => {
+    const appointmentId = String(appointment?.id || "");
+    if (!appointmentId) {
+      toast.error("Could not find appointment to reschedule");
+      return;
+    }
+
+    const sourceAppointment =
+      patientAppointments.find((apt: Appointment) => String(apt.id) === appointmentId) ||
+      mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === appointmentId) ||
+      appointment;
+    const appointmentDate = parseBackendDateToLocal(toDateOnly(sourceAppointment.date));
+
+    setRescheduleAppointment(sourceAppointment);
+    setRescheduleDate(Number.isNaN(appointmentDate.getTime()) ? new Date() : appointmentDate);
+    setRescheduleTime(String((sourceAppointment as any).time || "").trim());
+    setIsRescheduleDatePickerOpen(false);
+    setIsRescheduleTimePickerOpen(false);
+  };
+
+  const closeRescheduleModal = (force = false) => {
+    if (isRescheduleSaving && !force) return;
+
+    setRescheduleAppointment(null);
+    setRescheduleDate(null);
+    setRescheduleTime("");
+    setIsRescheduleDatePickerOpen(false);
+    setIsRescheduleTimePickerOpen(false);
+  };
+
+  const handleSaveReschedule = async () => {
+    const appointmentId = String(rescheduleAppointment?.id || "");
+    const selectedTime = rescheduleTime.trim();
+
+    if (!appointmentId) {
+      toast.error("Could not find appointment to reschedule");
+      return;
+    }
+
+    if (!rescheduleDate || !selectedTime) {
+      toast.error("Please select a date and time");
+      return;
+    }
+
+    const date = formatDateToYYYYMMDD(rescheduleDate);
+
+    setIsRescheduleSaving(true);
+    try {
+      const updated = await updateAppointment(appointmentId, {
+        date,
+        time: selectedTime,
+      } as Partial<Appointment>);
+
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId
+          ? ({
+              ...apt,
+              ...updated,
+              date: updated.date || date,
+              time: updated.time || selectedTime,
+            } as Appointment)
+          : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId },
+          })
+        );
+      } catch {}
+
+      toast.success("Appointment rescheduled");
+      closeRescheduleModal(true);
+    } catch (error) {
+      console.error("[PatientProfile] Failed to reschedule appointment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to reschedule appointment");
+    } finally {
+      setIsRescheduleSaving(false);
+    }
+  };
+
   const handleOpenTransactionSnapshot = (transaction: RecentTransaction) => {
     const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
       || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
@@ -2962,6 +3060,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const cardClass = "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm";
   const cardHeaderClass = "border-b border-slate-100 bg-white px-5 py-5 sm:px-6";
   const cardContentClass = "space-y-6 p-5 sm:p-6";
+  const rescheduleDoctorName = getVisitDoctorName(rescheduleAppointment);
+  const rescheduleAppointmentLabel = rescheduleAppointment
+    ? typeof (rescheduleAppointment as any).type === "number"
+      ? getHistoryAppointmentType(rescheduleAppointment as Appointment)
+      : String((rescheduleAppointment as any).type || "Appointment")
+    : "";
+  const rescheduleDuration = String((rescheduleAppointment as any)?.duration || "");
+  const rescheduleAppointmentId = rescheduleAppointment?.id ? String(rescheduleAppointment.id) : "";
+
   return (
     <div className="flex-1 overflow-hidden bg-slate-50">
       <div className="h-full flex flex-col">
@@ -3851,6 +3958,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                     const doctorImage = isDoctorUnassigned ? undefined : resolveDoctorImageFor(appointment as any);
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
+                    const visitTransactions = (appointment.transactions || []).filter((txn) => Number(txn.amount || 0) > 0);
 
                     return (
                       <div key={appointmentId} className="grid gap-3 xl:grid-cols-[7.5rem_minmax(0,1fr)]">
@@ -3958,13 +4066,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   Paid
                                 </div>
                               )}
-                              {originalAppointment && onOpenBookingModal ? (
+                              {originalAppointment ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
                                   className="h-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
-                                  onClick={() => onOpenBookingModal(originalAppointment)}
+                                  onClick={() => openRescheduleModal(originalAppointment)}
                                 >
                                   <Calendar className="mr-2 h-4 w-4" />
                                   Reschedule
@@ -3995,13 +4103,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   View Details
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  disabled={!originalAppointment || !onOpenBookingModal}
+                                  disabled={!originalAppointment}
                                   onClick={() => {
-                                    if (originalAppointment && onOpenBookingModal) onOpenBookingModal(originalAppointment);
+                                    if (originalAppointment) {
+                                      openRescheduleModal(originalAppointment);
+                                    }
                                   }}
                                 >
                                   <Calendar className="mr-2 h-4 w-4" />
-                                  Open Appointment
+                                  Reschedule
                                 </DropdownMenuItem>
                                 {isDoctorUnassigned ? (
                                   <DropdownMenuItem onClick={() => setAssignDoctorAppointment(appointment)}>
@@ -4012,6 +4122,102 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
+
+                          {visitTransactions.length > 0 ? (
+                            <div className="mt-4 border-t border-slate-100 pt-4">
+                              <div className="mb-3 flex items-center gap-2">
+                                <PaymentIcon className="h-4 w-4 text-violet-600" />
+                                <h4 className="text-sm font-black text-slate-950">Payment History</h4>
+                              </div>
+                              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_88px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
+                                  <span>Payment Method</span>
+                                  <span>Amount</span>
+                                  <span>Date</span>
+                                  <span>Reference No.</span>
+                                  <span className="text-right">Actions</span>
+                                </div>
+                                <div className="divide-y divide-slate-100">
+                                  {visitTransactions.map((txn) => {
+                                    const transactionKey = getPaymentTransactionKey(txn);
+                                    const paymentDisplay = getTransactionPaymentDisplay(txn);
+                                    const methodLabel = normalizeBookingPaymentMethod(txn.method);
+                                    const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
+                                    const referenceNo = String(txn.transactionId || txn.id || "N/A");
+                                    const editablePaymentId = getEditablePaymentId(txn);
+                                    const isCashPayment = methodLabel.toLowerCase() === "cash";
+
+                                    return (
+                                      <div
+                                        key={transactionKey}
+                                        className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_88px] md:items-center ${
+                                          paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                        }`}
+                                      >
+                                        <div className="flex min-w-0 items-center gap-3">
+                                          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isCashPayment ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-700"}`}>
+                                            {getPaymentMethodIcon(methodLabel)}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span className="truncate font-black text-slate-900">{methodLabel}</span>
+                                              <span className="font-semibold text-slate-400">-</span>
+                                              <span className="font-bold text-slate-700">{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              {paymentDisplay.label ? (
+                                                <Badge variant="outline" className={paymentDisplay.className}>
+                                                  {paymentDisplay.label}
+                                                </Badge>
+                                              ) : null}
+                                            </div>
+                                            {txn.notes ? (
+                                              <p className="mt-1 line-clamp-2 text-xs font-medium text-slate-500">{txn.notes}</p>
+                                            ) : null}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between gap-3 md:block">
+                                          <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
+                                          <span className="font-black text-emerald-600">{formatPatientHistoryCurrency(txn.amount)}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3 md:block">
+                                          <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
+                                          <span className="font-bold text-slate-700">{txnDate}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3 md:block">
+                                          <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span>
+                                          <span className="font-mono text-xs font-bold text-slate-600">Ref: {referenceNo}</span>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-2">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
+                                            onClick={() => handleOpenTransactionSnapshot(txn)}
+                                            title="View payment snapshot"
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                            <span className="sr-only">View payment snapshot</span>
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="icon"
+                                            className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                            onClick={() => handleEditPaymentTransaction(txn)}
+                                            title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                          >
+                                            <Edit className="h-4 w-4" />
+                                            <span className="sr-only">Edit payment</span>
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -4246,6 +4452,54 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
           </div>
       </Tabs>
+      <SelectScheduleModal
+        open={Boolean(rescheduleAppointment)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeRescheduleModal();
+        }}
+        title="Reschedule Visit"
+        description={rescheduleAppointmentLabel ? `${rescheduleAppointmentLabel} for ${patientDisplayName}` : patientDisplayName}
+        appointmentLabel={rescheduleAppointmentLabel}
+        doctorLabel={rescheduleDoctorName || "Unassigned"}
+        selectedDate={rescheduleDate}
+        selectedTime={rescheduleTime}
+        onDateClick={() => setIsRescheduleDatePickerOpen(true)}
+        onTimeClick={() => setIsRescheduleTimePickerOpen(true)}
+        onSave={handleSaveReschedule}
+        onCancel={() => closeRescheduleModal()}
+        isSaving={isRescheduleSaving}
+        canSave={Boolean(rescheduleDate && rescheduleTime.trim())}
+      />
+      <DatePickerModal
+        open={isRescheduleDatePickerOpen}
+        onOpenChange={setIsRescheduleDatePickerOpen}
+        selectedDate={rescheduleDate}
+        onDateSelect={setRescheduleDate}
+        doctorName={rescheduleDoctorName}
+        patientId={currentPatientId || undefined}
+        selectedTime={rescheduleTime}
+        duration={rescheduleDuration}
+        dateSelectionMode="edit"
+        title="Select New Date"
+        subtitle={rescheduleAppointmentLabel || undefined}
+        excludeAppointmentId={rescheduleAppointmentId || null}
+        timeConflictMessage="That time is already booked on this date. Please select another date or time."
+      />
+      {rescheduleDate ? (
+        <TimePickerModal
+          open={isRescheduleTimePickerOpen}
+          onOpenChange={setIsRescheduleTimePickerOpen}
+          selectedDate={rescheduleDate}
+          selectedTime={rescheduleTime}
+          doctorName={rescheduleDoctorName}
+          duration={rescheduleDuration}
+          onTimeSelect={setRescheduleTime}
+          onDateChange={setRescheduleDate}
+          excludeAppointmentId={rescheduleAppointmentId || undefined}
+          patientId={currentPatientId || null}
+          dateSelectionMode="edit"
+        />
+      ) : null}
       <Dialog open={Boolean(assignDoctorAppointment)} onOpenChange={(nextOpen) => !isAssigningVisitDoctor && !nextOpen && setAssignDoctorAppointment(null)}>
         <DialogContent
           showCloseButton={false}
