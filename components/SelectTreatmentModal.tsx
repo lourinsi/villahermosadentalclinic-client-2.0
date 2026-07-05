@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ClipboardList, Clock, Loader2, Tag } from "lucide-react";
+import type { FormEvent, ReactNode } from "react";
+import { ClipboardList, Clock, Loader2, Plus, Tag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,8 +36,10 @@ type SelectTreatmentModalProps = {
   currentTreatmentLabel?: string;
   customTreatmentName?: string;
   selectedPrice?: string | number;
+  toothNumberEntries?: string[];
   onCustomTreatmentNameChange?: (value: string) => void;
   onSelectedPriceChange?: (value: string) => void;
+  onToothNumberEntriesChange?: (entries: string[]) => void;
   onTreatmentSelect?: (treatment: TreatmentOption) => void;
   onSave?: () => void | Promise<void>;
   onCancel?: () => void;
@@ -53,6 +55,13 @@ const formatTreatmentCurrency = (amount?: number) =>
     maximumFractionDigits: 0,
   }).format(Number(amount) || 0);
 
+const sanitizeToothNumberEntry = (value: string) => String(value || "").replace(/\D/g, "");
+
+const preventNonWholeNumberInput = (event: FormEvent<HTMLInputElement>) => {
+  const data = (event.nativeEvent as { data?: string }).data;
+  if (data && /\D/.test(data)) event.preventDefault();
+};
+
 export function SelectTreatmentModal({
   children,
   open,
@@ -64,8 +73,10 @@ export function SelectTreatmentModal({
   currentTreatmentLabel,
   customTreatmentName = "",
   selectedPrice,
+  toothNumberEntries,
   onCustomTreatmentNameChange,
   onSelectedPriceChange,
+  onToothNumberEntriesChange,
   onTreatmentSelect,
   onSave,
   onCancel,
@@ -89,6 +100,33 @@ export function SelectTreatmentModal({
       : String(selectedPrice);
   const selectedPriceNumber = Math.max(0, Number(selectedPriceValue) || 0);
   const selectedDuration = Number(selectedTreatment?.duration || 0) || 30;
+  const showToothNumberField = Boolean(toothNumberEntries || onToothNumberEntriesChange);
+  const resolvedToothNumberEntries = toothNumberEntries && toothNumberEntries.length > 0 ? toothNumberEntries : [""];
+  const filledToothNumbers = resolvedToothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
+  const updateToothNumberEntries = (nextEntries: string[]) => {
+    onToothNumberEntriesChange?.(nextEntries.length > 0 ? nextEntries : [""]);
+  };
+  const handleToothNumberChange = (index: number, value: string) => {
+    const sanitizedValue = sanitizeToothNumberEntry(value);
+    updateToothNumberEntries(
+      resolvedToothNumberEntries.map((entry, entryIndex) =>
+        entryIndex === index ? sanitizedValue : entry
+      )
+    );
+  };
+  const handleAddToothNumber = () => {
+    updateToothNumberEntries([...resolvedToothNumberEntries, ""]);
+  };
+  const handleRemoveToothNumber = (index: number) => {
+    if (resolvedToothNumberEntries.length <= 1) {
+      updateToothNumberEntries([""]);
+      return;
+    }
+
+    updateToothNumberEntries(
+      resolvedToothNumberEntries.filter((_, entryIndex) => entryIndex !== index)
+    );
+  };
   const resolvedCanSave =
     canSave &&
     Boolean(selectedTreatment) &&
@@ -196,6 +234,57 @@ export function SelectTreatmentModal({
             </div>
           ) : null}
 
+          {showToothNumberField ? (
+            <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="visit-tooth-number-0" className="text-sm font-black text-slate-800">
+                  Tooth No./s
+                </Label>
+                <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 sm:flex">
+                  #
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                {resolvedToothNumberEntries.map((toothNumber, index) => (
+                  <div key={index} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2.5 shadow-sm">
+                    <Input
+                      id={index === 0 ? "visit-tooth-number-0" : undefined}
+                      value={toothNumber}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      onBeforeInput={preventNonWholeNumberInput}
+                      onChange={(event) => handleToothNumberChange(index, event.target.value)}
+                      placeholder="e.g. 18"
+                      disabled={!onToothNumberEntriesChange || isSaving}
+                      className="h-8 w-[4.75rem] border-0 bg-transparent px-0 text-center text-sm font-black text-blue-700 shadow-none placeholder:font-medium placeholder:text-blue-300 focus-visible:ring-0 focus-visible:ring-offset-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveToothNumber(index)}
+                      disabled={!onToothNumberEntriesChange || isSaving}
+                      aria-label={`Clear tooth number ${index + 1}`}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleAddToothNumber}
+                  disabled={!onToothNumberEntriesChange || isSaving}
+                  aria-label="Add tooth number"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="mt-3 text-xs font-semibold text-slate-500">
+                Select one or more teeth for this treatment.
+              </p>
+            </div>
+          ) : null}
+
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
             <div className="border-b border-slate-100 p-4 sm:p-5 lg:border-b-0 lg:border-r">
               <div className="flex items-center gap-2 text-sm font-black text-slate-800">
@@ -206,6 +295,23 @@ export function SelectTreatmentModal({
               <p className="mt-1 text-lg font-black text-slate-950">
                 {isCustomTreatment ? customTreatmentName.trim() || selectedTreatment?.label || "Custom Treatment" : selectedTreatment?.label || "No treatment selected"}
               </p>
+
+              {showToothNumberField ? (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">Tooth No./s</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {filledToothNumbers.length > 0 ? (
+                      filledToothNumbers.map((toothNumber, index) => (
+                        <span key={`${toothNumber}-${index}`} className="inline-flex h-7 items-center rounded-lg border border-blue-100 bg-blue-50 px-2.5 text-xs font-black text-blue-700">
+                          Tooth {toothNumber}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm font-semibold text-slate-400">No teeth selected</span>
+                    )}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="mt-5">
                 <Label htmlFor="visit-treatment-price" className="text-xs font-black uppercase tracking-widest text-slate-500">

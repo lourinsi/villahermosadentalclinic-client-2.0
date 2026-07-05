@@ -689,6 +689,16 @@ export function formatBookingPaymentDateLabel(dateInput?: Date | string | null) 
   return formatWordyDate(paymentDate);
 }
 
+export function isBookingPaymentDateDisabled(amountToPay?: string | number | null, paymentMethod?: string | null) {
+  if (/^pay at clinic$/i.test(normalizeBookingPaymentMethod(paymentMethod))) return true;
+
+  const amount = typeof amountToPay === "number"
+    ? amountToPay
+    : parseFloat(String(amountToPay ?? "").trim() || "0");
+
+  return !Number.isFinite(amount) || amount <= 0;
+}
+
 export function bookingTimeToMinutes(time: string) {
   const [hours, minutes] = String(time || "").split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;

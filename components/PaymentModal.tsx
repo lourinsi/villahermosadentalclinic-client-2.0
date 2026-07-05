@@ -64,6 +64,7 @@ type BookingPaymentPageProps = {
   paymentDateInputRef?: RefObject<HTMLInputElement | null>;
   maxPaymentDate?: string;
   onOpenPaymentDatePicker?: () => void;
+  paymentDateDisabled?: boolean;
   paymentDateHelp?: string;
   appointmentSelector?: ReactNode;
   paymentIdSelector?: ReactNode;
@@ -106,6 +107,7 @@ export function BookingPaymentPage({
   paymentDateInputRef,
   maxPaymentDate,
   onOpenPaymentDatePicker,
+  paymentDateDisabled = false,
   paymentDateHelp,
   appointmentSelector,
   paymentIdSelector,
@@ -134,6 +136,8 @@ export function BookingPaymentPage({
     ];
   }, [methodOptions, paymentMethod]);
   const openNativePaymentDatePicker = useCallback(() => {
+    if (paymentDateDisabled) return;
+
     if (onOpenPaymentDatePicker) {
       onOpenPaymentDatePicker();
       return;
@@ -148,7 +152,17 @@ export function BookingPaymentPage({
     }
 
     input.focus();
-  }, [effectivePaymentDateInputRef, onOpenPaymentDatePicker]);
+  }, [effectivePaymentDateInputRef, onOpenPaymentDatePicker, paymentDateDisabled]);
+  const paymentDateInputClassName = `h-16 rounded-2xl border-2 px-4 pr-16 text-xl font-black tracking-tight shadow-none focus:ring-0 min-[860px]:h-20 min-[860px]:px-6 min-[860px]:pr-20 min-[860px]:text-3xl [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+    paymentDateDisabled
+      ? "pointer-events-none cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70"
+      : "border-slate-200 bg-white text-slate-950 focus:border-blue-500 focus:bg-white"
+  }`;
+  const paymentDateButtonClassName = `absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-[860px]:right-5 ${
+    paymentDateDisabled
+      ? "cursor-not-allowed text-slate-300"
+      : "text-slate-950 hover:bg-slate-100"
+  }`;
 
   return (
     <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-4 py-1 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:space-y-5 sm:py-2">
@@ -253,31 +267,35 @@ export function BookingPaymentPage({
               <Label htmlFor="sharedPaymentDate" className="text-base font-semibold text-slate-700">
                 Payment Date
               </Label>
-              <div className="relative">
+              <div className={`relative ${paymentDateDisabled ? "cursor-not-allowed" : ""}`}>
                 <Input
                   ref={effectivePaymentDateInputRef}
                   id="sharedPaymentDate"
                   type="date"
                   value={paymentDate}
                   max={maxPaymentDate}
+                  disabled={paymentDateDisabled}
                   onChange={(event) => onPaymentDateChange(event.target.value)}
                   onMouseDown={(event) => {
-                    if (!onOpenPaymentDatePicker) return;
+                    if (!onOpenPaymentDatePicker || paymentDateDisabled) return;
                     event.preventDefault();
                     openNativePaymentDatePicker();
                   }}
                   onClick={(event) => {
-                    if (!onOpenPaymentDatePicker) return;
+                    if (!onOpenPaymentDatePicker || paymentDateDisabled) return;
                     event.preventDefault();
                     openNativePaymentDatePicker();
                   }}
-                  className="h-16 rounded-2xl border-2 border-slate-200 bg-white px-4 pr-16 text-xl font-black tracking-tight text-slate-950 shadow-none focus:border-blue-500 focus:bg-white focus:ring-0 min-[860px]:h-20 min-[860px]:px-6 min-[860px]:pr-20 min-[860px]:text-3xl [&::-webkit-calendar-picker-indicator]:opacity-0"
+                  aria-disabled={paymentDateDisabled}
+                  className={paymentDateInputClassName}
                 />
                 <button
                   type="button"
                   onClick={openNativePaymentDatePicker}
+                  disabled={paymentDateDisabled}
+                  aria-disabled={paymentDateDisabled}
                   aria-label="Open payment date calendar"
-                  className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-950 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-[860px]:right-5"
+                  className={paymentDateButtonClassName}
                 >
                   <CalendarIcon className="h-6 w-6" />
                 </button>
@@ -472,6 +490,7 @@ export function PaymentModal() {
   const selectedAptPaid = getAppointmentPaid(selectedApt);
   const outstandingBalance = selectedApt ? selectedAptTotalDue - selectedAptPaid : 0;
   const isEditing = Boolean(paymentData) || Boolean(paymentId);
+  const isPaymentDateDisabled = (parseFloat(amount) || 0) <= 0;
 
   useEffect(() => {
     if (!isPaymentModalOpen) {
@@ -622,6 +641,7 @@ export function PaymentModal() {
             onAmountChange={setAmount}
             paymentDate={paymentDate}
             onPaymentDateChange={setPaymentDate}
+            paymentDateDisabled={isPaymentDateDisabled}
             paymentMethod={paymentMethod || ""}
             onPaymentMethodChange={(value) => setPaymentMethod(value || null)}
             projectedRemainingBalance={Math.max(0, outstandingBalance - (parseFloat(amount) || 0))}

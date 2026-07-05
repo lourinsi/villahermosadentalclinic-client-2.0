@@ -51,6 +51,7 @@ import useSharedBookingLogic, {
   normalizeBookingPaymentDate,
   isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
+  isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
@@ -1426,6 +1427,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
+  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -1493,7 +1495,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const validatePaymentDateForAmount = (amount: number) => {
-    if (amount <= 0) return true;
+    if (isBookingPaymentDateDisabled(amount, paymentMethod)) return true;
 
     const normalizedDate = normalizeBookingPaymentDate(paymentDate);
     if (!normalizedDate) {
@@ -2869,7 +2871,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       value={paymentDate}
                       max={getDefaultBookingPaymentDate()}
                       onChange={(e: any) => setPaymentDate(e.target.value)}
-                      disabled={paymentMethod === "Pay at Clinic"}
+                      disabled={isPaymentDateDisabled}
                       className="h-12 font-semibold"
                     />
                     <p className="text-[10px] text-gray-500">

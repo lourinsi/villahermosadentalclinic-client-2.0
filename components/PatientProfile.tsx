@@ -113,7 +113,15 @@ import {
   type QuestionnaireQuestion,
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
-import { normalizeBookingDuration, normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL, type BookingInitialStep } from "./sharedBookingLogic";
+import {
+  getBookingToothNumberEntries,
+  getBookingToothNumbersValue,
+  normalizeBookingDuration,
+  normalizeBookingPaymentMethod,
+  normalizeBookingToothNumbers,
+  NO_PAYMENT_METHOD_LABEL,
+  type BookingInitialStep,
+} from "./sharedBookingLogic";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal } from "./SelectTreatmentModal";
@@ -1440,6 +1448,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
   const [customVisitTreatmentName, setCustomVisitTreatmentName] = useState("");
   const [visitTreatmentPrice, setVisitTreatmentPrice] = useState("");
+  const [visitTreatmentToothNumberEntries, setVisitTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [similarVisitTreatmentPrompt, setSimilarVisitTreatmentPrompt] = useState<{
     input: string;
     service: ServiceCatalogItem;
@@ -2488,6 +2497,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : ""
     );
     setVisitTreatmentPrice(String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0));
+    setVisitTreatmentToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(sourceAppointment)));
     setSimilarVisitTreatmentPrompt(null);
   };
 
@@ -2498,6 +2508,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setSelectedVisitTreatmentId(null);
     setCustomVisitTreatmentName("");
     setVisitTreatmentPrice("");
+    setVisitTreatmentToothNumberEntries([""]);
     setSimilarVisitTreatmentPrompt(null);
   };
 
@@ -2540,6 +2551,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const nextDuration = isOtherTreatment
       ? previousDuration
       : normalizeBookingDuration(selectedTreatment.duration || 30);
+    const nextToothNumbers = normalizeBookingToothNumbers(visitTreatmentToothNumberEntries);
 
     setIsUpdatingVisitTreatment(true);
     try {
@@ -2548,6 +2560,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         customType: isOtherTreatment ? customType : undefined,
         duration: nextDuration,
         price: Math.max(0, nextPrice),
+        toothNumbers: nextToothNumbers,
       } as Partial<Appointment>);
 
       const patchAppointment = (apt: Appointment) =>
@@ -2559,6 +2572,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               customType: isOtherTreatment ? customType : updated.customType,
               duration: updated.duration ?? nextDuration,
               price: updated.price ?? Math.max(0, nextPrice),
+              toothNumbers: (updated as any).toothNumbers ?? nextToothNumbers,
             } as Appointment)
           : apt;
 
@@ -5102,8 +5116,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         currentTreatmentLabel={updateTreatmentCurrentLabel}
         customTreatmentName={customVisitTreatmentName}
         selectedPrice={visitTreatmentPrice}
+        toothNumberEntries={visitTreatmentToothNumberEntries}
         onCustomTreatmentNameChange={setCustomVisitTreatmentName}
         onSelectedPriceChange={setVisitTreatmentPrice}
+        onToothNumberEntriesChange={setVisitTreatmentToothNumberEntries}
         onTreatmentSelect={(treatment) => {
           setSelectedVisitTreatmentId(treatment.id);
           setVisitTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));

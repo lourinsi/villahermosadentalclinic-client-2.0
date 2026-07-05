@@ -54,6 +54,7 @@ import useSharedBookingLogic, {
   normalizeBookingPaymentDate,
   isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
+  isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
@@ -2128,6 +2129,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const discountedPrice = Math.max(0, finalPrice - discountAmount);
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = parseFloat(amountToPay) || 0;
+  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === appointmentType);
   const selectedTreatmentName = appointmentType === "Other"
@@ -2202,7 +2204,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const validatePaymentDateForAmount = (amount: number) => {
-    if (amount <= 0) return true;
+    if (isBookingPaymentDateDisabled(amount, paymentMethod)) return true;
 
     const normalizedDate = normalizeBookingPaymentDate(paymentDate);
     if (!normalizedDate) {
@@ -3086,10 +3088,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   };
 
   const openPaymentDatePicker = () => {
+    if (isPaymentDateDisabled) return;
+
     setIsPaymentDatePickerOpen(true);
   };
 
+  useEffect(() => {
+    if (isPaymentDateDisabled) setIsPaymentDatePickerOpen(false);
+  }, [isPaymentDateDisabled]);
+
   const handlePaymentDateSelect = (date: Date) => {
+    if (isPaymentDateDisabled) return;
+
     setPaymentDate(formatDateToYYYYMMDD(date));
     setIsPaymentDatePickerOpen(false);
   };
@@ -3798,6 +3808,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     onAmountChange={setAmountToPay}
                     paymentDate={paymentDate}
                     onPaymentDateChange={setPaymentDate}
+                    paymentDateDisabled={isPaymentDateDisabled}
                     paymentMethod={paymentMethod}
                     onPaymentMethodChange={setPaymentMethod}
                     projectedRemainingBalance={projectedRemainingBalance}
@@ -3920,13 +3931,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               max={getDefaultBookingPaymentDate()}
                               onChange={(e: any) => setPaymentDate(e.target.value)}
                               onClick={openPaymentDatePicker}
-                              className="h-20 rounded-2xl border-2 border-slate-200 bg-white px-6 pr-20 text-3xl font-black tracking-tight text-slate-950 shadow-none focus:border-blue-500 focus:bg-white focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0"
+                              disabled={isPaymentDateDisabled}
+                              aria-disabled={isPaymentDateDisabled}
+                              className={`h-20 rounded-2xl border-2 px-6 pr-20 text-3xl font-black tracking-tight shadow-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                isPaymentDateDisabled
+                                  ? "pointer-events-none cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70"
+                                  : "border-slate-200 bg-white text-slate-950 focus:border-blue-500 focus:bg-white"
+                              }`}
                             />
                             <button
                               type="button"
                               onClick={openPaymentDatePicker}
+                              disabled={isPaymentDateDisabled}
+                              aria-disabled={isPaymentDateDisabled}
                               aria-label="Open payment date calendar"
-                              className="absolute right-5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-950 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className={`absolute right-5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                isPaymentDateDisabled
+                                  ? "cursor-not-allowed text-slate-300"
+                                  : "text-slate-950 hover:bg-slate-100"
+                              }`}
                             >
                               <CalendarIcon className="h-6 w-6" />
                             </button>
