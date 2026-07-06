@@ -835,6 +835,7 @@ export function FinanceView() {
   const [patientImages, setPatientImages] = useState<Record<string, string | undefined>>({});
   const [financeHistoryLogs, setFinanceHistoryLogs] = useState<FinanceHistoryLog[]>([]);
   const [isFinanceHistoryLoading, setIsFinanceHistoryLoading] = useState(false);
+  const [financeRefreshKey, setFinanceRefreshKey] = useState(0);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
@@ -983,7 +984,20 @@ export function FinanceView() {
 
   useEffect(() => {
     fetchData();
-  }, [canSeeDeletedPayments]);
+  }, [canSeeDeletedPayments, financeRefreshKey]);
+
+  useEffect(() => {
+    const handleFinanceRefresh = () => setFinanceRefreshKey((key) => key + 1);
+    window.addEventListener("appointments:updated", handleFinanceRefresh);
+    window.addEventListener("payments:updated", handleFinanceRefresh);
+    window.addEventListener("villahermosa:data-refresh", handleFinanceRefresh);
+
+    return () => {
+      window.removeEventListener("appointments:updated", handleFinanceRefresh);
+      window.removeEventListener("payments:updated", handleFinanceRefresh);
+      window.removeEventListener("villahermosa:data-refresh", handleFinanceRefresh);
+    };
+  }, []);
 
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);

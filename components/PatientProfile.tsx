@@ -525,10 +525,12 @@ export function PatientProfile({
     const handleDataRefresh = () => setModalDataRefreshKey((key) => key + 1);
     window.addEventListener("appointments:updated", handleDataRefresh);
     window.addEventListener("payments:updated", handleDataRefresh);
+    window.addEventListener("villahermosa:data-refresh", handleDataRefresh);
 
     return () => {
       window.removeEventListener("appointments:updated", handleDataRefresh);
       window.removeEventListener("payments:updated", handleDataRefresh);
+      window.removeEventListener("villahermosa:data-refresh", handleDataRefresh);
     };
   }, []);
 

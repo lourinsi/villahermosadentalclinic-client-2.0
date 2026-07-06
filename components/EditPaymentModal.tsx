@@ -120,7 +120,7 @@ export function EditPaymentModal() {
     appointmentId: contextAppointmentId,
     appointments: contextAppointments,
   } = usePaymentModal();
-  const { refreshPatients, updateAppointment } = useAppointmentModal();
+  const { refreshAppointments, refreshPatients, refreshFinanceData, updateAppointment } = useAppointmentModal();
   const { isReceptionistView } = useAdminViewMode();
 
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
@@ -419,6 +419,8 @@ export function EditPaymentModal() {
   const totalBilled = getAppointmentTotalDue(effectiveAppointmentForTotals);
   const totalPaid = effectiveAppointmentForTotals ? getAppointmentPaid(effectiveAppointmentForTotals) : currentPaymentAmount;
   const currentBalanceDue = Math.max(0, totalBilled - totalPaid);
+  const postEditPaymentTargetAmount = Math.max(0, totalBilled - Math.max(0, totalPaid - currentPaymentAmount));
+  const projectedRemainingBalance = Math.max(0, totalBilled - Math.max(0, totalPaid - currentPaymentAmount + (parseFloat(amount) || 0)));
   const selectedTreatmentName = selectedAppointmentRecord
     ? getAppointmentTypeName(selectedAppointmentRecord.type, selectedAppointmentRecord.customType)
     : effectivePaymentData?.appointmentSnapshot?.customType || effectivePaymentData?.appointmentSnapshot?.type || "Selected appointment";
@@ -512,8 +514,13 @@ export function EditPaymentModal() {
         window.dispatchEvent(new CustomEvent("appointments:updated", {
           detail: { appointmentId: selectedAppointment || currentAppointmentId },
         }));
+        window.dispatchEvent(new CustomEvent("villahermosa:data-refresh", {
+          detail: { source: "payment-edit", appointmentId: selectedAppointment || currentAppointmentId, paymentId: paymentRecordId },
+        }));
       }
+      refreshAppointments();
       refreshPatients();
+      refreshFinanceData();
       clearCompletedEditPaymentDraft();
       closePaymentModal();
       return true;
@@ -603,9 +610,9 @@ export function EditPaymentModal() {
             onPaymentDateChange={setPaymentDate}
             paymentMethod={paymentMethod || ""}
             onPaymentMethodChange={(value) => setPaymentMethod(normalizeBookingPaymentMethod(value))}
-            projectedRemainingBalance={Math.max(0, currentBalanceDue - (parseFloat(amount) || 0))}
-            onPayFull={() => setAmount(String(currentBalanceDue.toFixed(2)))}
-            payFullDisabled={currentBalanceDue <= 0}
+            projectedRemainingBalance={projectedRemainingBalance}
+            onPayFull={() => setAmount(String(postEditPaymentTargetAmount.toFixed(2)))}
+            payFullDisabled={postEditPaymentTargetAmount <= 0}
             loadingMessage={isFetchingPayment && !effectivePaymentData ? (
               <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 text-center text-sm font-semibold text-muted-foreground shadow-sm">
                 Loading payment record...
