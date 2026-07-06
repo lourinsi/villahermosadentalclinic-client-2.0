@@ -5,6 +5,7 @@ import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
   formatAppointmentStatusLabel,
   isCartAppointmentStatus,
+  normalizeAppointmentStatus,
 } from "@/lib/appointment-status";
 import {
   formatPaymentStatusLabel,
@@ -60,6 +61,16 @@ interface AllAppointmentsViewProps {
   onOpenAppointment?: (appointment: Appointment) => void;
   isCart?: boolean;
 }
+
+const isSoftDeletedAppointment = (appointment: Partial<Appointment>) =>
+  Boolean(appointment.deleted) ||
+  Boolean((appointment as any).deletedAt) ||
+  normalizeAppointmentStatus(String(appointment.status || "")) === "deleted";
+
+const getDisplayAppointmentStatus = (appointment: Partial<Appointment>) =>
+  isSoftDeletedAppointment(appointment)
+    ? "deleted"
+    : normalizeAppointmentStatus(String(appointment.status || ""));
 
 export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({ 
   appointments, 
@@ -246,20 +257,22 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
         <>
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {filteredAndSortedAppointments.map((appointment) => {
+              const appointmentStatus = getDisplayAppointmentStatus(appointment);
+              const isDeletedAppointment = isSoftDeletedAppointment(appointment);
               const statusAccentClass = getStatusDotColorClass(
-                getAppointmentStatusOptionWithColors(appointment.status, APPOINTMENT_STATUSES).bgColor
+                getAppointmentStatusOptionWithColors(appointmentStatus, APPOINTMENT_STATUSES).bgColor
               );
               const canPay =
                 onPay &&
+                !isDeletedAppointment &&
                 appointment.paymentStatus !== "paid" &&
-                appointment.status !== "cancelled" &&
-                appointment.status !== "deleted";
-              const canDelete = onDelete && isCartAppointmentStatus(appointment.status);
+                appointmentStatus !== "cancelled";
+              const canDelete = onDelete && !isDeletedAppointment && isCartAppointmentStatus(appointmentStatus);
 
               return (
                 <Card
                   key={appointment.id}
-                  className={`relative overflow-hidden border-gray-200 shadow-sm ${onOpenAppointment ? "cursor-pointer" : ""}`}
+                  className={`relative overflow-hidden border-gray-200 shadow-sm ${isDeletedAppointment ? "bg-slate-50 opacity-90" : ""} ${onOpenAppointment ? "cursor-pointer" : ""}`}
                   onClick={() => onOpenAppointment?.(appointment)}
                 >
                   <div className={`absolute left-0 top-0 h-full w-1 ${statusAccentClass}`} />
@@ -309,15 +322,15 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : (
-                        <Badge variant="outline" className={`shrink-0 px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointment.status)}`}>
-                          {displayStatus(appointment.status)}
+                        <Badge variant="outline" className={`shrink-0 px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointmentStatus)}`}>
+                          {displayStatus(appointmentStatus)}
                         </Badge>
                       )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getStatusBadgeClass(appointment.status)}`}>
-                        {displayStatus(appointment.status)}
+                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getStatusBadgeClass(appointmentStatus)}`}>
+                        {displayStatus(appointmentStatus)}
                       </Badge>
                       <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getPaymentBadgeClass(appointment.paymentStatus)}`}>
                         {displayPaymentStatus(appointment.paymentStatus)}
@@ -382,10 +395,20 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredAndSortedAppointments.map((appointment) => (
+              {filteredAndSortedAppointments.map((appointment) => {
+                const appointmentStatus = getDisplayAppointmentStatus(appointment);
+                const isDeletedAppointment = isSoftDeletedAppointment(appointment);
+                const canPay =
+                  onPay &&
+                  !isDeletedAppointment &&
+                  appointment.paymentStatus !== "paid" &&
+                  appointmentStatus !== "cancelled";
+                const canDelete = onDelete && !isDeletedAppointment && isCartAppointmentStatus(appointmentStatus);
+
+                return (
                 <TableRow
                   key={appointment.id}
-                  className={`hover:bg-gray-50/50 transition-colors ${onOpenAppointment ? "cursor-pointer" : ""}`}
+                  className={`hover:bg-gray-50/50 transition-colors ${isDeletedAppointment ? "bg-slate-50 opacity-90" : ""} ${onOpenAppointment ? "cursor-pointer" : ""}`}
                   onClick={() => onOpenAppointment?.(appointment)}
                 >
                   <TableCell className="font-semibold text-gray-900">{appointment.patientName}</TableCell>
@@ -395,8 +418,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   <TableCell>{getAppointmentTypeName(appointment.type, appointment.customType)}</TableCell>
                   <TableCell className="text-gray-600">Dr. {appointment.doctor}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter ${getStatusBadgeClass(appointment.status)}`}>
-                      {displayStatus(appointment.status)}
+                    <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter ${getStatusBadgeClass(appointmentStatus)}`}>
+                      {displayStatus(appointmentStatus)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -408,7 +431,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   {(onPay || onDelete) && (
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && appointment.status !== "deleted" && (
+                        {canPay && (
                           <Button 
                             size="sm" 
                             className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 shadow-sm active:scale-95 transition-all"
@@ -420,7 +443,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                             Pay Now
                           </Button>
                         )}
-                        {onDelete && isCartAppointmentStatus(appointment.status) && (
+                        {canDelete && (
                           <Button 
                             size="sm" 
                             variant="ghost" 
@@ -437,7 +460,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                     </TableCell>
                   )}
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
             </Table>
           </div>
@@ -445,14 +469,22 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filteredAndSortedAppointments.map((appointment) => {
+            const appointmentStatus = getDisplayAppointmentStatus(appointment);
+            const isDeletedAppointment = isSoftDeletedAppointment(appointment);
             const statusAccentClass = getStatusDotColorClass(
-              getAppointmentStatusOptionWithColors(appointment.status, APPOINTMENT_STATUSES).bgColor
+              getAppointmentStatusOptionWithColors(appointmentStatus, APPOINTMENT_STATUSES).bgColor
             );
+            const canPay =
+              onPay &&
+              !isDeletedAppointment &&
+              appointment.paymentStatus !== "paid" &&
+              appointmentStatus !== "cancelled";
+            const canDelete = onDelete && !isDeletedAppointment && isCartAppointmentStatus(appointmentStatus);
 
             return (
             <Card
               key={appointment.id}
-              className={`hover:shadow-md transition-all border-gray-200 group relative overflow-hidden ${onOpenAppointment ? "cursor-pointer" : ""}`}
+              className={`hover:shadow-md transition-all border-gray-200 group relative overflow-hidden ${isDeletedAppointment ? "bg-slate-50 opacity-90" : ""} ${onOpenAppointment ? "cursor-pointer" : ""}`}
               onClick={() => onOpenAppointment?.(appointment)}
             >
                <div className={`absolute top-0 left-0 w-1 h-full ${statusAccentClass}`} />
@@ -468,8 +500,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                       {getAppointmentTypeName(appointment.type, appointment.customType)}
                     </h3>
                   </div>
-                  <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointment.status)}`}>
-                    {displayStatus(appointment.status)}
+                  <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointmentStatus)}`}>
+                    {displayStatus(appointmentStatus)}
                   </Badge>
                 </div>
 
@@ -501,7 +533,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   </div>
                   
                   <div className="flex gap-2">
-                    {onPay && appointment.paymentStatus !== "paid" && appointment.status !== "cancelled" && (
+                    {canPay && (
                       <Button 
                         size="sm" 
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 rounded-lg shadow-sm"
@@ -513,7 +545,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                         Pay
                       </Button>
                     )}
-                    {onDelete && isCartAppointmentStatus(appointment.status) && (
+                    {canDelete && (
                       <Button 
                         size="sm" 
                         variant="ghost" 

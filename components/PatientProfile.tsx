@@ -29,7 +29,6 @@ import {
   Camera,
   Upload,
   Trash2,
-  Trash,
   User as UserIcon,
   Clock,
   CheckCircle,
@@ -58,6 +57,7 @@ import {
   Save,
   ArrowLeft,
   Stethoscope,
+  RotateCcw,
   X
 } from "lucide-react";
 
@@ -928,6 +928,7 @@ interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transa
   date: string;
   transactions: RecentTransaction[];
   deleted?: boolean;
+  deletedAt?: string | null;
 }
 
 type PaymentRow = RecentTransaction & {
@@ -935,6 +936,7 @@ type PaymentRow = RecentTransaction & {
   createdAt?: string | Date;
   updatedAt?: string | Date;
   deleted?: boolean;
+  deletedAt?: string | Date | null;
 };
 
 type PaymentLogRow = {
@@ -968,7 +970,17 @@ const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").star
 const isStoredPaymentLogRow = (txn: RecentTransaction) =>
   String((txn as any).source || "") === "payment-log" || String(txn.id || "").startsWith("payment-log-");
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
+const isSoftDeletedPaymentTransaction = (txn?: Partial<RecentTransaction> | null) =>
+  Boolean((txn as any)?.deleted) || Boolean((txn as any)?.deletedAt);
+const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
+const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
+const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
+  Boolean(appointment?.deleted) ||
+  Boolean((appointment as any)?.deletedAt) ||
+  normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
 const getEditablePaymentId = (txn: RecentTransaction) => {
+  if (isSoftDeletedPaymentTransaction(txn)) return "";
+
   const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
   if (explicitPaymentId) return String(explicitPaymentId).trim();
 
@@ -984,7 +996,21 @@ const getEditablePaymentId = (txn: RecentTransaction) => {
   return "";
 };
 
+const getRestorablePaymentId = (txn: RecentTransaction) => {
+  const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
+  if (explicitPaymentId) return String(explicitPaymentId).trim();
+
+  const id = String(txn.id || "").trim();
+  if (id.startsWith("pay_") || String((txn as any).source || "") === "payment") return id;
+
+  return "";
+};
+
 const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
+  if (isSoftDeletedPaymentTransaction(txn)) {
+    return "This payment has been deleted.";
+  }
+
   if (isLegacyPaymentRow(txn)) {
     return "This is a legacy recorded total from the appointment, not an individual payment record.";
   }
@@ -994,6 +1020,47 @@ const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
   }
 
   return "Could not find the payment record to edit.";
+};
+
+const PAYMENT_BALANCE_EPSILON = 0.01;
+const PAYMENT_TRANSACTION_STATUS_VALUES = new Set(["paid", "half-paid", "over-paid", "unpaid", "overdue"]);
+
+const toFinitePaymentNumber = (value: unknown): number | undefined => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
+const getTransactionAppointmentId = (transaction: RecentTransaction) => {
+  const snapshot = (transaction as any).appointmentSnapshot || {};
+  return String(
+    transaction.appointmentId ||
+    snapshot.appointmentId ||
+    snapshot.id ||
+    snapshot._id ||
+    ""
+  ).trim();
+};
+
+const getPaymentStatusFromCurrentBalance = (source?: any, fallbackStatus?: string | null) => {
+  const balance = toFinitePaymentNumber(source?.currentAppointmentBalance ?? source?.balance);
+  const price = toFinitePaymentNumber(source?.currentAppointmentPrice ?? source?.price) ?? 0;
+  const discount = toFinitePaymentNumber(source?.currentAppointmentDiscount ?? source?.discount) ?? 0;
+  const totalPaid = toFinitePaymentNumber(source?.currentAppointmentTotalPaid ?? source?.totalPaid);
+  const totalDue = Math.max(0, price - discount);
+  const computedBalance = totalPaid !== undefined ? totalDue - totalPaid : undefined;
+  const effectiveBalance = balance ?? computedBalance;
+  const hasOverpayment = totalPaid !== undefined && totalPaid - totalDue > PAYMENT_BALANCE_EPSILON;
+
+  if (hasOverpayment || (effectiveBalance !== undefined && effectiveBalance < -PAYMENT_BALANCE_EPSILON)) {
+    return "over-paid";
+  }
+
+  if (effectiveBalance !== undefined) {
+    return effectiveBalance <= PAYMENT_BALANCE_EPSILON ? "paid" : "half-paid";
+  }
+
+  const normalizedFallback = normalizePaymentStatus(fallbackStatus);
+  return PAYMENT_TRANSACTION_STATUS_VALUES.has(normalizedFallback) ? normalizedFallback : "paid";
 };
 
 const toDateOnly = (value?: string | Date) => {
@@ -1401,6 +1468,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const canSeeDeletedAppointments = effectiveRole === "admin";
+  const canSeeDeletedPayments = effectiveRole !== "receptionist";
   const shouldLoadTreatmentOptions = activeTab === "history" || activeTab === "payments";
   const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(shouldLoadTreatmentOptions);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
@@ -1448,6 +1516,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
   const [customVisitTreatmentName, setCustomVisitTreatmentName] = useState("");
   const [visitTreatmentPrice, setVisitTreatmentPrice] = useState("");
+  const [visitTreatmentDuration, setVisitTreatmentDuration] = useState("30");
   const [visitTreatmentToothNumberEntries, setVisitTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [similarVisitTreatmentPrompt, setSimilarVisitTreatmentPrompt] = useState<{
     input: string;
@@ -1850,7 +1919,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     // Normalize payments coming from the payments collection
     const paymentsFromCollection = payments
-      .filter((payment) => !payment.deleted)
       .map((payment) => {
         const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
@@ -1872,6 +1940,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentDate,
           doctor: payment.doctor || appointment?.doctor || "",
           status: payment.status || "completed",
+          deleted: Boolean(payment.deleted),
+          deletedAt: payment.deletedAt,
         } as RecentTransaction;
       });
 
@@ -2488,6 +2558,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       getAppointmentTypeName(numericType, (sourceAppointment as any).customType) ||
       String((sourceAppointment as any).type || "");
     const currentPrice = Number((sourceAppointment as any).price ?? selectedService?.price ?? 0);
+    const currentDuration = normalizeBookingDuration((sourceAppointment as any).duration || selectedService?.duration || 30);
 
     setUpdateTreatmentAppointment(sourceAppointment);
     setSelectedVisitTreatmentId(selectedId);
@@ -2497,6 +2568,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : ""
     );
     setVisitTreatmentPrice(String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0));
+    setVisitTreatmentDuration(String(currentDuration));
     setVisitTreatmentToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(sourceAppointment)));
     setSimilarVisitTreatmentPrompt(null);
   };
@@ -2508,6 +2580,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setSelectedVisitTreatmentId(null);
     setCustomVisitTreatmentName("");
     setVisitTreatmentPrice("");
+    setVisitTreatmentDuration("30");
     setVisitTreatmentToothNumberEntries([""]);
     setSimilarVisitTreatmentPrompt(null);
   };
@@ -2547,10 +2620,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    const previousDuration = normalizeBookingDuration((updateTreatmentAppointment as any).duration || selectedTreatment.duration || 30);
-    const nextDuration = isOtherTreatment
-      ? previousDuration
-      : normalizeBookingDuration(selectedTreatment.duration || 30);
+    const nextDuration = normalizeBookingDuration(visitTreatmentDuration || selectedTreatment.duration || (updateTreatmentAppointment as any).duration || 30);
     const nextToothNumbers = normalizeBookingToothNumbers(visitTreatmentToothNumberEntries);
 
     setIsUpdatingVisitTreatment(true);
@@ -2654,11 +2724,78 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
-    if (isPaymentLogTransaction(transaction)) {
-      return { label: "Log", className: "bg-gray-100 text-gray-700 border-gray-200", isLog: true };
+    if (isSoftDeletedPaymentTransaction(transaction)) {
+      return {
+        label: "Deleted",
+        status: "deleted",
+        className: deletedPaymentBadgeClass,
+        isLog: false,
+      };
     }
 
-    return { label: "", className: "", isLog: false };
+    const appointmentId = getTransactionAppointmentId(transaction);
+    const currentAppointment =
+      mockAppointmentHistoryLocal.find((apt) => String(apt.id) === appointmentId) ||
+      patientAppointments.find((apt) => String(apt.id) === appointmentId);
+    const transactionSnapshot = (transaction as any).appointmentSnapshot || {};
+    const currentTransactionState = {
+      currentAppointmentBalance: (transaction as any).currentAppointmentBalance,
+      currentAppointmentTotalPaid: (transaction as any).currentAppointmentTotalPaid,
+      currentAppointmentPrice: (transaction as any).currentAppointmentPrice,
+      currentAppointmentDiscount: (transaction as any).currentAppointmentDiscount,
+    };
+    const status = getPaymentStatusFromCurrentBalance(
+      currentAppointment || currentTransactionState,
+      (transaction as any).currentPaymentStatus
+    );
+    const statusOption = getPaymentStatusOptionWithColors(status, PAYMENT_STATUSES);
+
+    return {
+      label: statusOption.label || "Paid",
+      status: normalizePaymentStatus(statusOption.value) || status,
+      className: `${statusOption.bgColor} ${statusOption.textColor} border-transparent`,
+      isLog: isPaymentLogTransaction(transaction),
+    };
+  };
+
+  const handleRestoreVisitAppointment = async (appointment: Appointment | HistoryAppointment) => {
+    const appointmentId = String(appointment?.id || "");
+    if (!appointmentId) {
+      toast.error("Could not find appointment to restore");
+      return;
+    }
+
+    try {
+      const updated = await updateAppointment(appointmentId, {
+        status: "cancelled",
+        deleted: false,
+        deletedAt: null,
+      } as any);
+      const restored = {
+        ...appointment,
+        ...updated,
+        status: "cancelled",
+        deleted: false,
+        deletedAt: null,
+        updatedAt: new Date().toISOString(),
+      } as Appointment;
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId ? ({ ...apt, ...restored } as Appointment) : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      try {
+        window.dispatchEvent(new CustomEvent("appointments:updated", {
+          detail: { appointment: restored, appointmentId, restored: true, newStatus: "cancelled" },
+        }));
+      } catch {}
+      toast.success("Appointment restored");
+    } catch (error) {
+      console.error("[PatientProfile] Failed to restore appointment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to restore appointment");
+    }
   };
 
   const uniqueDoctors = React.useMemo(() => {
@@ -2688,7 +2825,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
         const normalizedStatus = normalizeAppointmentStatus(String(apt.status || ""));
-        if (!canSeeDeletedAppointments && (apt.deleted || normalizedStatus === "deleted")) return false;
+        if (!canSeeDeletedAppointments && isSoftDeletedAppointment(apt)) return false;
         if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
         if (historyDoctorFilter !== 'all' && getVisitDoctorName(apt) !== historyDoctorFilter) return false;
         if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
@@ -2714,19 +2851,37 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [paymentDateSortDirection, setPaymentDateSortDirection] = useState<"asc" | "desc">("desc");
 
   const uniquePaymentDoctors = React.useMemo(() => {
-    const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean).map(String));
+    const doctors = new Set(
+      allTransactions
+        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .map(t => t.doctor)
+        .filter(Boolean)
+        .map(String)
+    );
     return ['all', ...Array.from(doctors)];
-  }, [allTransactions]);
+  }, [allTransactions, canSeeDeletedPayments]);
 
   const uniquePaymentMethods = React.useMemo(() => {
-    const methods = new Set(allTransactions.map(t => t.method).filter(Boolean).map(String));
+    const methods = new Set(
+      allTransactions
+        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .map(t => t.method)
+        .filter(Boolean)
+        .map(String)
+    );
     return ['all', ...Array.from(methods)];
-  }, [allTransactions]);
+  }, [allTransactions, canSeeDeletedPayments]);
 
   const uniquePaymentProcedures = React.useMemo(() => {
-    const procedures = new Set(allTransactions.map(t => t.appointmentType).filter(Boolean).map(String));
+    const procedures = new Set(
+      allTransactions
+        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .map(t => t.appointmentType)
+        .filter(Boolean)
+        .map(String)
+    );
     return ['all', ...Array.from(procedures)];
-  }, [allTransactions]);
+  }, [allTransactions, canSeeDeletedPayments]);
 
   useEffect(() => {
     if (paymentDoctorFilter !== 'all' && !uniquePaymentDoctors.includes(paymentDoctorFilter)) setPaymentDoctorFilter('all');
@@ -2747,6 +2902,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     return allTransactions
       .filter(t => {
+        if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
         if (doctorFilter && t.doctor !== doctorFilter) return false;
         if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
         if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
@@ -2779,7 +2935,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const keyDiff = getPaymentTransactionKey(a).localeCompare(getPaymentTransactionKey(b));
         return paymentDateSortDirection === "asc" ? keyDiff : -keyDiff;
       });
-  }, [allTransactions, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter]);
+  }, [allTransactions, canSeeDeletedPayments, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter]);
 
   const paymentSummary = React.useMemo(() => {
     return mockAppointmentHistoryLocal.reduce(
@@ -3218,7 +3374,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           if (!patient?.id) return [];
 
           try {
-            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}`), {
+            const includeDeletedQuery = canSeeDeletedPayments ? "?includeDeleted=true" : "";
+            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}${includeDeletedQuery}`), {
               headers,
               credentials: 'include',
               signal: controller.signal,
@@ -3304,7 +3461,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
 
       return () => controller.abort();
-    }, [buildPatientTransactions, patientAppointments, patient?.id, shouldLoadFinancialLog]);
+    }, [buildPatientTransactions, canSeeDeletedPayments, patientAppointments, patient?.id, shouldLoadFinancialLog]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -3361,18 +3518,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const handleDeletePayment = async (paymentId: string, appointmentId?: string) => {
-    console.log("=== DELETE PAYMENT STARTED ===");
-    console.log("Payment ID:", paymentId);
-    console.log("Appointment ID:", appointmentId);
-
-    if (paymentId.startsWith("legacy-")) {
+    if (!paymentId || paymentId.startsWith("legacy-")) {
       toast.error("This payment total comes from legacy appointment data and cannot be deleted here.");
       return;
     }
 
     try {
       const deleteUrl = apiUrl(`/api/payments/${paymentId}`);
-      console.log("DELETE URL:", deleteUrl);
 
       const response = await fetch(deleteUrl, {
         method: "DELETE",
@@ -3380,41 +3532,114 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         credentials: "include",
       });
 
-      console.log("Response Status:", response.status);
-      console.log("Response OK:", response.ok);
-
       const result = await response.json();
-      console.log("Response JSON:", result);
 
       if (result.success) {
+        const deletedAt = new Date().toISOString();
+        const matchesDeletedPayment = (txn: RecentTransaction) =>
+          getEditablePaymentId(txn) === paymentId ||
+          String(txn.id || "") === paymentId ||
+          String(txn.transactionId || "") === paymentId;
+        const markDeletedPayment = (txn: RecentTransaction) =>
+          matchesDeletedPayment(txn)
+            ? ({ ...txn, deleted: true, deletedAt } as RecentTransaction)
+            : txn;
+
         toast.success("Payment deleted successfully");
-        setAllTransactions((prev) => prev.filter((txn) => txn.id !== paymentId));
+        setAllTransactions((prev) => prev.map(markDeletedPayment));
         setMockAppointmentHistoryLocal((prev) => prev.map((apt) => {
           if (appointmentId && apt.id !== appointmentId) return apt;
-          const newTransactions = apt.transactions?.filter((txn: RecentTransaction) => txn.id !== paymentId) || [];
-          if (appointmentId && apt.id === appointmentId) {
-            return {
-              ...apt,
-              transactions: newTransactions,
-              totalPaid: newTransactions.reduce((sum: number, txn: RecentTransaction) => sum + Number(txn.amount || 0), 0),
-            };
-          }
+          const newTransactions = apt.transactions?.map(markDeletedPayment) || [];
           return {
             ...apt,
             transactions: newTransactions,
           };
         }));
-        console.log("Delete successful, refreshing patients...");
-        // Refresh the appointments to reflect the deletion
+        window.dispatchEvent(new CustomEvent("payments:updated"));
         refreshPatients();
       } else {
-        console.log("Delete failed with message:", result.message);
         toast.error(result.message || "Failed to delete payment");
       }
     } catch (err) {
       console.error("Error deleting payment:", err);
       toast.error("Error deleting payment");
     }
+  };
+
+  const handleRestorePayment = async (paymentId: string, appointmentId?: string) => {
+    if (effectiveRole !== "admin") {
+      toast.error("Only admins can restore deleted payments");
+      return;
+    }
+
+    if (!paymentId) {
+      toast.error("Could not find the payment to restore");
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/payments/${encodeURIComponent(paymentId)}/restore`), {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+      });
+
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok || !result.success) {
+        toast.error(result.message || "Failed to restore payment");
+        return;
+      }
+
+      const restoredPayment = result.data?.payment || {};
+      const matchesRestoredPayment = (txn: RecentTransaction) =>
+        getRestorablePaymentId(txn) === paymentId ||
+        String(txn.id || "") === paymentId ||
+        String(txn.transactionId || "") === paymentId;
+      const markRestoredPayment = (txn: RecentTransaction) =>
+        matchesRestoredPayment(txn)
+          ? ({
+              ...txn,
+              ...restoredPayment,
+              source: (txn as any).source || "payment",
+              deleted: false,
+              deletedAt: null,
+            } as RecentTransaction)
+          : txn;
+
+      setAllTransactions((prev) => prev.map(markRestoredPayment));
+      setMockAppointmentHistoryLocal((prev) => prev.map((apt) => {
+        if (appointmentId && apt.id !== appointmentId) return apt;
+        const newTransactions = apt.transactions?.map(markRestoredPayment) || [];
+        return {
+          ...apt,
+          transactions: newTransactions,
+        };
+      }));
+      window.dispatchEvent(new CustomEvent("payments:updated"));
+      refreshPatients();
+      refreshAppointments();
+      toast.success("Payment restored successfully");
+    } catch (err) {
+      console.error("Error restoring payment:", err);
+      toast.error("Error restoring payment");
+    }
+  };
+
+  const requestDeletePaymentTransaction = (txn: RecentTransaction) => {
+    const paymentId = getEditablePaymentId(txn);
+
+    if (!paymentId) {
+      toast.error(getPaymentEditUnavailableMessage(txn));
+      return;
+    }
+
+    setPdConfirmTitle("Delete Payment");
+    setPdConfirmMessage("Are you sure you want to delete this payment? This will update the appointment balance.");
+    setPdConfirmAction(() => async () => {
+      await handleDeletePayment(paymentId, txn.appointmentId || getTransactionAppointmentId(txn));
+    });
+    setPdIsConfirmOpen(true);
   };
 
   const handleDeleteLegacyPayment = async (appointmentId: string) => {
@@ -3503,7 +3728,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     selectedVisitTreatment &&
     (!selectedVisitTreatment || selectedVisitTreatment.id !== OTHER_APPOINTMENT_TYPE_INDEX || customVisitTreatmentName.trim()) &&
     Number.isFinite(visitTreatmentPriceNumber) &&
-    visitTreatmentPriceNumber >= 0
+    visitTreatmentPriceNumber >= 0 &&
+    Boolean(visitTreatmentDuration)
   );
   const assignDoctorActionLabel = assignDoctorAppointment && getVisitDoctorName(assignDoctorAppointment)
     ? "Change Doctor"
@@ -4418,7 +4644,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       ? appointmentBalance
                       : computedOutstandingBalance;
                     const appointmentStatus = normalizeAppointmentStatus(String(appointment.status || ""));
-                    const isVoidedAppointment = appointment.deleted || appointmentStatus === "cancelled" || appointmentStatus === "deleted";
+                    const isDeletedAppointment = isSoftDeletedAppointment(appointment);
+                    const isVoidedAppointment = isDeletedAppointment || appointmentStatus === "cancelled";
+                    const canRestoreAppointment = isDeletedAppointment && effectiveRole === "admin";
                     const originalDisplayedBalance = isVoidedAppointment
                       ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
                       : storedDisplayedBalance;
@@ -4444,7 +4672,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                     const doctorImage = isDoctorUnassigned ? undefined : resolveDoctorImageFor(appointment as any);
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
-                    const visitTransactions = (appointment.transactions || []).filter((txn) => Number(txn.amount || 0) > 0);
+                    const visitTransactions = (appointment.transactions || []).filter((txn) =>
+                      Number(txn.amount || 0) > 0 &&
+                      (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(txn))
+                    );
 
                     return (
                       <div key={appointmentId} className="grid gap-3 xl:grid-cols-[7.5rem_minmax(0,1fr)]">
@@ -4462,7 +4693,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                        <div className={`rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md ${
+                          isDeletedAppointment
+                            ? "border-slate-300 bg-slate-50 opacity-90"
+                            : "border-slate-200 bg-white"
+                        }`}>
                           <div className="mb-3 flex items-center gap-3 xl:hidden">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                               <Calendar className="h-5 w-5" />
@@ -4503,7 +4738,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     <Clock className="h-3.5 w-3.5" />
                                     {appointmentTime}
                                   </span>
-                                  {getAppointmentStatusBadge(String(appointment.status || ''))}
+                                  {getAppointmentStatusBadge(isDeletedAppointment ? "deleted" : String(appointment.status || ''))}
+                                  {isDeletedAppointment ? (
+                                    <Badge variant="outline" className="border-slate-300 bg-slate-100 text-slate-700">
+                                      Deleted
+                                    </Badge>
+                                  ) : null}
                                   <span className="inline-flex min-w-0 items-center gap-1 text-slate-500">
                                     <FileText className="h-3.5 w-3.5 shrink-0" />
                                     <span className="truncate">{notesText}</span>
@@ -4535,7 +4775,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
-                              {!isVoidedAppointment ? (
+                              {canRestoreAppointment ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-9 rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                  onClick={() => handleRestoreVisitAppointment(appointment)}
+                                >
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                  Restore
+                                </Button>
+                              ) : !isVoidedAppointment ? (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -4561,7 +4812,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   Closed
                                 </div>
                               )}
-                              {originalAppointment ? (
+                              {originalAppointment && !isDeletedAppointment ? (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -4608,8 +4859,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   <DollarSign className="mr-2 h-4 w-4" />
                                   Record Payment
                                 </DropdownMenuItem>
+                                {canRestoreAppointment ? (
+                                  <DropdownMenuItem onClick={() => handleRestoreVisitAppointment(appointment)}>
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Restore Appointment
+                                  </DropdownMenuItem>
+                                ) : null}
                                 <DropdownMenuItem
-                                  disabled={!originalAppointment}
+                                  disabled={!originalAppointment || isDeletedAppointment}
                                   onClick={() => {
                                     if (originalAppointment) {
                                       openRescheduleModal(originalAppointment);
@@ -4620,7 +4877,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   Reschedule
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  disabled={!originalAppointment}
+                                  disabled={!originalAppointment || isDeletedAppointment}
                                   onClick={() => {
                                     if (originalAppointment) {
                                       openUpdateTreatmentModal(originalAppointment);
@@ -4631,7 +4888,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   Update Treatment
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  disabled={!originalAppointment}
+                                  disabled={!originalAppointment || isDeletedAppointment}
                                   onClick={() => {
                                     if (originalAppointment) {
                                       setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment);
@@ -4652,7 +4909,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 <h4 className="text-sm font-black text-slate-950">Payment History</h4>
                               </div>
                               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_88px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
+                                <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
                                   <span>Payment Method</span>
                                   <span>Amount</span>
                                   <span>Date</span>
@@ -4667,13 +4924,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
                                     const referenceNo = String(txn.transactionId || txn.id || "N/A");
                                     const editablePaymentId = getEditablePaymentId(txn);
+                                    const restorablePaymentId = getRestorablePaymentId(txn);
                                     const isCashPayment = methodLabel.toLowerCase() === "cash";
+                                    const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
 
                                     return (
                                       <div
                                         key={transactionKey}
-                                        className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_88px] md:items-center ${
-                                          paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                        className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${
+                                          isDeletedPayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
                                         }`}
                                       >
                                         <div className="flex min-w-0 items-center gap-3">
@@ -4682,9 +4941,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                           </div>
                                           <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                              <span className="truncate font-black text-slate-900">{methodLabel}</span>
+                                              <span className={`truncate font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
                                               <span className="font-semibold text-slate-400">-</span>
-                                              <span className="font-bold text-slate-700">{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              <span className={`font-bold ${isDeletedPayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                               {paymentDisplay.label ? (
                                                 <Badge variant="outline" className={paymentDisplay.className}>
                                                   {paymentDisplay.label}
@@ -4699,7 +4958,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                          <span className="font-black text-emerald-600">{formatPatientHistoryCurrency(txn.amount)}</span>
+                                          <span className={`font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
@@ -4721,17 +4980,44 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                             <Eye className="h-4 w-4" />
                                             <span className="sr-only">View payment snapshot</span>
                                           </Button>
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="icon"
-                                            className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
-                                            onClick={() => handleEditPaymentTransaction(txn)}
-                                            title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                          >
-                                            <Edit className="h-4 w-4" />
-                                            <span className="sr-only">Edit payment</span>
-                                          </Button>
+                                          {!isDeletedPayment ? (
+                                            <>
+                                              <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                onClick={() => handleEditPaymentTransaction(txn)}
+                                                title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                              >
+                                                <Edit className="h-4 w-4" />
+                                                <span className="sr-only">Edit payment</span>
+                                              </Button>
+                                              <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                className={`h-9 w-9 rounded-xl border-red-100 text-red-600 hover:bg-red-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                onClick={() => requestDeletePaymentTransaction(txn)}
+                                                title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                                <span className="sr-only">Delete payment</span>
+                                              </Button>
+                                            </>
+                                          ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-50"
+                                              onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
+                                              title="Restore payment"
+                                            >
+                                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                              Restore
+                                            </Button>
+                                          ) : null}
                                         </div>
                                       </div>
                                     );
@@ -4922,11 +5208,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       const txnDateParts = getPatientHistoryDateParts(txnPaymentDateRaw);
                       const transactionIdLabel = txn.transactionId || txn.id || "N/A";
                       const editablePaymentId = getEditablePaymentId(txn);
+                      const restorablePaymentId = getRestorablePaymentId(txn);
+                      const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
 
                       return (
                         <div key={txn.id} className="relative">
-                          <span className="absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white bg-violet-600 shadow-md shadow-violet-200 sm:-left-[3rem]" />
-                          <div className={`rounded-lg border bg-white p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200"}`}>
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedPayment ? "bg-gray-400 shadow-gray-100" : "bg-violet-600 shadow-violet-200"}`} />
+                          <div className={`rounded-lg border p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedPayment ? `border-slate-200 ${deletedPaymentRowClass}` : paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200 bg-white"}`}>
                             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                               <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                                 <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -4937,7 +5225,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   </div>
                                 </div>
                                 <div className="min-w-0">
-                                  <h4 className="truncate text-lg font-black text-slate-950">{txn.doctor || "Unassigned Doctor"}</h4>
+                                  <h4 className={`truncate text-lg font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-950"}`}>{txn.doctor || "Unassigned Doctor"}</h4>
                                   <p className="mt-1 truncate text-base font-medium text-slate-500">{txn.appointmentType || "Appointment Payment"}</p>
                                   <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
                                     <span className="inline-flex items-center gap-2">
@@ -4962,19 +5250,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className="text-2xl font-black text-emerald-600">
-                                    {formatPatientHistoryCurrency(txn.amount)}
+                                    <span className={isDeletedPayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                   </div>
                                   <div className="mt-2">
-                                    {paymentDisplay.isLog ? (
-                                      <Badge variant="outline" className="rounded-md border-slate-200 bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">
-                                        Log
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="outline" className="rounded-md border-emerald-100 bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">
-                                        Paid
+                                    <Badge variant="outline" className={`rounded-md px-3 py-1 text-sm font-bold ${paymentDisplay.className}`}>
+                                      {paymentDisplay.label}
+                                      {paymentDisplay.status === "deleted" ? (
+                                        <X className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : paymentDisplay.status === "over-paid" ? (
+                                        <AlertTriangle className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : paymentDisplay.status === "half-paid" ? (
+                                        <Clock className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : (
                                         <CheckCircle className="ml-1.5 h-3.5 w-3.5" />
-                                      </Badge>
-                                    )}
+                                      )}
+                                    </Badge>
                                   </div>
                                   <div className="mt-2 text-xs font-medium text-slate-400">Payment Date: {txnPaymentDate}</div>
                                 </div>
@@ -4988,50 +5278,40 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     <Eye className="h-5 w-5" />
                                     <span className="sr-only">View Appointment Snapshot</span>
                                   </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${editablePaymentId ? "" : "opacity-60"}`}
-                                    title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                    onClick={() => handleEditPaymentTransaction(txn)}
-                                  >
-                                    <Edit className="h-5 w-5" />
-                                    <span className="sr-only">Edit Payment</span>
-                                  </Button>
-                                  {!isReadOnlyPaymentRow(txn) && (
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                                        >
-                                          <MoreVertical className="h-5 w-5" />
-                                          <span className="sr-only">More payment actions</span>
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => handleEditPaymentTransaction(txn)}>
-                                          <Edit className="mr-2 h-4 w-4" />
-                                          Edit
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            setPdConfirmTitle("Delete Payment");
-                                            setPdConfirmMessage("Are you sure you want to delete this payment?");
-                                            setPdConfirmAction(() => async () => {
-                                              if (txn.id) await handleDeletePayment(String(txn.id), txn.appointmentId);
-                                            });
-                                            setPdIsConfirmOpen(true);
-                                          }}
-                                          className="text-red-600"
-                                        >
-                                          <Trash className="mr-2 h-4 w-4" />
-                                          Delete
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  )}
+                                  {!isDeletedPayment ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${editablePaymentId ? "" : "opacity-60"}`}
+                                        title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                        onClick={() => handleEditPaymentTransaction(txn)}
+                                      >
+                                        <Edit className="h-5 w-5" />
+                                        <span className="sr-only">Edit Payment</span>
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700 ${editablePaymentId ? "" : "opacity-60"}`}
+                                        title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
+                                        onClick={() => requestDeletePaymentTransaction(txn)}
+                                      >
+                                        <Trash2 className="h-5 w-5" />
+                                        <span className="sr-only">Delete Payment</span>
+                                      </Button>
+                                    </>
+                                  ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                    <Button
+                                      variant="outline"
+                                      className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
+                                      title="Restore payment"
+                                      onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
+                                    >
+                                      <RotateCcw className="mr-2 h-5 w-5" />
+                                      Restore
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </div>
                             </div>
@@ -5116,13 +5396,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         currentTreatmentLabel={updateTreatmentCurrentLabel}
         customTreatmentName={customVisitTreatmentName}
         selectedPrice={visitTreatmentPrice}
+        selectedDuration={visitTreatmentDuration}
         toothNumberEntries={visitTreatmentToothNumberEntries}
         onCustomTreatmentNameChange={setCustomVisitTreatmentName}
         onSelectedPriceChange={setVisitTreatmentPrice}
+        onSelectedDurationChange={setVisitTreatmentDuration}
         onToothNumberEntriesChange={setVisitTreatmentToothNumberEntries}
         onTreatmentSelect={(treatment) => {
           setSelectedVisitTreatmentId(treatment.id);
           setVisitTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
+          setVisitTreatmentDuration(String(normalizeBookingDuration(treatment.duration || 30)));
           if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
             setCustomVisitTreatmentName("");
           } else if (!customVisitTreatmentName.trim()) {

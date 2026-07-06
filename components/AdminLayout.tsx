@@ -19,6 +19,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
 import { PatientProfileDraftRedirect } from "./PatientProfileDraftRedirect";
+import { MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH } from "@/lib/management-routes";
 
 export interface AdminLayoutTheme {
   sidebar: string;
@@ -55,8 +56,6 @@ const navItems = [
   { path: "/notifications", label: "Notifications", icon: Bell },
   { path: "/settings", label: "Settings", icon: Settings },
 ];
-
-const MANAGEMENT_LOGOUT_REDIRECT_KEY = "villahermosa-management-logout-redirect";
 
 interface AdminLayoutShellProps {
   children: React.ReactNode;
@@ -164,15 +163,14 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   const handleLogout = async () => {
     try {
-      const logoutRedirect = user?.role === "receptionist" ? "/receptionist/login" : "/admin/login";
       try {
-        sessionStorage.setItem(MANAGEMENT_LOGOUT_REDIRECT_KEY, logoutRedirect);
+        sessionStorage.setItem(MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH);
       } catch {
         // Ignore storage failures; the explicit router push below still handles normal logout.
       }
       await logout();
       toast.success("Logged out successfully");
-      router.push(logoutRedirect);
+      router.push(STAFF_PORTAL_LOGIN_PATH);
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout");

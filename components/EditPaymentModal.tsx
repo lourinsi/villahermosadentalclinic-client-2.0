@@ -468,8 +468,12 @@ export function EditPaymentModal() {
       }
       toast.success("Payment updated successfully");
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("payments:updated"));
-        window.dispatchEvent(new CustomEvent("appointments:updated"));
+        window.dispatchEvent(new CustomEvent("payments:updated", {
+          detail: { appointmentId: selectedAppointment || currentAppointmentId, paymentId: paymentRecordId, payment: json?.data },
+        }));
+        window.dispatchEvent(new CustomEvent("appointments:updated", {
+          detail: { appointmentId: selectedAppointment || currentAppointmentId },
+        }));
       }
       refreshPatients();
       clearCompletedEditPaymentDraft();

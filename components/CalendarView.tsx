@@ -80,6 +80,16 @@ const getViewModeStatusLabel = (mode: ViewMode) => {
   return "Calendar View";
 };
 
+const isSoftDeletedAppointment = (appointment: Partial<Appointment>) =>
+  Boolean(appointment.deleted) ||
+  Boolean((appointment as any).deletedAt) ||
+  normalizeAppointmentStatus(String(appointment.status || "")) === "deleted";
+
+const getCalendarAppointmentStatus = (appointment: Partial<Appointment>) =>
+  isSoftDeletedAppointment(appointment)
+    ? "deleted"
+    : normalizeAppointmentStatus(String(appointment.status || ""));
+
 const pickImageSource = (...sources: unknown[]) => {
   for (const source of sources) {
     if (typeof source !== "string") continue;
@@ -360,8 +370,8 @@ export function CalendarView({
     }
     
     let filtered = displayedAppointments
-      .map((a) => ({ ...a, status: normalizeAppointmentStatus(a.status) }))
-      .filter((a) => canSeeDeletedAppointments || a.status !== "deleted")
+      .map((a) => ({ ...a, status: getCalendarAppointmentStatus(a) }))
+      .filter((a) => canSeeDeletedAppointments || !isSoftDeletedAppointment(a))
       .filter((a) => a.status !== 'cancelled')
       .filter((a) => statusesToFilter.map(normalizeAppointmentStatus).includes(a.status));
     

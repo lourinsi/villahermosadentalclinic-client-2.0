@@ -102,7 +102,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     try {
       await logout();
       toast.success("Logged out successfully");
-      router.push("/login");
+      router.push("/");
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout");

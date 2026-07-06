@@ -2,6 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { getPaymentStatusOptionWithColors, normalizePaymentStatus } from "@/lib/status-colors";
 import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ConfirmDialog from "./ConfirmDialog";
@@ -80,7 +81,8 @@ import {
   Menu,
   Search,
   ShieldCheck,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -552,6 +554,13 @@ export interface RecentTransaction {
   patientName?: string;
   paymentId?: string;
   paymentRecordId?: string;
+  currentAppointmentBalance?: number;
+  currentAppointmentTotalPaid?: number;
+  currentAppointmentPrice?: number;
+  currentAppointmentDiscount?: number;
+  currentPaymentStatus?: string;
+  deleted?: boolean;
+  deletedAt?: string | null;
 }
 
 type TransactionLedgerMode = "all" | "patients" | "doctors";
@@ -690,17 +699,76 @@ const getFinanceAppointmentType = (transaction: RecentTransaction) => {
   );
 };
 
+const PAYMENT_BALANCE_EPSILON = 0.01;
+const PAYMENT_TRANSACTION_STATUS_VALUES = new Set(["paid", "half-paid", "over-paid", "unpaid", "overdue"]);
+const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
+const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
+
+const toFinitePaymentNumber = (value: unknown): number | undefined => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
+const getFinancePaymentStatusValue = (transaction: RecentTransaction) => {
+  const balance = toFinitePaymentNumber(transaction.currentAppointmentBalance);
+  const price = toFinitePaymentNumber(transaction.currentAppointmentPrice) ?? 0;
+  const discount = toFinitePaymentNumber(transaction.currentAppointmentDiscount) ?? 0;
+  const totalPaid = toFinitePaymentNumber(transaction.currentAppointmentTotalPaid);
+  const totalDue = Math.max(0, price - discount);
+  const computedBalance = totalPaid !== undefined ? totalDue - totalPaid : undefined;
+  const effectiveBalance = balance ?? computedBalance;
+  const hasOverpayment = totalPaid !== undefined && totalPaid - totalDue > PAYMENT_BALANCE_EPSILON;
+
+  if (hasOverpayment || (effectiveBalance !== undefined && effectiveBalance < -PAYMENT_BALANCE_EPSILON)) {
+    return "over-paid";
+  }
+
+  if (effectiveBalance !== undefined) {
+    return effectiveBalance <= PAYMENT_BALANCE_EPSILON ? "paid" : "half-paid";
+  }
+
+  const normalizedFallback = normalizePaymentStatus(transaction.currentPaymentStatus);
+  return PAYMENT_TRANSACTION_STATUS_VALUES.has(normalizedFallback) ? normalizedFallback : "paid";
+};
+
+const getFinancePaymentStatusDisplay = (transaction: RecentTransaction) => {
+  if (isSoftDeletedPaymentTransaction(transaction)) {
+    return {
+      label: "Deleted",
+      status: "deleted",
+      className: deletedPaymentBadgeClass,
+    };
+  }
+
+  const status = getFinancePaymentStatusValue(transaction);
+  const statusOption = getPaymentStatusOptionWithColors(status);
+
+  return {
+    label: statusOption.label || "Paid",
+    status: normalizePaymentStatus(statusOption.value) || status,
+    className: `${statusOption.bgColor} ${statusOption.textColor} border-transparent`,
+  };
+};
+
+const isSoftDeletedPaymentTransaction = (transaction?: Partial<RecentTransaction> | null) =>
+  Boolean(transaction?.deleted) || Boolean(transaction?.deletedAt);
+
+const isCountableIncomeTransaction = (transaction: RecentTransaction) =>
+  transaction.type === "income" && !isSoftDeletedPaymentTransaction(transaction);
+
 export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { openEditPaymentModal } = usePaymentModal();
   const canManageExpenseStatus = normalizeFilterValue(effectiveRole) === "admin";
+  const canSeeDeletedPayments = normalizeFilterValue(effectiveRole) !== "receptionist";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<RecentTransaction | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
@@ -750,6 +818,7 @@ export function FinanceView() {
   const [isSavingExpense, setIsSavingExpense] = useState(false);
   const [isSavingExpensePayment, setIsSavingExpensePayment] = useState(false);
   const [isDeletingExpense, setIsDeletingExpense] = useState(false);
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
   const [isSavingInventory, setIsSavingInventory] = useState(false);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
   const [isSavingPayroll, setIsSavingPayroll] = useState(false);
@@ -937,6 +1006,7 @@ export function FinanceView() {
         const appointmentType = getFinanceAppointmentType(transaction);
         const isAppointmentPayment = isFinanceAppointmentPaymentTransaction(transaction);
 
+        if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(transaction)) return false;
         if (transactionLedgerMode !== "all" && !isAppointmentPayment) return false;
         if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
         if (startDate && reportingDate < startDate) return false;
@@ -987,6 +1057,7 @@ export function FinanceView() {
         return transactionDateSortDirection === "asc" ? keyDiff : -keyDiff;
       })
   ), [
+    canSeeDeletedPayments,
     detailedExpenseById,
     endDate,
     recentTransactions,
@@ -1002,9 +1073,9 @@ export function FinanceView() {
       (summary, transaction) => {
         const amount = Math.abs(Number(transaction.amount) || 0);
 
-        if (transaction.type === "income") {
+        if (isCountableIncomeTransaction(transaction)) {
           summary.income += amount;
-        } else {
+        } else if (transaction.type !== "income") {
           summary.expenses += amount;
         }
 
@@ -1159,7 +1230,7 @@ export function FinanceView() {
   const metricPeriodRange = useMemo(() => getMetricPeriodRange(metricPeriod), [metricPeriod]);
   const metricRevenue = useMemo(() => (
     recentTransactions
-      .filter((transaction) => transaction.type === "income" && isDateWithinRange(getTransactionReportingDate(transaction), metricPeriodRange))
+      .filter((transaction) => isCountableIncomeTransaction(transaction) && isDateWithinRange(getTransactionReportingDate(transaction), metricPeriodRange))
       .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
   ), [metricPeriodRange, recentTransactions]);
   const metricExpenses = useMemo(() => (
@@ -1410,7 +1481,7 @@ export function FinanceView() {
 
   const handleGenerateInvoices = () => {
     const invoiceRows = recentTransactions
-      .filter((transaction) => transaction.type === "income")
+      .filter(isCountableIncomeTransaction)
       .map((transaction) => ({
         Date: getTransactionReportingDate(transaction),
         Description: transaction.description,
@@ -2014,7 +2085,7 @@ export function FinanceView() {
     getAppointmentIdFromDescription(transaction.description);
 
   const isEditablePaymentTransaction = (transaction: RecentTransaction) =>
-    Boolean(getEditablePaymentId(transaction));
+    !isSoftDeletedPaymentTransaction(transaction) && Boolean(getEditablePaymentId(transaction));
 
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
     transaction.type === "income" &&
@@ -2027,6 +2098,8 @@ export function FinanceView() {
     );
 
   const getEditablePaymentId = (transaction: RecentTransaction) => {
+    if (isSoftDeletedPaymentTransaction(transaction)) return "";
+
     const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
     if (explicitPaymentId) return String(explicitPaymentId).trim();
 
@@ -2041,7 +2114,21 @@ export function FinanceView() {
     return "";
   };
 
+  const getRestorablePaymentId = (transaction: RecentTransaction) => {
+    const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
+    if (explicitPaymentId) return String(explicitPaymentId).trim();
+
+    const id = String(transaction.id || "").trim();
+    if (id.startsWith("pay_") || transaction.source === "payment") return id;
+
+    return "";
+  };
+
   const getPaymentEditUnavailableMessage = (transaction: RecentTransaction) => {
+    if (isSoftDeletedPaymentTransaction(transaction)) {
+      return "This payment has been deleted.";
+    }
+
     if (transaction.source === "appointment-log") {
       return "Could not connect this payment log to an editable payment record.";
     }
@@ -2068,6 +2155,73 @@ export function FinanceView() {
       null;
 
     openEditPaymentModal(paymentId, transaction as any, paymentPatientId);
+  };
+
+  const handleRequestDeletePaymentTransaction = (transaction: RecentTransaction) => {
+    const paymentId = getEditablePaymentId(transaction);
+
+    if (!paymentId) {
+      toast.error(getPaymentEditUnavailableMessage(transaction));
+      return;
+    }
+
+    setPaymentToDelete(transaction);
+  };
+
+  const handleDeletePaymentTransaction = async () => {
+    if (!paymentToDelete) return;
+
+    const paymentId = getEditablePaymentId(paymentToDelete);
+    if (!paymentId) {
+      toast.error(getPaymentEditUnavailableMessage(paymentToDelete));
+      setPaymentToDelete(null);
+      return;
+    }
+
+    setIsDeletingPayment(true);
+    try {
+      await fetchApiData<null>(
+        `/api/payments/${encodeURIComponent(paymentId)}`,
+        "payment deletion",
+        { method: "DELETE" }
+      );
+
+      toast.success("Payment deleted");
+      setPaymentToDelete(null);
+      await fetchData();
+    } catch (error) {
+      console.error("Error deleting payment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete payment");
+    } finally {
+      setIsDeletingPayment(false);
+    }
+  };
+
+  const handleRestorePaymentTransaction = async (transaction: RecentTransaction) => {
+    if (!canManageExpenseStatus) {
+      toast.error("Only admins can restore deleted payments");
+      return;
+    }
+
+    const paymentId = getRestorablePaymentId(transaction);
+    if (!paymentId) {
+      toast.error("Could not find the payment record to restore.");
+      return;
+    }
+
+    try {
+      await fetchApiData(
+        `/api/payments/${encodeURIComponent(paymentId)}/restore`,
+        "payment restoration",
+        { method: "POST" }
+      );
+
+      toast.success("Payment restored");
+      await fetchData();
+    } catch (error) {
+      console.error("Error restoring payment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to restore payment");
+    }
   };
 
   const findExpenseForTransaction = (
@@ -2330,9 +2484,12 @@ export function FinanceView() {
                 const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
                 const paymentDate = getFinanceTransactionSortDate(payment);
                 const canEditPayment = isEditablePaymentTransaction(payment);
+                const paymentStatusDisplay = getFinancePaymentStatusDisplay(payment);
+                const isDeletedPayment = isSoftDeletedPaymentTransaction(payment);
+                const restorablePaymentId = getRestorablePaymentId(payment);
 
                 return (
-                  <div key={payment.id || payment.transactionId} className="flex flex-col gap-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div key={payment.id || payment.transactionId} className={`flex flex-col gap-3 rounded-lg border border-slate-100 p-3 sm:flex-row sm:items-center sm:justify-between ${isDeletedPayment ? deletedPaymentRowClass : "bg-slate-50/70"}`}>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-semibold text-slate-600">
                         <span>Payment Date: {formatFinanceDate(paymentDate)}</span>
@@ -2344,7 +2501,12 @@ export function FinanceView() {
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
-                      <div className="text-xl font-black text-emerald-600">{formatCurrency(Math.abs(payment.amount))}</div>
+                      <div className="text-right">
+                        <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatCurrency(Math.abs(payment.amount))}</div>
+                        <Badge variant="outline" className={`mt-1 rounded-md px-2.5 py-0.5 text-xs font-bold ${paymentStatusDisplay.className}`}>
+                          {paymentStatusDisplay.label}
+                        </Badge>
+                      </div>
                       <Button
                         variant="outline"
                         size="icon"
@@ -2356,16 +2518,41 @@ export function FinanceView() {
                         <Eye className="h-4 w-4" />
                         <span className="sr-only">View transaction details</span>
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className={`h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-700 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
-                        title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(payment)}
-                        onClick={() => handleEditPaymentTransaction(payment)}
-                      >
-                        <Edit className="h-4 w-4" />
-                        <span className="sr-only">Edit Payment</span>
-                      </Button>
+                      {!isDeletedPayment ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={`h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-700 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
+                            title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(payment)}
+                            onClick={() => handleEditPaymentTransaction(payment)}
+                          >
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit Payment</span>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={`h-10 w-10 rounded-lg border-slate-200 bg-white text-red-600 shadow-sm hover:border-red-200 hover:bg-red-50 hover:text-red-700 ${canEditPayment ? "" : "opacity-60"}`}
+                            title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(payment)}
+                            onClick={() => handleRequestDeletePaymentTransaction(payment)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span className="sr-only">Delete Payment</span>
+                          </Button>
+                        </>
+                      ) : canManageExpenseStatus && restorablePaymentId ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-10 rounded-lg border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 shadow-sm hover:bg-emerald-50"
+                          title="Restore payment"
+                          onClick={() => handleRestorePaymentTransaction(payment)}
+                        >
+                          <RotateCcw className="mr-1.5 h-4 w-4" />
+                          Restore
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -3301,11 +3488,14 @@ export function FinanceView() {
                       const canViewAppointmentSnapshot = Boolean(appointmentId || transaction.appointmentSnapshot);
                       const canEditPayment = isEditablePaymentTransaction(transaction);
                       const shouldShowPaymentEdit = isPaymentTransactionRow(transaction);
+                      const paymentStatusDisplay = shouldShowPaymentEdit ? getFinancePaymentStatusDisplay(transaction) : null;
+                      const isDeletedPayment = isSoftDeletedPaymentTransaction(transaction);
+                      const restorablePaymentId = getRestorablePaymentId(transaction);
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
                       const statusLabel = transaction.type === "income"
-                        ? "Paid"
+                        ? paymentStatusDisplay?.label || "Paid"
                         : formatOptionLabel(expenseForTransaction?.status || transaction.type, EXPENSE_STATUS_OPTIONS);
                       const amountPrefix = transaction.type === "income" ? "+" : "-";
 
@@ -3322,8 +3512,8 @@ export function FinanceView() {
 
                       return (
                         <div key={transaction.id} className="relative">
-                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${transaction.type === "income" ? "bg-violet-600 shadow-violet-200" : "bg-red-500 shadow-red-100"}`} />
-                          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5">
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedPayment ? "bg-gray-400 shadow-gray-100" : transaction.type === "income" ? "bg-violet-600 shadow-violet-200" : "bg-red-500 shadow-red-100"}`} />
+                          <div className={`rounded-lg border border-slate-200 p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedPayment ? deletedPaymentRowClass : "bg-white"}`}>
                             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                               <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                                 <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -3336,7 +3526,7 @@ export function FinanceView() {
                                   </div>
                                 </div>
                                 <div className="min-w-0">
-                                  <h4 className="truncate text-lg font-black text-slate-950">{transaction.description}</h4>
+                                  <h4 className={`truncate text-lg font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-950"}`}>{transaction.description}</h4>
                                   <p className="mt-1 truncate text-base font-medium text-slate-500">
                                     {transaction.type === "income" ? "Income transaction" : "Expense transaction"}
                                   </p>
@@ -3373,16 +3563,24 @@ export function FinanceView() {
 
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
-                                  <div className={`text-2xl font-black ${transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
+                                  <div className={`text-2xl font-black ${isDeletedPayment ? "text-gray-600" : transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
                                     {amountPrefix}{formatCurrency(Math.abs(transaction.amount))}
                                   </div>
                                   <div className="mt-2">
                                     <Badge
                                       variant="outline"
-                                      className={`rounded-md px-3 py-1 text-sm font-bold ${transaction.type === "income" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-red-100 bg-red-50 text-red-700"}`}
+                                      className={`rounded-md px-3 py-1 text-sm font-bold ${paymentStatusDisplay ? paymentStatusDisplay.className : transaction.type === "income" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-red-100 bg-red-50 text-red-700"}`}
                                     >
                                       {statusLabel}
-                                      {transaction.type === "income" ? <CheckCircle2 className="ml-1.5 h-3.5 w-3.5" /> : null}
+                                      {paymentStatusDisplay?.status === "deleted" ? (
+                                        <X className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : paymentStatusDisplay?.status === "over-paid" ? (
+                                        <AlertTriangle className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : paymentStatusDisplay?.status === "half-paid" ? (
+                                        <Clock className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : transaction.type === "income" ? (
+                                        <CheckCircle2 className="ml-1.5 h-3.5 w-3.5" />
+                                      ) : null}
                                     </Badge>
                                   </div>
                                 </div>
@@ -3404,7 +3602,7 @@ export function FinanceView() {
                                     <Eye className="h-5 w-5" />
                                     <span className="sr-only">View transaction details</span>
                                   </Button>
-                                  {shouldShowPaymentEdit && (
+                                  {shouldShowPaymentEdit && !isDeletedPayment && (
                                     <Button
                                       variant="outline"
                                       size="icon"
@@ -3414,6 +3612,29 @@ export function FinanceView() {
                                     >
                                       <Edit className="h-5 w-5" />
                                       <span className="sr-only">Edit Payment</span>
+                                    </Button>
+                                  )}
+                                  {shouldShowPaymentEdit && !isDeletedPayment && (
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700 ${canEditPayment ? "" : "opacity-60"}`}
+                                      title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(transaction)}
+                                      onClick={() => handleRequestDeletePaymentTransaction(transaction)}
+                                    >
+                                      <Trash2 className="h-5 w-5" />
+                                      <span className="sr-only">Delete Payment</span>
+                                    </Button>
+                                  )}
+                                  {shouldShowPaymentEdit && isDeletedPayment && canManageExpenseStatus && restorablePaymentId && (
+                                    <Button
+                                      variant="outline"
+                                      className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
+                                      title="Restore payment"
+                                      onClick={() => handleRestorePaymentTransaction(transaction)}
+                                    >
+                                      <RotateCcw className="mr-2 h-5 w-5" />
+                                      Restore
                                     </Button>
                                   )}
                                 </div>
@@ -3475,6 +3696,15 @@ export function FinanceView() {
         confirmLabel="Delete"
         loading={isDeletingExpense}
         onConfirm={handleDeleteExpense}
+      />
+      <ConfirmDialog
+        open={Boolean(paymentToDelete)}
+        onOpenChange={(open) => !open && setPaymentToDelete(null)}
+        title="Delete Payment"
+        message="This will soft-delete the payment and update the appointment balance."
+        confirmLabel="Delete"
+        loading={isDeletingPayment}
+        onConfirm={handleDeletePaymentTransaction}
       />
       <FinanceInventoryModal
         open={Boolean(inventoryModalMode)}

@@ -150,6 +150,7 @@ export function PatientPaymentModal() {
         const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? getNonClinicPaymentStatus(selectedAppointment.paymentStatus) : 'paid');
         // Map to internal appointment status: full paid -> scheduled, partial -> reserved
         const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        window.dispatchEvent(new CustomEvent('payments:updated', { detail: { appointmentId, payment: json.data } }));
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);
       } catch (e) {
@@ -217,6 +218,7 @@ export function PatientPaymentModal() {
         const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
         const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? getNonClinicPaymentStatus(selectedAppointment.paymentStatus) : 'paid');
         const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        window.dispatchEvent(new CustomEvent('payments:updated', { detail: { appointmentId, payment: json.data } }));
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);
       } catch (e) {

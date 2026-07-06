@@ -165,32 +165,6 @@ export default function DoctorLoginPage() {
               )}
             </Button>
 
-            {/* Divider */}
-            <div className="flex items-center my-6">
-              <div className="flex-1 border-t border-gray-300"></div>
-              <span className="px-3 text-xs text-gray-500">OR</span>
-              <div className="flex-1 border-t border-gray-300"></div>
-            </div>
-
-            {/* Other Login Links */}
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
-              <p className="text-xs font-semibold text-gray-700">Other Portals:</p>
-              <div className="flex gap-2 flex-wrap">
-                <Link
-                  href="/login"
-                  className="flex-1 text-center text-xs text-green-600 hover:text-green-700 font-medium py-2 rounded hover:bg-green-50 transition-colors"
-                >
-                  Patient Login
-                </Link>
-                <Link
-                  href="/admin/login"
-                  className="flex-1 text-center text-xs text-blue-600 hover:text-blue-700 font-medium py-2 rounded hover:bg-blue-50 transition-colors"
-                >
-                  Admin Login
-                </Link>
-              </div>
-            </div>
-
             {/* Demo Credentials */}
             <div className="mt-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
               <p className="text-xs font-semibold text-purple-900 mb-2">Demo Credentials:</p>

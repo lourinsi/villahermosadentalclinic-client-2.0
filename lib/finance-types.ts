@@ -41,6 +41,10 @@ export interface RecentTransaction {
   appointmentDate?: string;
   doctor?: string;
   transactionId?: string;
+  paymentId?: string;
+  paymentRecordId?: string;
   notes?: string;
   status?: string;
+  deleted?: boolean;
+  deletedAt?: string | Date | null;
 }

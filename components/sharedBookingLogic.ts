@@ -1120,7 +1120,11 @@ export function getBookingCancellationConfig({
   const existingStatus = normalizeAppointmentStatus(appointmentToEdit?.status || "");
   const currentStatus = selectedStatus || existingStatus;
   const isCancelled = currentStatus === "cancelled" || existingStatus === "cancelled";
-  const isDeleted = currentStatus === "deleted" || existingStatus === "deleted";
+  const isDeleted =
+    currentStatus === "deleted" ||
+    existingStatus === "deleted" ||
+    Boolean(appointmentToEdit?.deletedAt) ||
+    appointmentToEdit?.deleted === true;
 
   return {
     isCancelled,
@@ -1360,9 +1364,10 @@ export function getProjectedPaymentStatus({
   const safePreviouslyPaidAmount = Number.isFinite(previouslyPaidAmount) ? Math.max(0, previouslyPaidAmount) : 0;
   const safeTotalPrice = Number.isFinite(totalPrice) ? Math.max(0, totalPrice) : 0;
   const newTotalPaid = safeAmountPaid > 0 ? safePreviouslyPaidAmount + safeAmountPaid : safePreviouslyPaidAmount;
-  const newBalance = Math.max(0, safeTotalPrice - newTotalPaid);
+  const newBalance = safeTotalPrice - newTotalPaid;
 
-  if (newBalance <= 0) return 'paid';
+  if (newBalance < -0.01) return 'over-paid';
+  if (newBalance <= 0.01) return 'paid';
   if (newTotalPaid > 0) return 'half-paid';
 
   return 'unpaid';
