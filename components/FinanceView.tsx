@@ -664,12 +664,33 @@ const getFinanceTransactionAppointmentId = (transaction: RecentTransaction) =>
     ""
   ).trim();
 
+const isPaymentLogLikeTransaction = (transaction?: Partial<RecentTransaction> | null) => {
+  const source = String(transaction?.source || "").trim().toLowerCase();
+  if (source === "payment-log" || source === "appointment-log") return true;
+  if (/\bpay_log_[A-Za-z0-9_-]+/.test(String(transaction?.description || ""))) return true;
+
+  return [
+    transaction?.id,
+    transaction?.transactionId,
+    transaction?.paymentId,
+    transaction?.paymentRecordId,
+  ].some((value) => {
+    const id = String(value || "").trim();
+    return (
+      id.startsWith("pay_log_") ||
+      id.startsWith("payment-log-") ||
+      id.startsWith("appointment-log-") ||
+      id.startsWith("apt_log_")
+    );
+  });
+};
+
 const isFinanceAppointmentPaymentTransaction = (transaction: RecentTransaction) =>
   transaction.type === "income" &&
   Number(transaction.amount || 0) > 0 &&
+  !isPaymentLogLikeTransaction(transaction) &&
   (
     transaction.source === "payment" ||
-    transaction.source === "appointment-log" ||
     Boolean(getFinanceTransactionAppointmentId(transaction)) ||
     Boolean(transaction.appointmentSnapshot)
   );
@@ -864,11 +885,12 @@ export function FinanceView() {
       setDetailedExpenses(detailedExpensesData || []);
       setInventoryData(inventoryData || []);
       setPayrollData(PAYROLL_DISABLED ? [] : payrollData || []);
-      setRecentTransactions(transactionsData || []);
+      const transactionRows = (transactionsData || []).filter((transaction) => !isPaymentLogLikeTransaction(transaction));
+      setRecentTransactions(transactionRows);
 
       // Load patient images for any transactions that reference a patient
       try {
-        const txs = transactionsData || [];
+        const txs = transactionRows;
         const patientIds = new Set<string>();
         txs.forEach((t: RecentTransaction) => {
           const snap = t.appointmentSnapshot;
@@ -1009,6 +1031,7 @@ export function FinanceView() {
         const appointmentType = getFinanceAppointmentType(transaction);
         const isAppointmentPayment = isFinanceAppointmentPaymentTransaction(transaction);
 
+        if (isPaymentLogLikeTransaction(transaction)) return false;
         if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(transaction)) return false;
         if (transactionLedgerMode !== "all" && !isAppointmentPayment) return false;
         if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
@@ -2093,22 +2116,19 @@ export function FinanceView() {
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
     transaction.type === "income" &&
     Number(transaction.amount || 0) > 0 &&
+    !isPaymentLogLikeTransaction(transaction) &&
     (
       transaction.source === "payment" ||
-      transaction.source === "appointment-log" ||
       Boolean(getTransactionAppointmentId(transaction)) ||
       /payment/i.test(`${transaction.description || ""} ${transaction.method || ""}`)
     );
 
   const getEditablePaymentId = (transaction: RecentTransaction) => {
+    if (isPaymentLogLikeTransaction(transaction)) return "";
     if (isSoftDeletedPaymentTransaction(transaction)) return "";
 
     const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
     if (explicitPaymentId) return String(explicitPaymentId).trim();
-
-    if (transaction.source === "appointment-log" && String(transaction.id || "").startsWith("apt_log_")) {
-      return String(transaction.id).trim();
-    }
 
     if (transaction.source === "payment" && transaction.id) {
       return String(transaction.id).trim();
@@ -2118,6 +2138,8 @@ export function FinanceView() {
   };
 
   const getRestorablePaymentId = (transaction: RecentTransaction) => {
+    if (isPaymentLogLikeTransaction(transaction)) return "";
+
     const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
     if (explicitPaymentId) return String(explicitPaymentId).trim();
 
@@ -2132,7 +2154,7 @@ export function FinanceView() {
       return "This payment has been deleted.";
     }
 
-    if (transaction.source === "appointment-log") {
+    if (isPaymentLogLikeTransaction(transaction)) {
       return "Could not connect this payment log to an editable payment record.";
     }
 
@@ -2340,10 +2362,11 @@ export function FinanceView() {
       if (!appointmentId && !transactionToView.appointmentSnapshot) {
         const recentTransactionsPath = `/api/finance/recent-transactions?limit=500${canSeeDeletedPayments ? "&includeDeleted=true" : ""}`;
         const refreshedTransactions = await fetchApiData<RecentTransaction[]>(recentTransactionsPath, "recent transactions");
-        setRecentTransactions(refreshedTransactions || []);
+        const refreshedRows = (refreshedTransactions || []).filter((item) => !isPaymentLogLikeTransaction(item));
+        setRecentTransactions(refreshedRows);
 
         transactionToView =
-          (refreshedTransactions || []).find((item) => String(item.id) === String(transaction.id)) ||
+          refreshedRows.find((item) => String(item.id) === String(transaction.id)) ||
           transactionToView;
         appointmentId = getTransactionAppointmentId(transactionToView);
       }

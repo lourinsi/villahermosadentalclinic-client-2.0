@@ -939,36 +939,27 @@ type PaymentRow = RecentTransaction & {
   deletedAt?: string | Date | null;
 };
 
-type PaymentLogRow = {
-  id?: string;
-  appointmentId?: string;
-  amount?: number;
-  paymentMethod?: string;
-  paymentStatus?: string;
-  changedBy?: string;
-  changedByName?: string;
-  changedAt?: string | Date;
-  createdAt?: string | Date;
-  previousBalance?: number;
-  newBalance?: number;
-};
+const isPaymentLogLikeRow = (row?: Partial<RecentTransaction> | Record<string, any> | null) => {
+  const source = String((row as any)?.source || "").trim().toLowerCase();
+  if (source === "payment-log" || source === "appointment-log") return true;
 
-type AppointmentLogRow = {
-  id?: string;
-  appointmentId?: string;
-  previousState?: any;
-  newState?: any;
-  changedBy?: string;
-  changedByName?: string;
-  changedAt?: string | Date;
-  changeType?: string;
-  amount?: number;
-  notes?: string;
+  return [
+    (row as any)?.id,
+    (row as any)?.transactionId,
+    (row as any)?.paymentId,
+    (row as any)?.paymentRecordId,
+  ].some((value) => {
+    const id = String(value || "").trim();
+    return (
+      id.startsWith("pay_log_") ||
+      id.startsWith("payment-log-") ||
+      id.startsWith("appointment-log-") ||
+      id.startsWith("apt_log_")
+    );
+  });
 };
-
 const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
-const isStoredPaymentLogRow = (txn: RecentTransaction) =>
-  String((txn as any).source || "") === "payment-log" || String(txn.id || "").startsWith("payment-log-");
+const isStoredPaymentLogRow = (txn: RecentTransaction) => isPaymentLogLikeRow(txn);
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
 const isSoftDeletedPaymentTransaction = (txn?: Partial<RecentTransaction> | null) =>
   Boolean((txn as any)?.deleted) || Boolean((txn as any)?.deletedAt);
@@ -979,15 +970,11 @@ const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAp
   Boolean((appointment as any)?.deletedAt) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
 const getEditablePaymentId = (txn: RecentTransaction) => {
+  if (isStoredPaymentLogRow(txn)) return "";
   if (isSoftDeletedPaymentTransaction(txn)) return "";
 
   const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
   if (explicitPaymentId) return String(explicitPaymentId).trim();
-
-  if (isStoredPaymentLogRow(txn)) {
-    const paymentLogId = String(txn.transactionId || txn.id || "").replace(/^payment-log-/, "").trim();
-    return paymentLogId.startsWith("pay_log_") ? paymentLogId : "";
-  }
 
   if (String((txn as any).source || "") === "payment" && txn.id && !isReadOnlyPaymentRow(txn)) {
     return String(txn.id).trim();
@@ -997,6 +984,8 @@ const getEditablePaymentId = (txn: RecentTransaction) => {
 };
 
 const getRestorablePaymentId = (txn: RecentTransaction) => {
+  if (isStoredPaymentLogRow(txn)) return "";
+
   const explicitPaymentId = (txn as any).paymentId || (txn as any).paymentRecordId;
   if (explicitPaymentId) return String(explicitPaymentId).trim();
 
@@ -1119,60 +1108,8 @@ const parsePaymentTimestamp = (value?: string | Date) => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
-const getPaymentEventTimestamps = (txn: RecentTransaction) => {
-  const row = txn as PaymentRow;
-
-  return [txn.date, row.createdAt, row.updatedAt]
-    .map(parsePaymentTimestamp)
-    .filter((timestamp, index, timestamps) => timestamp > 0 && timestamps.indexOf(timestamp) === index);
-};
-
-const getPaymentEventDateKey = (txn: RecentTransaction) => {
-  const row = txn as PaymentRow;
-
-  return toDateOnly(txn.date) || toDateOnly(row.createdAt) || toDateOnly(row.updatedAt);
-};
-
 const getPaymentSortDateValue = (txn: RecentTransaction) =>
   String((txn as any).paymentDate || txn.date || "");
-
-const hasClosePaymentTimestamp = (a: RecentTransaction, b: RecentTransaction) =>
-  getPaymentEventTimestamps(a).some((aTime) =>
-    getPaymentEventTimestamps(b).some((bTime) => Math.abs(aTime - bTime) <= 10_000)
-  );
-
-const isSamePaymentEvent = (a: RecentTransaction, b: RecentTransaction) => {
-  if (!a.appointmentId || !b.appointmentId) return false;
-  if (String(a.appointmentId) !== String(b.appointmentId)) return false;
-
-  const aSource = String((a as any).source || "");
-  const bSource = String((b as any).source || "");
-  const hasCollectionPayment = aSource === "payment" || bSource === "payment";
-  const hasPaymentLog = aSource === "payment-log" || bSource === "payment-log";
-  const hasCloseTimestamp = hasClosePaymentTimestamp(a, b);
-
-  if (hasCollectionPayment && hasPaymentLog && hasCloseTimestamp) return true;
-
-  if (Math.abs(Number(a.amount || 0) - Number(b.amount || 0)) > 0.01) return false;
-  if (hasCloseTimestamp) return true;
-
-  return getPaymentEventDateKey(a) === getPaymentEventDateKey(b);
-};
-
-const findMatchingAppointmentPaymentLog = (paymentLog: PaymentLogRow, appointmentLogs: AppointmentLogRow[]) => {
-  const paymentAmount = Number(paymentLog.amount || 0);
-  const paymentTime = parsePaymentTimestamp(paymentLog.changedAt);
-
-  return appointmentLogs.find((appointmentLog) => {
-    if (String(appointmentLog.appointmentId || "") !== String(paymentLog.appointmentId || "")) return false;
-    if (Math.abs(Number(appointmentLog.amount || 0) - paymentAmount) > 0.01) return false;
-
-    const appointmentLogTime = parsePaymentTimestamp(appointmentLog.changedAt);
-    if (paymentTime && appointmentLogTime) return Math.abs(paymentTime - appointmentLogTime) <= 10_000;
-
-    return toDateOnly(appointmentLog.changedAt) === toDateOnly(paymentLog.changedAt);
-  });
-};
 
 const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
   const paymentDateDiff = parsePaymentTimestamp(getPaymentSortDateValue(b)) - parsePaymentTimestamp(getPaymentSortDateValue(a));
@@ -1373,19 +1310,6 @@ const compareAppointmentSnapshotToCurrent = (snapshot: any, currentAppointment: 
   }
 
   return { compared, matches: compared > 0 };
-};
-
-const isLatestAppointmentLogForAppointment = (appointmentLog: AppointmentLogRow | undefined, appointmentLogs: AppointmentLogRow[]) => {
-  if (!appointmentLog) return true;
-
-  const latestLog = appointmentLogs
-    .filter((log) => String(log.appointmentId || "") === String(appointmentLog.appointmentId || ""))
-    .sort((a, b) => parsePaymentTimestamp(b.changedAt) - parsePaymentTimestamp(a.changedAt))[0];
-
-  if (!latestLog) return true;
-
-  if (appointmentLog.id && latestLog.id) return String(appointmentLog.id) === String(latestLog.id);
-  return parsePaymentTimestamp(appointmentLog.changedAt) === parsePaymentTimestamp(latestLog.changedAt);
 };
 
 const MAX_PATIENT_PHOTO_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -1914,11 +1838,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     };
   }, [getHistoryAppointmentType]);
 
-  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = [], paymentLogs: PaymentLogRow[] = [], appointmentLogs: AppointmentLogRow[] = []) => {
+  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = []) => {
     const appointmentById = new Map(history.map((apt) => [apt.id, apt]));
 
     // Normalize payments coming from the payments collection
     const paymentsFromCollection = payments
+      .filter((payment) => !isPaymentLogLikeRow(payment))
       .map((payment) => {
         const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
@@ -1979,92 +1904,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
     });
 
-    const representedRows = [...paymentsFromCollection, ...historyRows];
-    const paymentLogRows: RecentTransaction[] = paymentLogs
-      .filter((log) => Boolean(log.appointmentId) && Number(log.amount || 0) > 0)
-      .map((log) => {
-        const appointment = log.appointmentId ? appointmentById.get(log.appointmentId) : undefined;
-        const appointmentType = appointment ? getHistoryAppointmentType(appointment) : "Appointment Payment";
-        const appointmentDate = appointment ? String(appointment.date || "") : "";
-        const changedAt = log.changedAt || new Date().toISOString();
-        const matchingAppointmentLog = findMatchingAppointmentPaymentLog(log, appointmentLogs);
-        const actualPaymentDate = toDateOnly(
-          (matchingAppointmentLog?.newState as any)?.paymentDate ||
-          (matchingAppointmentLog as any)?.paymentDate
-        );
-        const recordedPaymentDate = actualPaymentDate;
-        const paymentCreatedDate = toDateOnly(log.createdAt) || toDateOnly(changedAt);
-        const paymentDisplayDate = recordedPaymentDate || paymentCreatedDate || toDateOnly(appointmentDate);
-        const appointmentSnapshotBase = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
-          ? {
-              ...(matchingAppointmentLog.newState || {}),
-              id: matchingAppointmentLog.newState?.id || log.appointmentId,
-              appointmentId: log.appointmentId,
-              logType: "payment",
-              changeType: matchingAppointmentLog.changeType || "payment",
-              previousState: matchingAppointmentLog.previousState,
-              newState: matchingAppointmentLog.newState,
-              changedAt: matchingAppointmentLog.changedAt || changedAt,
-              changedBy: matchingAppointmentLog.changedBy || log.changedBy,
-              changedByName: matchingAppointmentLog.changedByName || log.changedByName,
-              amount: Number(log.amount || 0),
-              paymentAmount: Number(log.amount || 0),
-              paymentDate: paymentDisplayDate,
-              paymentMethod: normalizeBookingPaymentMethod(log.paymentMethod),
-              paymentStatus: log.paymentStatus,
-              previousBalance: log.previousBalance,
-              newBalance: log.newBalance,
-            }
-          : undefined;
-        const snapshotComparison = appointmentSnapshotBase && appointment
-          ? compareAppointmentSnapshotToCurrent(appointmentSnapshotBase, appointment)
-          : { compared: 0, matches: false };
-        const appointmentSnapshot = appointmentSnapshotBase
-          ? {
-              ...appointmentSnapshotBase,
-              _isHistorical: snapshotComparison.compared > 0
-                ? !snapshotComparison.matches
-                : !isLatestAppointmentLogForAppointment(matchingAppointmentLog, appointmentLogs),
-            }
-          : undefined;
-
-        return {
-          id: `payment-log-${log.id || `${log.appointmentId}-${String(changedAt)}-${log.amount}`}`,
-          appointmentId: log.appointmentId,
-          appointmentType,
-          appointmentDate,
-          doctor: appointment?.doctor || "",
-          date: paymentDisplayDate,
-          paymentDate: paymentDisplayDate,
-          description: `Payment for ${appointmentType}`,
-          amount: Number(log.amount || 0),
-          type: "payment",
-          method: normalizeBookingPaymentMethod(log.paymentMethod),
-          transactionId: log.id || `LOG-${log.appointmentId}`,
-          notes: log.changedByName ? `Recorded by ${log.changedByName}` : undefined,
-          status: log.paymentStatus || "completed",
-          source: "payment-log",
-          appointmentSnapshot,
-          changedAt,
-          changedBy: log.changedBy,
-          changedByName: log.changedByName,
-          previousBalance: log.previousBalance,
-          newBalance: log.newBalance,
-          createdAt: paymentCreatedDate || changedAt,
-          updatedAt: changedAt,
-        } as RecentTransaction;
-      })
-      .filter((txn) => {
-        const key = getPaymentTransactionKey(txn);
-        if (keys.has(key)) return false;
-        if (representedRows.some((row) => isSamePaymentEvent(txn, row))) return false;
-
-        keys.add(key);
-        return true;
-      });
-
     const realAppointmentIds = new Set(
-      [...paymentsFromCollection, ...historyRows, ...paymentLogRows].map((row) => row.appointmentId).filter(Boolean)
+      [...paymentsFromCollection, ...historyRows].map((row) => row.appointmentId).filter(Boolean)
     );
 
     const legacyRows = history
@@ -2072,7 +1913,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       .map(createLegacyPaymentRow)
       .filter(Boolean) as RecentTransaction[];
 
-    return [...paymentsFromCollection, ...historyRows, ...paymentLogRows, ...legacyRows]
+    return [...paymentsFromCollection, ...historyRows, ...legacyRows]
       .filter((txn) => Number(txn.amount || 0) > 0)
       .sort(comparePaymentTransactionsDesc);
   }, [createLegacyPaymentRow, getHistoryAppointmentType]);
@@ -2865,7 +2706,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const uniquePaymentDoctors = React.useMemo(() => {
     const doctors = new Set(
       allTransactions
-        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
         .map(t => t.doctor)
         .filter(Boolean)
         .map(String)
@@ -2876,7 +2717,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const uniquePaymentMethods = React.useMemo(() => {
     const methods = new Set(
       allTransactions
-        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
         .map(t => t.method)
         .filter(Boolean)
         .map(String)
@@ -2887,7 +2728,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const uniquePaymentProcedures = React.useMemo(() => {
     const procedures = new Set(
       allTransactions
-        .filter((t) => canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t))
+        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
         .map(t => t.appointmentType)
         .filter(Boolean)
         .map(String)
@@ -2914,6 +2755,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     return allTransactions
       .filter(t => {
+        if (isPaymentLogLikeRow(t)) return false;
         if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
         if (doctorFilter && t.doctor !== doctorFilter) return false;
         if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
@@ -3320,8 +3162,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           } as Appointment;
       });
 
-      const applyTransactions = (payments: PaymentRow[] = [], paymentLogs: PaymentLogRow[] = [], appointmentLogs: AppointmentLogRow[] = []) => {
-        const normalized = buildPatientTransactions(mapped, payments, paymentLogs, appointmentLogs);
+      const applyTransactions = (payments: PaymentRow[] = []) => {
+        const normalized = buildPatientTransactions(mapped, payments);
         const paymentsByAppointment = new Map<string, RecentTransaction[]>();
 
         normalized.forEach((txn) => {
@@ -3380,7 +3222,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const controller = new AbortController();
       const loadPersistedTransactions = async () => {
         const headers = getAuthHeaders({ "Content-Type": "application/json" });
-        const appointmentIds = Array.from(new Set(mapped.map((apt) => apt.id).filter(Boolean)));
 
         const fetchPatientPayments = async (): Promise<PaymentRow[]> => {
           if (!patient?.id) return [];
@@ -3403,66 +3244,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           }
         };
 
-        const fetchAppointmentPaymentLogs = async (): Promise<PaymentLogRow[]> => {
-          if (appointmentIds.length === 0) return [];
-
-          const logSets = await Promise.all(
-            appointmentIds.map(async (appointmentId) => {
-              try {
-                const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/payments`), {
-                  headers,
-                  credentials: 'include',
-                  signal: controller.signal,
-                });
-                const json = await res.json().catch(() => null);
-
-                return res.ok && json?.success && Array.isArray(json.data) ? json.data as PaymentLogRow[] : [];
-              } catch (err) {
-                if ((err as any)?.name !== "AbortError") {
-                  console.warn(`[Payments] Failed to fetch appointment payment logs for ${appointmentId}:`, err);
-                }
-                return [];
-              }
-            })
-          );
-
-          return logSets.flat();
-        };
-
-        const fetchAppointmentLogs = async (): Promise<AppointmentLogRow[]> => {
-          if (appointmentIds.length === 0) return [];
-
-          const logSets = await Promise.all(
-            appointmentIds.map(async (appointmentId) => {
-              try {
-                const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/logs`), {
-                  headers,
-                  credentials: 'include',
-                  signal: controller.signal,
-                });
-                const json = await res.json().catch(() => null);
-
-                return res.ok && json?.success && Array.isArray(json.data) ? json.data as AppointmentLogRow[] : [];
-              } catch (err) {
-                if ((err as any)?.name !== "AbortError") {
-                  console.warn(`[Payments] Failed to fetch appointment logs for ${appointmentId}:`, err);
-                }
-                return [];
-              }
-            })
-          );
-
-          return logSets.flat();
-        };
-
-        const [payments, paymentLogs, appointmentLogs] = await Promise.all([
-          fetchPatientPayments(),
-          fetchAppointmentPaymentLogs(),
-          fetchAppointmentLogs(),
-        ]);
+        const payments = await fetchPatientPayments();
 
         if (!controller.signal.aborted) {
-          applyTransactions(payments, paymentLogs, appointmentLogs);
+          applyTransactions(payments);
         }
       };
 
@@ -3647,7 +3432,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
 
     setPdConfirmTitle("Delete Payment");
-    setPdConfirmMessage("Are you sure you want to delete this payment? This will update the appointment balance.");
+    setPdConfirmMessage("Are you sure you want to delete this payment? This will update the appointment balance. This action cannot be undone.  ");
     setPdConfirmAction(() => async () => {
       await handleDeletePayment(paymentId, txn.appointmentId || getTransactionAppointmentId(txn));
     });
@@ -4686,6 +4471,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
                     const visitTransactions = (appointment.transactions || []).filter((txn) =>
                       Number(txn.amount || 0) > 0 &&
+                      !isPaymentLogLikeRow(txn) &&
                       (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(txn))
                     );
 
