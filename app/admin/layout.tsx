@@ -10,7 +10,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const ManagementLayout = isReceptionistView ? ReceptionistLayout : AdminLayout;
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "receptionist"]}>
+    <ProtectedRoute allowedRoles={["admin", "doctor", "receptionist"]}>
       <ManagementLayout>{children}</ManagementLayout>
     </ProtectedRoute>
   );

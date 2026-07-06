@@ -5,7 +5,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <ProtectedRoute allowedRoles={["receptionist"]}>
+    <ProtectedRoute allowedRoles={["doctor", "receptionist"]}>
       <ReceptionistLayout>{children}</ReceptionistLayout>
     </ProtectedRoute>
   );

@@ -4,7 +4,7 @@ import React, { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH } from "@/lib/management-routes";
+import { MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH, isManagementRole } from "@/lib/management-routes";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -12,7 +12,7 @@ interface ProtectedRouteProps {
   loginPath?: string;
 }
 
-const MANAGEMENT_ROLES = ["admin", "receptionist"];
+const MANAGEMENT_ROLES = ["admin", "doctor", "receptionist"];
 
 const getManagementLoginRedirect = (defaultLoginPath: string) => {
   try {
@@ -41,7 +41,7 @@ export default function ProtectedRoute({ children, allowedRoles, loginPath = STA
     if (!isLoading && isAuthenticated && user) {
       const routeRoles = allowedRoles || MANAGEMENT_ROLES;
 
-      if (!routeRoles.includes(user.role)) {
+      if (!routeRoles.includes(user.role) && !(routeRoles === MANAGEMENT_ROLES && isManagementRole(user.role))) {
         router.push(loginPath);
         return;
       }
@@ -64,7 +64,7 @@ export default function ProtectedRoute({ children, allowedRoles, loginPath = STA
   }
 
   const routeRoles = allowedRoles || MANAGEMENT_ROLES;
-  if (user && !routeRoles.includes(user.role)) {
+  if (user && !routeRoles.includes(user.role) && !(routeRoles === MANAGEMENT_ROLES && isManagementRole(user.role))) {
     return null;
   }
 

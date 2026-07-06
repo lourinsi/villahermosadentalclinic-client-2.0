@@ -3,6 +3,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
@@ -39,6 +40,7 @@ import {
   normalizeBookingPaymentMethod,
   normalizeBookingHistoryStatus,
   parseLocalDateOnly,
+  findNextAvailableRepeatSlot,
 } from "./sharedBookingLogic";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
@@ -71,6 +73,45 @@ interface AppointmentHistoryViewProps {
 type SnapshotState = "historical" | "latest" | "current";
 type CurrentFieldChange = {
   title: string;
+};
+
+const REPEAT_NONE_OPTION = "do-not-repeat";
+const REPEAT_OPTIONS = [
+  { value: "next-week", label: "Next week" },
+  { value: "next-month", label: "Next month" },
+  { value: "3-months", label: "3 months from now" },
+  { value: "custom", label: "Custom date" },
+];
+
+const getRepeatTargetDate = (baseDateValue: unknown, repeatOption: string, customRepeatDate = "") => {
+  if (repeatOption === REPEAT_NONE_OPTION) return null;
+
+  const baseDate = resolveScheduleDateValue(baseDateValue);
+  if (!baseDate) return null;
+
+  const target = new Date(baseDate);
+  switch (repeatOption) {
+    case "next-week":
+      target.setDate(baseDate.getDate() + 7);
+      return target;
+    case "next-month":
+      target.setMonth(baseDate.getMonth() + 1);
+      return target;
+    case "3-months":
+      target.setMonth(baseDate.getMonth() + 3);
+      return target;
+    case "custom":
+      return customRepeatDate ? parseLocalDateOnly(customRepeatDate) : null;
+    default:
+      return null;
+  }
+};
+
+const buildRepeatScheduleNotes = (baseNotes: unknown, sourceDate: Date) => {
+  const sourceDateLabel = formatWordyDate(sourceDate);
+  const followUpNote = `Created as a repeating schedule from ${sourceDateLabel}`;
+  const trimmed = String(baseNotes || "").trim();
+  return trimmed ? `${trimmed}\n${followUpNote}` : followUpNote;
 };
 
 const resolveAppointmentTypeName = (type: unknown, customType?: string) => {
@@ -468,6 +509,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isScheduleTimePickerOpen, setIsScheduleTimePickerOpen] = useState(false);
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [selectedScheduleTime, setSelectedScheduleTime] = useState("");
+  const [isRepeatScheduleOpen, setIsRepeatScheduleOpen] = useState(false);
+  const [isSavingRepeatSchedule, setIsSavingRepeatSchedule] = useState(false);
+  const [repeatOption, setRepeatOption] = useState("next-week");
+  const [customRepeatDate, setCustomRepeatDate] = useState("");
+  const [isCustomRepeatDatePickerOpen, setIsCustomRepeatDatePickerOpen] = useState(false);
   const [isChangeTreatmentOpen, setIsChangeTreatmentOpen] = useState(false);
   const [isSavingTreatmentChange, setIsSavingTreatmentChange] = useState(false);
   const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
@@ -481,7 +527,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
   // Appointment action helpers (approve/reject) using central appointment modal hook
-  const { updateAppointment, openEditModalById } = useAppointmentModal();
+  const { addAppointment, updateAppointment, openEditModalById } = useAppointmentModal();
   const { openPaymentFor, openEditPaymentModal } = usePaymentModal();
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
@@ -513,6 +559,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setIsScheduleTimePickerOpen(false);
       setSelectedScheduleDate(null);
       setSelectedScheduleTime("");
+      setIsRepeatScheduleOpen(false);
+      setIsSavingRepeatSchedule(false);
+      setRepeatOption("next-week");
+      setCustomRepeatDate("");
+      setIsCustomRepeatDatePickerOpen(false);
       setIsChangeTreatmentOpen(false);
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
@@ -1298,6 +1349,21 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
   const selectedScheduleDuration = String(normalizeBookingDuration(displayedSnapshot?.duration || 30));
+  const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
+  const repeatTargetDate = getRepeatTargetDate(displayedSnapshot?.date, repeatOption, customRepeatDate);
+  const repeatTargetLabel = repeatTargetDate ? formatWordyDate(repeatTargetDate) : "";
+  const canRepeatSchedule = Boolean(
+    canChangeSchedule &&
+    repeatSourceDate &&
+    displayedPatientId &&
+    displayedDoctorName &&
+    String(displayedSnapshot?.time || "").trim()
+  );
+  const canSaveRepeatSchedule = Boolean(
+    canRepeatSchedule &&
+    repeatTargetDate &&
+    !isSavingRepeatSchedule
+  );
   const canSaveScheduleChange = Boolean(
     canChangeSchedule &&
     selectedScheduleDisplayDate &&
@@ -1496,6 +1562,135 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       toast.error(error instanceof Error ? error.message : "Failed to update schedule");
     } finally {
       setIsSavingScheduleChange(false);
+    }
+  };
+
+  const closeRepeatScheduleModal = (force = false) => {
+    if (isSavingRepeatSchedule && !force) return;
+
+    setIsRepeatScheduleOpen(false);
+    setIsCustomRepeatDatePickerOpen(false);
+  };
+
+  const openRepeatScheduleModal = () => {
+    if (!canChangeSchedule) {
+      toast.error("This snapshot cannot be repeated");
+      return;
+    }
+
+    if (!displayedPatientId) {
+      toast.error("No patient is assigned to this appointment");
+      return;
+    }
+
+    if (!displayedDoctorName) {
+      toast.error("Assign a doctor before repeating this schedule");
+      return;
+    }
+
+    if (!repeatSourceDate || !displayedSnapshot?.time) {
+      toast.error("This appointment does not have a complete schedule");
+      return;
+    }
+
+    setRepeatOption("next-week");
+    setCustomRepeatDate("");
+    setIsCustomRepeatDatePickerOpen(false);
+    setIsRepeatScheduleOpen(true);
+  };
+
+  const handleRepeatOptionChange = (value: string) => {
+    setRepeatOption(value);
+    setIsCustomRepeatDatePickerOpen(value === "custom");
+  };
+
+  const handleSaveRepeatSchedule = async () => {
+    if (!canSaveRepeatSchedule || !repeatSourceDate || !repeatTargetDate) {
+      toast.error("Please choose a repeat schedule");
+      return;
+    }
+
+    const sourceTime = String(displayedSnapshot?.time || "").trim();
+    const patientId = String(displayedPatientId || "").trim();
+    const doctorName = displayedDoctorName || resolveDoctorName(displayedSnapshot?.doctor || displayedSnapshot?.doctorName || "");
+    const basePrice = Number(displayedBasePrice) || 0;
+    const discountAmount = Number(displayedDiscountAmount) || 0;
+    const sourceTypeNumber =
+      typeof displayedSnapshot?.type === "number"
+        ? displayedSnapshot.type
+        : typeof displayedSnapshot?.type === "string" && displayedSnapshot.type.trim()
+          ? Number(displayedSnapshot.type)
+          : NaN;
+    const appointmentType = Number.isFinite(sourceTypeNumber) ? sourceTypeNumber : OTHER_APPOINTMENT_TYPE_INDEX;
+    const customType = appointmentType === OTHER_APPOINTMENT_TYPE_INDEX
+      ? String(displayedSnapshot?.customType || typeName || "Appointment").trim()
+      : displayedSnapshot?.customType;
+
+    setIsSavingRepeatSchedule(true);
+    try {
+      const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+        startDate: repeatTargetDate,
+        doctorToCheck: doctorName,
+        durationToCheck: selectedScheduleDuration,
+        patientToCheck: patientId,
+        timeToCheck: sourceTime,
+        availabilityMode: "authenticated",
+      });
+
+      if (!resolvedRepeatSlot) {
+        toast.error("No available repeat schedule found in the next 30 days");
+        return;
+      }
+
+      const followUpDate = resolvedRepeatSlot.date;
+      const followUpDateStr = formatDateToYYYYMMDD(followUpDate);
+      const movedFromRequestedDate = followUpDateStr !== formatDateToYYYYMMDD(repeatTargetDate);
+
+      const newAppointment = await addAppointment({
+        patientId,
+        patientName,
+        doctor: doctorName,
+        doctorId: displayedSnapshot?.doctorId,
+        doctorName,
+        date: followUpDateStr,
+        time: resolvedRepeatSlot.time || sourceTime,
+        type: appointmentType,
+        customType,
+        duration: normalizeBookingDuration(displayedSnapshot?.duration || 30),
+        price: basePrice,
+        discount: discountAmount,
+        notes: buildRepeatScheduleNotes(displayedSnapshot?.notes, repeatSourceDate),
+        treatmentNotes: displayedTreatmentNotesComparisonText || displayedSnapshot?.treatmentNotes || "",
+        toothNumbers: displayedToothNumbersText || displayedSnapshot?.toothNumbers || "",
+        serviceType: displayedSnapshot?.serviceType,
+        status: "scheduled",
+        paymentStatus: "unpaid",
+        paymentMethod: "",
+        totalPaid: 0,
+        balance: Math.max(0, basePrice - discountAmount),
+      } as any);
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: newAppointment, appointmentId: newAppointment?.id },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      if (movedFromRequestedDate) {
+        toast.success(`Repeat schedule moved to ${formatWordyDate(followUpDate)} because the requested date was unavailable.`);
+      } else {
+        toast.success("Repeat schedule created");
+      }
+
+      closeRepeatScheduleModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to repeat schedule:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to repeat schedule");
+    } finally {
+      setIsSavingRepeatSchedule(false);
     }
   };
 
@@ -1913,6 +2108,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         Change schedule
                       </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={openRepeatScheduleModal} disabled={!canRepeatSchedule}>
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Repeat Schedule
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
                         {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
                         Edit payment
@@ -2267,6 +2466,147 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={isRepeatScheduleOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeRepeatScheduleModal();
+          else setIsRepeatScheduleOpen(true);
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="w-[calc(100vw-1.25rem)] max-w-[520px] gap-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl"
+        >
+          <DialogHeader className="border-b border-slate-100 px-6 pb-5 pt-6 text-left">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <RotateCcw className="h-6 w-6" />
+                </span>
+                <div className="min-w-0">
+                  <DialogTitle className="text-2xl font-black tracking-tight text-slate-950">Repeat Schedule</DialogTitle>
+                  <DialogDescription className="mt-1 text-sm font-semibold text-slate-500">
+                    {patientName ? `${typeName} for ${patientName}` : typeName}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => closeRepeatScheduleModal()}
+                disabled={isSavingRepeatSchedule}
+                className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100"
+                aria-label="Close repeat schedule"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-5 px-6 py-6">
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm font-bold text-slate-600">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">From</span>
+                <span className="text-right text-slate-900">
+                  {repeatSourceDate ? formatWordyDate(repeatSourceDate) : "No date"} at {formatAppointmentTimeRange(displayedSnapshot?.time, displayedSnapshot?.duration)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">Doctor</span>
+                <span className="truncate text-right text-slate-900">{displayedDoctorName || "No doctor assigned"}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Repeat this appointment</Label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Select value={repeatOption} onValueChange={handleRepeatOptionChange} disabled={isSavingRepeatSchedule}>
+                  <SelectTrigger className="h-11 rounded-full border-0 bg-slate-100 px-4 text-sm font-black text-slate-900 shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-w-[190px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl border-none shadow-2xl">
+                    <SelectItem value={REPEAT_NONE_OPTION} className="mx-2 my-1 rounded-xl">
+                      Do not repeat
+                    </SelectItem>
+                    {REPEAT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value} className="mx-2 my-1 rounded-xl">
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {repeatOption === "custom" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-full border-0 bg-blue-50 px-4 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-100"
+                    onClick={() => setIsCustomRepeatDatePickerOpen(true)}
+                    disabled={isSavingRepeatSchedule}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {customRepeatDate
+                      ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
+                      : "Pick date"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            {repeatOption !== REPEAT_NONE_OPTION ? (
+              <p className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold leading-6 text-blue-700">
+                {repeatTargetDate
+                  ? `This appointment will be cloned to ${repeatTargetLabel}.`
+                  : "Choose a custom clone date to schedule the follow-up."}
+              </p>
+            ) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold leading-6 text-slate-500">
+                Select a repeat option to create another appointment from this schedule.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-3 border-t border-slate-200 bg-slate-50/80 p-5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => closeRepeatScheduleModal()}
+              disabled={isSavingRepeatSchedule}
+              className="h-12 flex-1 rounded-xl border-slate-200 bg-white text-sm font-black text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveRepeatSchedule}
+              disabled={!canSaveRepeatSchedule}
+              className="h-12 flex-1 rounded-xl bg-blue-600 text-sm font-black uppercase tracking-wide text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
+            >
+              {isSavingRepeatSchedule ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+              Create Repeat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DatePickerModal
+        open={isCustomRepeatDatePickerOpen}
+        onOpenChange={setIsCustomRepeatDatePickerOpen}
+        selectedDate={customRepeatDate || repeatTargetDate || repeatSourceDate}
+        onDateSelect={(date) => setCustomRepeatDate(formatDateToYYYYMMDD(date))}
+        doctorName={displayedDoctorName}
+        patientId={String(displayedPatientId || "")}
+        selectedTime={String(displayedSnapshot?.time || "")}
+        duration={selectedScheduleDuration}
+        minDate={repeatSourceDate}
+        title="Choose follow-up date"
+        subtitle="Pick a date for the cloned appointment."
+        disableDatesWithTimeConflict={true}
+        timeConflictMessage="This doctor already has an appointment at the selected time on this day."
+        disableDatesOnOrBeforeMinDate={true}
+      />
 
       <SelectScheduleModal
         open={isChangeScheduleOpen}

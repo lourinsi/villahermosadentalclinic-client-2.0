@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { Lock, User, Loader2, Stethoscope, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { getManagementDashboardPath } from "@/lib/management-routes";
 
 export default function DoctorLoginPage() {
   const { login, logout, isLoading } = useAuth();
@@ -41,9 +42,10 @@ export default function DoctorLoginPage() {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.user?.role === "doctor") {
+        const dashboardPath = getManagementDashboardPath(data.user?.role);
+        if (dashboardPath && data.user?.role === "doctor") {
           toast.success("Doctor login successful!");
-          router.push("/doctor/dashboard");
+          router.push(dashboardPath);
         } else {
           // Wrong portal! Logout immediately
           await logout();
