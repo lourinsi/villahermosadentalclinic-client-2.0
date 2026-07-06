@@ -1,10 +1,6 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
-import { getManagementDashboardPath } from "@/lib/management-routes";
 import {
   Card,
   CardContent,
@@ -21,19 +17,6 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 
 export default function LandingPage() {
-  const router = useRouter();
-  const { isAuthenticated, isLoading, user } = useAuth();
-
-  const handleLoginClick = () => {
-    if (isLoading) return;
-
-    const dashboardPath = isAuthenticated
-      ? getManagementDashboardPath(user?.role)
-      : null;
-
-    router.push(dashboardPath || "/receptionist/login");
-  };
-
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <Header />
@@ -51,20 +34,10 @@ export default function LandingPage() {
             <h1 className="mb-6 max-w-3xl text-4xl font-black leading-tight text-gray-950 md:text-6xl">
               Trusted dental care for brighter, healthier smiles
             </h1>
-            <p className="mb-8 max-w-2xl text-lg leading-8 text-gray-600">
+            <p className="max-w-2xl text-lg leading-8 text-gray-600">
               Villahermosa Dental Clinic provides friendly, modern care for
               families and returning patients.
             </p>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                onClick={handleLoginClick}
-                size="lg"
-                disabled={isLoading}
-                className="h-12 rounded-full bg-primary px-8 text-base font-bold hover:bg-primary/90"
-              >
-                {isAuthenticated ? "Dashboard" : "Login"}
-              </Button>
-            </div>
           </div>
 
           <div className="rounded-[2rem] border border-white bg-white/85 p-6 shadow-xl shadow-blue-100/70">

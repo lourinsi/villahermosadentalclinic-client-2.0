@@ -28,7 +28,7 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { useAuth } from "@/hooks/useAuth";
 
 export function SettingsView() {
-  const { user } = useAuth();
+  const { user, checkAuth } = useAuth();
   const [clinicName, setClinicName] = useState("Villahermosa Dental Clinic");
   const [email, setEmail] = useState("info@villahermosadental.com");
   const [phone, setPhone] = useState("+1 (555) 123-4567");
@@ -86,6 +86,11 @@ export function SettingsView() {
       return;
     }
 
+    if (newPassword === "password") {
+      toast.error("Choose a password different from the default password");
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       toast.error("New passwords do not match");
       return;
@@ -105,9 +110,14 @@ export function SettingsView() {
         throw new Error(payload?.message || "Failed to change password");
       }
 
+      if (payload.token) {
+        localStorage.setItem("authToken", payload.token);
+      }
+
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      await checkAuth();
       toast.success("Password changed successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to change password");

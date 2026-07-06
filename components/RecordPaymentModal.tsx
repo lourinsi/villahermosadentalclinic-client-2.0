@@ -150,6 +150,11 @@ export function RecordPaymentModal() {
         return;
       }
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("payments:updated", {
+          detail: { appointmentId: aptId, payment: json?.data },
+        }));
+      }
       refreshPatients();
       clearCompletedRecordPaymentDraft();
       closePaymentModal();

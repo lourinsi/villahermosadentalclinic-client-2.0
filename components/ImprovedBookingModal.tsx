@@ -17,7 +17,7 @@ import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersis
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag, RotateCcw } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -769,18 +769,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     !isPatientLevelBookingMode &&
     !isPublicCachedAppointment
   );
-  const canHardDeleteDeletedAppointment = Boolean(
+  const canRestoreDeletedAppointment = Boolean(
     appointmentToEdit &&
     isDeleted &&
     effectiveRole === "admin" &&
     !isPublicCachedAppointment
   );
-  const canDeleteAppointment = canDeleteCancelledAppointment || canHardDeleteDeletedAppointment;
-  const destructiveAppointmentActionLabel = canHardDeleteDeletedAppointment
-    ? "Hard Delete Appointment"
-    : canDeleteCancelledAppointment
-      ? "Delete Appointment"
-      : "Cancel Appointment";
+  const canDeleteAppointment = canDeleteCancelledAppointment;
+  const destructiveAppointmentActionLabel = canDeleteCancelledAppointment
+    ? "Delete Appointment"
+    : "Cancel Appointment";
   const getLocalPublicAppointmentLogs = useCallback(() => {
     if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];
 
@@ -2969,24 +2967,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
-      if (canHardDeleteDeletedAppointment) {
-        await deleteAppointment(appointmentToEdit.id, { hardDelete: true });
-        try {
-          window.dispatchEvent(new CustomEvent('appointments:updated', {
-            detail: { appointmentId: appointmentToEdit.id, hardDeleted: true },
-          }));
-        } catch {}
-        if (onDeleted) onDeleted({ ...appointmentToEdit, hardDeleted: true });
-        toast?.success?.('Appointment permanently deleted');
-        closeAfterCommittedBookingAction();
-        return;
-      }
-
       if (canDeleteCancelledAppointment) {
         await deleteAppointment(appointmentToEdit.id);
         const deletedAppointment = {
           ...appointmentToEdit,
           status: "deleted",
+          deleted: true,
           deletedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -3020,6 +3006,42 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     } catch (err) {
       console.error('Failed to cancel appointment', err);
       toast?.error?.('Failed to cancel appointment');
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
+  const handleRestoreAppointment = async () => {
+    if (!appointmentToEdit || !canRestoreDeletedAppointment) return;
+
+    setIsBooking(true);
+    try {
+      const restoredAppointment = await updateAppointment(appointmentToEdit.id, {
+        status: "cancelled",
+        deleted: false,
+        deletedAt: null,
+      } as any);
+      const restored = {
+        ...appointmentToEdit,
+        ...restoredAppointment,
+        status: "cancelled",
+        deleted: false,
+        deletedAt: null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      try {
+        window.dispatchEvent(new CustomEvent('appointments:updated', {
+          detail: { appointment: restored, appointmentId: appointmentToEdit.id, restored: true, newStatus: 'cancelled' },
+        }));
+      } catch {}
+      if (onBooked) onBooked(restored);
+      if (onDeleted) onDeleted(restored);
+      toast?.success?.('Appointment restored');
+      closeAfterCommittedBookingAction();
+    } catch (err) {
+      console.error('Restore appointment error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to restore appointment');
     } finally {
       setIsBooking(false);
     }
@@ -4030,6 +4052,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     {isBooking ? "Processing..." : destructiveAppointmentActionLabel}
                   </Button>
                 )}
+                {canRestoreDeletedAppointment && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleRestoreAppointment}
+                    disabled={isBooking}
+                    className="h-12 w-full rounded-2xl border-emerald-200 bg-emerald-50 px-6 font-black uppercase tracking-widest text-emerald-700 shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-100 hover:shadow-emerald-200 sm:mr-auto sm:w-auto"
+                  >
+                    {isBooking ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                    )}
+                    {isBooking ? "Processing..." : "Restore Appointment"}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   onClick={handlePrimaryBookingAction}
@@ -4065,15 +4103,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         mode="cancel"
         appointment={appointmentToEdit}
         isProcessing={isBooking}
-        title={canHardDeleteDeletedAppointment ? "Hard Delete Appointment?" : canDeleteCancelledAppointment ? "Delete Appointment?" : undefined}
+        title={canDeleteCancelledAppointment ? "Delete Appointment?" : undefined}
         description={
-          canHardDeleteDeletedAppointment
-            ? "This will permanently delete this appointment and all connected appointment logs, payments, payment logs, finance records, and notifications. This action cannot be undone."
-            : canDeleteCancelledAppointment
+          canDeleteCancelledAppointment
               ? "This will move the appointment to Deleted and hide it from receptionist views. Admins can still view it later."
             : undefined
         }
-        confirmLabel={canHardDeleteDeletedAppointment ? "Yes, Hard Delete" : canDeleteCancelledAppointment ? "Yes, Delete" : undefined}
+        confirmLabel={canDeleteCancelledAppointment ? "Yes, Delete" : undefined}
         onConfirm={handleCancel}
       />
 

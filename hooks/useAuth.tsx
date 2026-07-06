@@ -9,6 +9,7 @@ interface User {
   role: string;
   patientId?: string;
   staffId?: string;
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextType {
@@ -61,6 +62,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           role: data.user.role,
           patientId: data.user.patientId,
           staffId: data.user.staffId,
+          mustChangePassword: Boolean(data.user.mustChangePassword),
         });
       } else {
         clearAuthState();
@@ -97,6 +99,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         role: data.user.role,
         patientId: data.user.patientId,
         staffId: data.user.staffId,
+        mustChangePassword: Boolean(data.user.mustChangePassword),
       });
 
       // Store token in localStorage for client-side use (optional)

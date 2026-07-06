@@ -68,22 +68,24 @@ const ADD_PATIENT_MODAL_SELECTORS = [
   '[data-tour-id="add-patient-confirm"]',
 ];
 
+const STAFF_PORTAL_LOGIN_PATH = "/workspace-portal-auth";
 const getReceptionistTourRoute = (route: string) => route.replace(/^\/admin(?=\/|$)/, "/receptionist");
 
 const TOUR_STEPS: TourStep[] = [
   {
     id: "receptionist-credentials",
-    route: "/receptionist/login",
-    target: '[data-tour-id="receptionist-login-demo-card"]',
-    title: "Use the receptionist demo credentials",
-    body: "Email: hannah@villahermosa\nPassword: password\nUse the demo-fill button, then sign in.",
-    primaryLabel: "Fill credentials",
+    route: STAFF_PORTAL_LOGIN_PATH,
+    target: '[data-tour-id="receptionist-login-username"]',
+    title: "Enter staff credentials",
+    body: "Sign in with an internally provisioned admin or receptionist account.",
+    primaryLabel: "Continue",
     placement: "top",
-    action: { type: "clickSelector", selector: '[data-tour-id="receptionist-demo-fill"]' },
+    allowTargetInteraction: true,
+    action: { type: "wait" },
   },
   {
     id: "receptionist-submit",
-    route: "/receptionist/login",
+    route: STAFF_PORTAL_LOGIN_PATH,
     target: '[data-tour-id="receptionist-login-submit"]',
     title: "Sign in as receptionist",
     body: "Click Sign In. The helper will automatically continue once the dashboard loads.",

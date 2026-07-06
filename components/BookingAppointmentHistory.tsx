@@ -11,6 +11,7 @@ import {
   getBookingPaymentAdjustment,
   isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName,
+  normalizeBookingHistoryStatus,
   normalizeBookingPaymentDate,
   shouldShowBookingHistoryLog,
 } from "./sharedBookingLogic";
@@ -54,12 +55,16 @@ export const getMergedBookingLogs = (appointmentLogs: any[], paymentLogs: any[])
     if (shouldMerge) {
       const currentAmount = Number(current.amount || 0);
       const previousAmount = Number(previous.amount || 0);
-      const maxAmount = Math.max(currentAmount, previousAmount);
+      const maxAmount = Math.abs(currentAmount) >= Math.abs(previousAmount) ? currentAmount : previousAmount;
       const appointmentLog = current.logType === "appointment" ? current : previous;
       const paymentLog = current.logType === "payment" ? current : previous;
 
       appointmentLog.amount = maxAmount;
       appointmentLog.paymentMethod = paymentLog.paymentMethod || appointmentLog.paymentMethod;
+      appointmentLog.paymentDate = paymentLog.paymentDate || paymentLog.date || appointmentLog.paymentDate;
+      appointmentLog.paymentId = paymentLog.paymentId || paymentLog.paymentRecordId || appointmentLog.paymentId;
+      appointmentLog.paymentRecordId = paymentLog.paymentRecordId || paymentLog.paymentId || appointmentLog.paymentRecordId;
+      appointmentLog.transactionId = paymentLog.transactionId || appointmentLog.transactionId;
       appointmentLog.newBalance = paymentLog.newBalance ?? appointmentLog.newBalance;
       appointmentLog.paymentStatus = paymentLog.paymentStatus || appointmentLog.paymentStatus;
 
@@ -99,6 +104,78 @@ const getHistoryDoctorChange = (log: BookingHistoryLog) => {
 const getHistoryPaymentAmount = (log: BookingHistoryLog) => Number(log.amount || 0);
 
 const getHistoryActor = (log: BookingHistoryLog) => log.changedByName || log.changedBy || "";
+
+const isDeletedAppointmentState = (state: any) =>
+  Boolean(state?.deleted || state?.deletedAt) ||
+  normalizeBookingHistoryStatus(state?.status) === "deleted";
+
+const getAppointmentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restored" | "" => {
+  if (log.logType !== "appointment") return "";
+
+  const wasDeleted = isDeletedAppointmentState(log.previousState);
+  const isDeleted = isDeletedAppointmentState(log.newState);
+
+  if (!wasDeleted && isDeleted) return "deleted";
+  if (wasDeleted && !isDeleted) return "restored";
+  return "";
+};
+
+const getPaymentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restored" | "" => {
+  const notes = String(log.notes || "").trim().toLowerCase();
+  if (notes.includes("payment deleted")) return "deleted";
+  if (notes.includes("payment restored")) return "restored";
+  return "";
+};
+
+const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
+  const paymentAction = getPaymentLifecycleAction(log);
+  if (!paymentAction) return undefined;
+
+  const amount = Math.abs(getHistoryPaymentAmount(log));
+  if (amount <= 0) return undefined;
+
+  const paymentDate =
+    log.paymentDate ||
+    log.newState?.paymentDate ||
+    log.previousState?.paymentDate ||
+    log.date ||
+    log.changedAt;
+  const paymentMethod =
+    log.paymentMethod ||
+    log.newState?.paymentMethod ||
+    log.previousState?.paymentMethod ||
+    log.method ||
+    "";
+  const paymentRecordId =
+    log.paymentId ||
+    log.paymentRecordId ||
+    log.newState?.paymentId ||
+    log.newState?.paymentRecordId ||
+    log.previousState?.paymentId ||
+    log.previousState?.paymentRecordId ||
+    "";
+  const transactionId =
+    log.transactionId ||
+    log.newState?.transactionId ||
+    log.previousState?.transactionId ||
+    log.id;
+
+  return {
+    id: paymentRecordId || transactionId || log.id,
+    paymentId: paymentRecordId,
+    paymentRecordId,
+    transactionId,
+    amount,
+    paymentAmount: amount,
+    date: paymentDate,
+    paymentDate,
+    method: paymentMethod,
+    paymentMethod,
+    changedAt: log.changedAt,
+    notes: log.notes,
+    _paymentHistoryAction: paymentAction,
+  };
+};
 
 const getHistoryBadges = (log: BookingHistoryLog): HistoryBadge[] => {
   const badges: HistoryBadge[] = [];
@@ -154,8 +231,14 @@ const getHistoryBadgeClass = (tone: HistoryBadge["tone"]) => {
 const getHistoryTitle = (log: BookingHistoryLog) => {
   const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
   const amount = getHistoryPaymentAmount(log);
+  const lifecycleAction = getAppointmentLifecycleAction(log);
+  const paymentLifecycleAction = getPaymentLifecycleAction(log);
 
   if (getBookingPaymentAdjustment(log).isAdjustment) return "Payment adjusted";
+  if (lifecycleAction === "deleted") return "Appointment deleted";
+  if (lifecycleAction === "restored") return "Appointment restored";
+  if (paymentLifecycleAction === "deleted") return "Payment deleted";
+  if (paymentLifecycleAction === "restored") return "Payment restored";
 
   if (log.logType === "payment") {
     return amount > 0 ? "Payment recorded" : "Payment status updated";
@@ -181,6 +264,8 @@ const getHistoryDetail = (log: BookingHistoryLog, userRole?: string) => {
   const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
   const amount = getHistoryPaymentAmount(log);
   const adjustment = getBookingPaymentAdjustment(log);
+  const lifecycleAction = getAppointmentLifecycleAction(log);
+  const paymentLifecycleAction = getPaymentLifecycleAction(log);
   const scheduleChanged = Boolean(
     (log.newState?.date && log.newState.date !== log.previousState?.date) ||
     (log.newState?.time && log.newState.time !== log.previousState?.time)
@@ -193,6 +278,10 @@ const getHistoryDetail = (log: BookingHistoryLog, userRole?: string) => {
   const statusChanged = Boolean(log.newState?.status && log.newState.status !== log.previousState?.status);
 
   if (adjustment.isAdjustment) return formatBookingPaymentAdjustmentDetail(log);
+  if (lifecycleAction === "deleted") return "Appointment moved to deleted records";
+  if (lifecycleAction === "restored") return "Appointment restored from deleted records";
+  if (paymentLifecycleAction === "deleted") return "Payment deleted";
+  if (paymentLifecycleAction === "restored") return "Payment restored";
 
   if (log.logType === "payment") {
     if (amount > 0) return "Payment recorded";
@@ -281,6 +370,9 @@ export default function BookingAppointmentHistory({
 
   const openSnapshot = (log: BookingHistoryLog, index: number) => {
     const changedBy = log.changedByName || log.changedBy;
+    const lifecycleAction = getAppointmentLifecycleAction(log);
+    const paymentLifecycleAction = getPaymentLifecycleAction(log);
+    const paymentLifecycleSnapshot = getPaymentLifecycleSnapshot(log);
     const historicalData =
       log.logType === "appointment" && log.newState && Object.keys(log.newState).length > 3
         ? {
@@ -294,6 +386,9 @@ export default function BookingAppointmentHistory({
             logType: log.logType,
             changedAt: log.changedAt,
             changedByName: changedBy,
+            _appointmentHistoryAction: lifecycleAction || undefined,
+            _paymentHistoryAction: paymentLifecycleAction || undefined,
+            _focusedPaymentSnapshot: paymentLifecycleSnapshot,
           }
         : {
             ...appointmentToEdit,
@@ -306,6 +401,9 @@ export default function BookingAppointmentHistory({
             logType: log.logType,
             changedAt: log.changedAt,
             changedByName: changedBy,
+            _appointmentHistoryAction: lifecycleAction || undefined,
+            _paymentHistoryAction: paymentLifecycleAction || undefined,
+            _focusedPaymentSnapshot: paymentLifecycleSnapshot,
           };
 
     setIsHistoryDialogOpen(false);

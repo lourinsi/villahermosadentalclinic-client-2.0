@@ -57,6 +57,8 @@ export interface Appointment {
   transactions?: RecentTransaction[];
   createdAt?: string;
   updatedAt?: string;
+  deleted?: boolean;
+  deletedAt?: string | null;
 }
 
 const API_URL = apiUrl("/api/appointments");

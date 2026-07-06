@@ -4,20 +4,20 @@ import React, { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH, isManagementRole } from "@/lib/management-routes";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
-  loginPath?: "/admin/login" | "/receptionist/login";
+  loginPath?: string;
 }
 
-const MANAGEMENT_ROLES = ["admin", "receptionist"];
-const MANAGEMENT_LOGOUT_REDIRECT_KEY = "villahermosa-management-logout-redirect";
+const MANAGEMENT_ROLES = ["admin", "doctor", "receptionist"];
 
-const getManagementLoginRedirect = (defaultLoginPath: "/admin/login" | "/receptionist/login") => {
+const getManagementLoginRedirect = (defaultLoginPath: string) => {
   try {
     const pendingRedirect = sessionStorage.getItem(MANAGEMENT_LOGOUT_REDIRECT_KEY);
-    if (pendingRedirect === "/admin/login" || pendingRedirect === "/receptionist/login") {
+    if (pendingRedirect === STAFF_PORTAL_LOGIN_PATH) {
       sessionStorage.removeItem(MANAGEMENT_LOGOUT_REDIRECT_KEY);
       return pendingRedirect;
     }
@@ -28,7 +28,7 @@ const getManagementLoginRedirect = (defaultLoginPath: "/admin/login" | "/recepti
   return defaultLoginPath;
 };
 
-export default function ProtectedRoute({ children, allowedRoles, loginPath = "/admin/login" }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, allowedRoles, loginPath = STAFF_PORTAL_LOGIN_PATH }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
 
@@ -41,7 +41,7 @@ export default function ProtectedRoute({ children, allowedRoles, loginPath = "/a
     if (!isLoading && isAuthenticated && user) {
       const routeRoles = allowedRoles || MANAGEMENT_ROLES;
 
-      if (!routeRoles.includes(user.role)) {
+      if (!routeRoles.includes(user.role) && !(routeRoles === MANAGEMENT_ROLES && isManagementRole(user.role))) {
         router.push(loginPath);
         return;
       }
@@ -64,7 +64,7 @@ export default function ProtectedRoute({ children, allowedRoles, loginPath = "/a
   }
 
   const routeRoles = allowedRoles || MANAGEMENT_ROLES;
-  if (user && !routeRoles.includes(user.role)) {
+  if (user && !routeRoles.includes(user.role) && !(routeRoles === MANAGEMENT_ROLES && isManagementRole(user.role))) {
     return null;
   }
 

@@ -149,7 +149,7 @@ export const DEFAULT_PAYMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
   {
     key: 5,
     value: "over-paid",
-    label: "Over-paid",
+    label: "Overpaid",
     description: "Payment exceeds appointment total",
     ...DEFAULT_PAYMENT_STATUS_COLORS["over-paid"],
   },
@@ -170,7 +170,7 @@ export function formatPaymentStatusLabel(status?: string | null): string {
 
   const statusOption = DEFAULT_PAYMENT_STATUS_OPTIONS.find((option) => option.value === normalized);
   if (statusOption) return statusOption.label;
-  if (normalized === "over-paid") return "Over-paid";
+  if (normalized === "over-paid") return "Overpaid";
 
   return normalized
     .split("-")

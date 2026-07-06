@@ -2,6 +2,7 @@
 
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { isReceptionistLevelRole } from "@/lib/management-routes";
 
 export type AdminViewMode = "admin" | "receptionist";
 
@@ -42,11 +43,11 @@ export function AdminViewModeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setViewModeState(userRole === "receptionist" ? "receptionist" : "admin");
+    setViewModeState(isReceptionistLevelRole(userRole) ? "receptionist" : "admin");
   }, [userRole]);
 
   const setViewMode = useCallback((mode: AdminViewMode) => {
-    const nextMode = canSwitchAdminView ? mode : userRole === "receptionist" ? "receptionist" : "admin";
+    const nextMode = canSwitchAdminView ? mode : isReceptionistLevelRole(userRole) ? "receptionist" : "admin";
     setViewModeState(nextMode);
 
     if (canSwitchAdminView) {
@@ -63,7 +64,11 @@ export function AdminViewModeProvider({ children }: { children: ReactNode }) {
   }, [setViewMode, viewMode]);
 
   const value = useMemo<AdminViewModeContextType>(() => {
-    const effectiveRole = userRole === "admin" ? viewMode : userRole;
+    const effectiveRole = userRole === "admin"
+      ? viewMode
+      : isReceptionistLevelRole(userRole)
+        ? "receptionist"
+        : userRole;
 
     return {
       viewMode,

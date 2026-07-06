@@ -559,6 +559,11 @@ export function PaymentModal() {
         return false;
       }
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("payments:updated", {
+          detail: { appointmentId: aptId, payment: json?.data },
+        }));
+      }
       refreshPatients();
       clearCompletedPaymentDraft();
       closePaymentModal();

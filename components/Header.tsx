@@ -97,18 +97,7 @@ export function Header(_props: HeaderProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            ) : (
-              <div className="hidden items-center gap-2 lg:flex">
-                <Button 
-                  variant="outline" 
-                  data-tour-id="landing-login"
-                  onClick={() => router.push("/receptionist/login")}
-                  className="h-11 rounded-full border-primary px-5 font-semibold text-primary hover:bg-primary/5"
-                >
-                  Login
-                </Button>
-              </div>
-            )}
+            ) : null}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -122,9 +111,9 @@ export function Header(_props: HeaderProps) {
                     <Link href={link.href} prefetch={false}>{link.label}</Link>
                   </DropdownMenuItem>
                 ))}
-                <DropdownMenuSeparator />
                 {isAuthenticated ? (
                   <>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={handleDashboard}>
                       <LayoutDashboard className="mr-2 h-4 w-4" />
                       Dashboard
@@ -134,14 +123,7 @@ export function Header(_props: HeaderProps) {
                       Logout
                     </DropdownMenuItem>
                   </>
-                ) : (
-                  <>
-                    <DropdownMenuItem onClick={() => router.push("/receptionist/login")}>
-                      <User className="mr-2 h-4 w-4" />
-                      Login
-                    </DropdownMenuItem>
-                  </>
-                )}
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

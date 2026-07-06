@@ -3,6 +3,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
@@ -25,7 +26,7 @@ import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import type { Appointment } from "@/hooks/useAppointments";
-import { formatWordyDate } from "@/lib/utils";
+import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingDateKey,
@@ -38,6 +39,8 @@ import {
   normalizeBookingToothNumbers,
   normalizeBookingPaymentMethod,
   normalizeBookingHistoryStatus,
+  parseLocalDateOnly,
+  findNextAvailableRepeatSlot,
 } from "./sharedBookingLogic";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
@@ -45,6 +48,9 @@ import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-ide
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
+import { DatePickerModal } from "./DatePickerModal";
+import { TimePickerModal } from "./TimePickerModal";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -60,11 +66,52 @@ interface AppointmentHistoryViewProps {
   onRestoreNotification?: (notificationId: string) => void | Promise<void>;
   openedFromBookingModal?: boolean;
   showPreviousInputChanges?: boolean;
+  selectedPaymentSnapshot?: any;
+  useCurrentAppointmentDetails?: boolean;
 }
 
 type SnapshotState = "historical" | "latest" | "current";
 type CurrentFieldChange = {
   title: string;
+};
+
+const REPEAT_NONE_OPTION = "do-not-repeat";
+const REPEAT_OPTIONS = [
+  { value: "next-week", label: "Next week" },
+  { value: "next-month", label: "Next month" },
+  { value: "3-months", label: "3 months from now" },
+  { value: "custom", label: "Custom date" },
+];
+
+const getRepeatTargetDate = (baseDateValue: unknown, repeatOption: string, customRepeatDate = "") => {
+  if (repeatOption === REPEAT_NONE_OPTION) return null;
+
+  const baseDate = resolveScheduleDateValue(baseDateValue);
+  if (!baseDate) return null;
+
+  const target = new Date(baseDate);
+  switch (repeatOption) {
+    case "next-week":
+      target.setDate(baseDate.getDate() + 7);
+      return target;
+    case "next-month":
+      target.setMonth(baseDate.getMonth() + 1);
+      return target;
+    case "3-months":
+      target.setMonth(baseDate.getMonth() + 3);
+      return target;
+    case "custom":
+      return customRepeatDate ? parseLocalDateOnly(customRepeatDate) : null;
+    default:
+      return null;
+  }
+};
+
+const buildRepeatScheduleNotes = (baseNotes: unknown, sourceDate: Date) => {
+  const sourceDateLabel = formatWordyDate(sourceDate);
+  const followUpNote = `Created as a repeating schedule from ${sourceDateLabel}`;
+  const trimmed = String(baseNotes || "").trim();
+  return trimmed ? `${trimmed}\n${followUpNote}` : followUpNote;
 };
 
 const resolveAppointmentTypeName = (type: unknown, customType?: string) => {
@@ -365,7 +412,80 @@ const getManagementBasePath = (pathname: string | null) => {
   return "/admin";
 };
 
-export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true }: AppointmentHistoryViewProps) {
+const resolveScheduleDateValue = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const parsedLocalDate = parseLocalDateOnly(String(value));
+  if (parsedLocalDate) return parsedLocalDate;
+
+  const parsedDate = new Date(String(value));
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+const getPaymentLogAmountValue = (payment: any) => Number(payment?.amount || payment?.paymentAmount || 0);
+
+const getPaymentLogDateValue = (payment: any) =>
+  payment?.paymentDate ||
+  payment?.date ||
+  payment?.paymentDetails?.paymentDate ||
+  payment?.paymentDetails?.date ||
+  payment?.transaction?.paymentDate ||
+  payment?.transaction?.date ||
+  "";
+
+const getPaymentLogFallbackDateValue = (payment: any) =>
+  payment?.changedAt || payment?.createdAt || payment?.updatedAt || "";
+
+const getPaymentLogMethodValue = (payment: any) =>
+  payment?.paymentMethod || payment?.method || payment?.paymentDetails?.method || "";
+
+const getPaymentLogSortTime = (payment: any) => {
+  const primaryDate = getPaymentLogDateValue(payment);
+  const parsedPrimary = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(primaryDate)) ? `${primaryDate}T00:00:00` : String(primaryDate));
+  if (!Number.isNaN(parsedPrimary.getTime())) return parsedPrimary.getTime();
+
+  const fallbackDate = getPaymentLogFallbackDateValue(payment);
+  const parsedFallback = new Date(fallbackDate);
+  return Number.isNaN(parsedFallback.getTime()) ? 0 : parsedFallback.getTime();
+};
+
+const getPaymentEntryIdentity = (payment: any) =>
+  String(
+    payment?.paymentId ||
+    payment?.paymentRecordId ||
+    payment?.transactionId ||
+    payment?._paymentTransactionId ||
+    payment?._transactionId ||
+    payment?.id ||
+    ""
+  ).trim();
+
+const normalizePaymentEntryMethod = (payment: any) =>
+  String(getPaymentLogMethodValue(payment) || "").trim().toLowerCase();
+
+const isSamePaymentEntry = (first: any, second: any) => {
+  if (!first || !second) return false;
+
+  const firstIdentity = getPaymentEntryIdentity(first);
+  const secondIdentity = getPaymentEntryIdentity(second);
+  if (firstIdentity && secondIdentity && firstIdentity === secondIdentity) return true;
+
+  const firstAmount = getPaymentLogAmountValue(first);
+  const secondAmount = getPaymentLogAmountValue(second);
+  const firstDate = String(getPaymentLogDateValue(first) || "").trim();
+  const secondDate = String(getPaymentLogDateValue(second) || "").trim();
+
+  return (
+    Math.abs(firstAmount - secondAmount) <= 0.01 &&
+    Boolean(firstDate && secondDate && firstDate === secondDate) &&
+    normalizePaymentEntryMethod(first) === normalizePaymentEntryMethod(second)
+  );
+};
+
+export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true, selectedPaymentSnapshot, useCurrentAppointmentDetails = false }: AppointmentHistoryViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
@@ -377,13 +497,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestPaymentLogDate, setLatestPaymentLogDate] = useState<string>("");
+  const [latestPaymentLogMethod, setLatestPaymentLogMethod] = useState<string>("");
+  const [paymentLogEntries, setPaymentLogEntries] = useState<any[]>([]);
+  const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
+  const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
+  const [isChangeScheduleOpen, setIsChangeScheduleOpen] = useState(false);
+  const [isSavingScheduleChange, setIsSavingScheduleChange] = useState(false);
+  const [isScheduleDatePickerOpen, setIsScheduleDatePickerOpen] = useState(false);
+  const [isScheduleTimePickerOpen, setIsScheduleTimePickerOpen] = useState(false);
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
+  const [selectedScheduleTime, setSelectedScheduleTime] = useState("");
+  const [isRepeatScheduleOpen, setIsRepeatScheduleOpen] = useState(false);
+  const [isSavingRepeatSchedule, setIsSavingRepeatSchedule] = useState(false);
+  const [repeatOption, setRepeatOption] = useState("next-week");
+  const [customRepeatDate, setCustomRepeatDate] = useState("");
+  const [isCustomRepeatDatePickerOpen, setIsCustomRepeatDatePickerOpen] = useState(false);
   const [isChangeTreatmentOpen, setIsChangeTreatmentOpen] = useState(false);
   const [isSavingTreatmentChange, setIsSavingTreatmentChange] = useState(false);
   const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
   const [customTreatmentName, setCustomTreatmentName] = useState("");
   const [selectedTreatmentPrice, setSelectedTreatmentPrice] = useState("");
+  const [selectedTreatmentDuration, setSelectedTreatmentDuration] = useState("30");
   const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(open);
@@ -391,32 +527,48 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
   // Appointment action helpers (approve/reject) using central appointment modal hook
-  const { updateAppointment, openEditModalById } = useAppointmentModal();
+  const { addAppointment, updateAppointment, openEditModalById } = useAppointmentModal();
   const { openPaymentFor, openEditPaymentModal } = usePaymentModal();
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const shouldShowPreviousInputChanges = openedFromBookingModal || showPreviousInputChanges;
+  const shouldUseCurrentAppointmentDetails = Boolean(useCurrentAppointmentDetails && !openedFromBookingModal);
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
     // `_isHistorical` (set by `fetchSnapshotFromLogs`), honor that value. Otherwise
     // fall back to the `isHistorical` prop provided by the caller.
-    const derivedHistorical = appointmentSnapshot && Object.prototype.hasOwnProperty.call(appointmentSnapshot, "_isHistorical")
+    const derivedHistorical = shouldUseCurrentAppointmentDetails
+      ? false
+      : appointmentSnapshot && Object.prototype.hasOwnProperty.call(appointmentSnapshot, "_isHistorical")
       ? Boolean(appointmentSnapshot._isHistorical)
       : Boolean(isHistorical);
     setSnapshotState(derivedHistorical ? "historical" : "current");
-  }, [appointmentSnapshot, isHistorical]);
+  }, [appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
 
   useEffect(() => {
     if (!open) {
       setSnapshotHistory([]);
+      setShowAdditionalPayments(false);
+      setIsChangeScheduleOpen(false);
+      setIsSavingScheduleChange(false);
+      setIsScheduleDatePickerOpen(false);
+      setIsScheduleTimePickerOpen(false);
+      setSelectedScheduleDate(null);
+      setSelectedScheduleTime("");
+      setIsRepeatScheduleOpen(false);
+      setIsSavingRepeatSchedule(false);
+      setRepeatOption("next-week");
+      setCustomRepeatDate("");
+      setIsCustomRepeatDatePickerOpen(false);
       setIsChangeTreatmentOpen(false);
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
       setSelectedTreatmentPrice("");
+      setSelectedTreatmentDuration("30");
       setTreatmentToothNumberEntries([""]);
     }
   }, [open]);
@@ -466,8 +618,80 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   }, [open, displayedPatientId]);
 
   useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || typeof window === "undefined") return;
+
+    const handlePaymentsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        appointmentId?: string | number | null;
+        appointment?: { id?: string | number | null } | null;
+        payment?: { appointmentId?: string | number | null } | null;
+      }>).detail;
+      const changedAppointmentId = String(
+        detail?.appointmentId ??
+        detail?.payment?.appointmentId ??
+        detail?.appointment?.id ??
+        ""
+      ).trim();
+
+      if (!changedAppointmentId || changedAppointmentId === appointmentId) {
+        setPaymentLogsRefreshKey((key) => key + 1);
+      }
+    };
+
+    window.addEventListener("payments:updated", handlePaymentsUpdated as EventListener);
+    return () => window.removeEventListener("payments:updated", handlePaymentsUpdated as EventListener);
+  }, [open, displayedAppointmentId]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !shouldUseCurrentAppointmentDetails || !appointmentId) return;
+
+    const controller = new AbortController();
+    const loadCurrentAppointmentDetails = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        const currentAppointment = response.ok && result?.data ? result.data : null;
+        if (!currentAppointment) return;
+
+        setDisplayedSnapshot((current: any) => ({
+          ...(current || {}),
+          ...currentAppointment,
+          id: currentAppointment.id || appointmentId,
+          appointmentId,
+          changedAt: currentAppointment.changedAt || currentAppointment.updatedAt || currentAppointment.createdAt || current?.changedAt,
+          _isHistorical: false,
+        }));
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(currentAppointment);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load current appointment details:", error);
+        }
+      }
+    };
+
+    loadCurrentAppointmentDetails();
+
+    return () => controller.abort();
+  }, [
+    open,
+    displayedAppointmentId,
+    shouldUseCurrentAppointmentDetails,
+    paymentLogsRefreshKey,
+  ]);
+
+  useEffect(() => {
     setLatestPaymentLogAmount(null);
     setLatestPaymentLogDate("");
+    setLatestPaymentLogMethod("");
+    setPaymentLogEntries([]);
+    setShowAdditionalPayments(false);
 
     const appointmentId = String(displayedAppointmentId || "").trim();
     if (
@@ -478,29 +702,59 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const controller = new AbortController();
     const loadLatestPaymentLogAmount = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/payments`), {
-          credentials: "include",
-          headers: getAuthHeaders(),
-          signal: controller.signal,
-        });
-        const result = await response.json().catch(() => null);
-        const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
-        const latestPositiveLog = logs.find((log: any) => Number(log?.amount || 0) > 0);
-        const latestPositiveAmount = latestPositiveLog ? Number(latestPositiveLog.amount || 0) : undefined;
+        const fetchPaymentRows = async (path: string, normalizeRow: (row: any) => any) => {
+          const response = await fetch(apiUrl(path), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+            signal: controller.signal,
+          });
+          const result = await response.json().catch(() => null);
+          return response.ok && result?.success && Array.isArray(result.data)
+            ? result.data.map(normalizeRow)
+            : [];
+        };
 
+        const paymentRecords = await fetchPaymentRows(
+          `/api/payments/appointment/${encodeURIComponent(appointmentId)}`,
+          (payment: any) => ({
+            ...payment,
+            paymentId: payment.paymentId || payment.id,
+            paymentRecordId: payment.paymentRecordId || payment.id,
+            paymentAmount: payment.paymentAmount ?? payment.amount,
+            paymentDate: getPaymentLogDateValue(payment) || payment.date,
+            paymentMethod: getPaymentLogMethodValue(payment) || payment.method,
+          })
+        );
+        const logs = paymentRecords.length > 0
+          ? paymentRecords
+          : await fetchPaymentRows(
+              `/api/appointments/${encodeURIComponent(appointmentId)}/payments`,
+              (log: any) => ({
+                ...log,
+                paymentAmount: log.paymentAmount ?? log.amount,
+                paymentDate: getPaymentLogDateValue(log) || getPaymentLogFallbackDateValue(log),
+                paymentMethod: getPaymentLogMethodValue(log),
+              })
+            );
+        const positiveLogs = logs
+          .filter((log: any) => getPaymentLogAmountValue(log) > 0)
+          .sort((a: any, b: any) => getPaymentLogSortTime(b) - getPaymentLogSortTime(a));
+        const latestPositiveLog = positiveLogs[0];
+        const latestPositiveAmount = latestPositiveLog ? getPaymentLogAmountValue(latestPositiveLog) : undefined;
+
+        setPaymentLogEntries(positiveLogs);
         setLatestPaymentLogAmount(latestPositiveAmount ?? 0);
         setLatestPaymentLogDate(
-          latestPositiveLog?.paymentDate ||
-          latestPositiveLog?.date ||
-          latestPositiveLog?.createdAt ||
-          latestPositiveLog?.changedAt ||
-          ""
+          latestPositiveLog ? getPaymentLogDateValue(latestPositiveLog) : ""
         );
+        setLatestPaymentLogMethod(latestPositiveLog ? getPaymentLogMethodValue(latestPositiveLog) : "");
       } catch (error: any) {
         if (error?.name !== "AbortError") {
           console.warn("[AppointmentHistoryView] Failed to load payment logs:", error);
           setLatestPaymentLogAmount(0);
           setLatestPaymentLogDate("");
+          setLatestPaymentLogMethod("");
+          setPaymentLogEntries([]);
         }
       }
     };
@@ -511,8 +765,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   }, [
     open,
     displayedAppointmentId,
-    displayedSnapshot,
-    snapshotState,
+    paymentLogsRefreshKey,
   ]);
 
   useEffect(() => {
@@ -578,7 +831,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     fallback: String(displayedSnapshot.date || "No date"),
   });
 
-  const resolvedLogDate = logDate || displayedSnapshot.changedAt || displayedSnapshot.updatedAt || displayedSnapshot.createdAt || new Date().toISOString();
+  const resolvedLogDate = shouldUseCurrentAppointmentDetails
+    ? displayedSnapshot.updatedAt || displayedSnapshot.changedAt || displayedSnapshot.createdAt || logDate || new Date().toISOString()
+    : logDate || displayedSnapshot.changedAt || displayedSnapshot.updatedAt || displayedSnapshot.createdAt || new Date().toISOString();
   const isDateOnlyLog = typeof resolvedLogDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(resolvedLogDate);
   const snapshotDate = formatWordyDate(resolvedLogDate, {
     fallback: String(resolvedLogDate),
@@ -683,6 +938,41 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
+  const isDeletedAppointmentState = (state: any) =>
+    Boolean(state?.deleted || state?.deletedAt) ||
+    normalizeBookingHistoryStatus(state?.status) === "deleted";
+  const derivedLifecycleAction = (() => {
+    const wasDeleted = isDeletedAppointmentState(prevState);
+    const isDeleted = isDeletedAppointmentState(nextState);
+
+    if (!wasDeleted && isDeleted) return "deleted";
+    if (wasDeleted && !isDeleted) return "restored";
+    return "";
+  })();
+  const appointmentLifecycleAction =
+    displayedSnapshot?._appointmentHistoryAction ||
+    (openedFromBookingModal ? derivedLifecycleAction : "");
+  const hasAppointmentLifecycleAction =
+    appointmentLifecycleAction === "deleted" || appointmentLifecycleAction === "restored";
+  const appointmentLifecycleLabel =
+    appointmentLifecycleAction === "deleted" ? "Appointment Deleted" : "Appointment Restored";
+  const appointmentLifecycleDetail =
+    appointmentLifecycleAction === "deleted"
+      ? "This snapshot was logged when the appointment was deleted."
+      : "This snapshot was logged when the appointment was restored.";
+  const appointmentLifecycleClass =
+    appointmentLifecycleAction === "deleted"
+      ? "border-red-100 bg-red-50/70 text-red-700"
+      : "border-emerald-100 bg-emerald-50/70 text-emerald-700";
+  const AppointmentLifecycleIcon = appointmentLifecycleAction === "deleted" ? AlertTriangle : RefreshCw;
+
+  const focusedPaymentSnapshot = selectedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
+  const focusedPaymentAmount = focusedPaymentSnapshot ? getPaymentLogAmountValue(focusedPaymentSnapshot) : 0;
+  const hasFocusedPaymentSnapshot = focusedPaymentAmount > 0;
+  const focusedPaymentAction =
+    focusedPaymentSnapshot?._paymentHistoryAction ||
+    displayedSnapshot?._paymentHistoryAction ||
+    "";
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
   const paymentAdjustment = getBookingPaymentAdjustment(displayedSnapshot);
   const isPaymentAdjustmentSnapshot = paymentAdjustment.isAdjustment;
@@ -706,10 +996,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     isPaymentAdjustmentSnapshot ||
     isSeedPaymentId
   );
-  const paidInSnapshotAmount = explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
-    ? explicitSnapshotPaymentAmount
-    : 0;
-  const hasPaidInSnapshot = !isPaymentAdjustmentSnapshot && isPaymentLogSnapshot && paidInSnapshotAmount > 0;
+  const paidInSnapshotAmount = hasFocusedPaymentSnapshot
+    ? focusedPaymentAmount
+    : explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
+      ? explicitSnapshotPaymentAmount
+      : 0;
+  const hasPaidInSnapshot = !isPaymentAdjustmentSnapshot && (
+    hasFocusedPaymentSnapshot ||
+    (openedFromBookingModal && isPaymentLogSnapshot && paidInSnapshotAmount > 0)
+  );
   const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
   const shouldShowLatestPayment = !isPaymentAdjustmentSnapshot && !hasPaidInSnapshot && latestPaymentAmount > 0;
   const shouldShowPaymentLine = isPaymentAdjustmentSnapshot || hasPaidInSnapshot || shouldShowLatestPayment;
@@ -717,7 +1012,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? paymentAdjustment.delta < 0
       ? "Payment Reduced"
       : "Payment Adjusted"
-    : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+    : focusedPaymentAction === "deleted"
+      ? "Deleted Payment"
+      : focusedPaymentAction === "restored"
+        ? "Restored Payment"
+        : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+  const paymentSectionTitle = hasAppointmentLifecycleAction
+    ? "Appointment Activity"
+    : hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
+  const mainPaymentTone = focusedPaymentAction === "deleted" ? "deleted" : "default";
+  const mainPaymentCardClass = mainPaymentTone === "deleted"
+    ? "border-red-100 bg-red-50/70"
+    : "border-emerald-100 bg-emerald-50/60";
+  const mainPaymentTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700"
+    : "text-emerald-700";
+  const mainPaymentMutedTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700/70"
+    : "text-emerald-700/70";
+  const mainPaymentMethodTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700/80"
+    : "text-emerald-700/80";
+  const mainPaymentDividerClass = mainPaymentTone === "deleted"
+    ? "border-red-100"
+    : "border-emerald-100";
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
@@ -747,6 +1065,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       fallback: formatChangeValue(value || "No date"),
     });
   const paidInSnapshotPaymentDateRaw =
+    (focusedPaymentSnapshot ? getPaymentLogDateValue(focusedPaymentSnapshot) || getPaymentLogFallbackDateValue(focusedPaymentSnapshot) : "") ||
     displayedSnapshot?.paymentDate ||
     displayedSnapshot?.newState?.paymentDate ||
     displayedSnapshot?.previousState?.paymentDate ||
@@ -760,11 +1079,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     displayedSnapshot?.newState?.createdAt ||
     appointmentSnapshot?.createdAt;
   const latestPaymentDateRaw =
+    latestPaymentLogDate ||
     latestComparisonSnapshot?.paymentDate ||
     latestComparisonSnapshot?.newState?.paymentDate ||
     appointmentSnapshot?.paymentDate ||
     appointmentSnapshot?.newState?.paymentDate ||
-    latestPaymentLogDate ||
     latestComparisonSnapshot?.createdAt ||
     appointmentSnapshot?.createdAt;
   const snapshotPaymentDateRaw = hasPaidInSnapshot
@@ -773,13 +1092,63 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? latestPaymentDateRaw
       : "";
   const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
+  const paymentLogRows = paymentLogEntries
+    .map((payment) => {
+      const amount = getPaymentLogAmountValue(payment);
+      const dateValue = getPaymentLogDateValue(payment);
+
+      return {
+        id: String(payment?.id || `${dateValue}-${amount}`),
+        raw: payment,
+        amount,
+        amountLabel: `\u20b1${amount.toLocaleString()}`,
+        dateLabel: dateValue ? formatLongDate(dateValue) : "No date",
+        methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(payment)),
+      };
+    })
+    .filter((payment) => payment.amount > 0);
+  const selectedPaymentRow = hasFocusedPaymentSnapshot
+    ? {
+        id: getPaymentEntryIdentity(focusedPaymentSnapshot) || `selected-${getPaymentLogDateValue(focusedPaymentSnapshot)}-${focusedPaymentAmount}`,
+        raw: focusedPaymentSnapshot,
+        amount: focusedPaymentAmount,
+        amountLabel: `\u20b1${focusedPaymentAmount.toLocaleString()}`,
+        dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
+        methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
+      }
+    : null;
+  const mainPaymentRow = hasPaidInSnapshot
+    ? selectedPaymentRow || {
+        id: getPaymentEntryIdentity(displayedSnapshot) || `snapshot-${paidInSnapshotPaymentDateRaw}-${paidInSnapshotAmount}`,
+        raw: displayedSnapshot,
+        amount: paidInSnapshotAmount,
+        amountLabel: `\u20b1${paidInSnapshotAmount.toLocaleString()}`,
+        dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
+        methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(displayedSnapshot)),
+      }
+    : shouldShowLatestPayment
+      ? paymentLogRows[0] || null
+      : null;
+  const additionalPaymentRows = paymentLogRows.filter((payment) =>
+    mainPaymentRow ? !isSamePaymentEntry(payment.raw, mainPaymentRow.raw) : true
+  );
   const snapshotPaymentMethodLabel = normalizeBookingPaymentMethod(
-    displayedSnapshot?.paymentMethod ||
-    displayedSnapshot?.newState?.paymentMethod ||
-    displayedSnapshot?.paymentDetails?.method ||
-    displayedSnapshot?.transaction?.method ||
-    appointmentSnapshot?.paymentMethod ||
-    appointmentSnapshot?.newState?.paymentMethod
+    hasFocusedPaymentSnapshot
+      ? getPaymentLogMethodValue(focusedPaymentSnapshot)
+      : shouldShowLatestPayment
+        ? latestPaymentLogMethod ||
+        displayedSnapshot?.paymentMethod ||
+        displayedSnapshot?.newState?.paymentMethod ||
+        displayedSnapshot?.paymentDetails?.method ||
+        displayedSnapshot?.transaction?.method ||
+        appointmentSnapshot?.paymentMethod ||
+        appointmentSnapshot?.newState?.paymentMethod
+        : displayedSnapshot?.paymentMethod ||
+        displayedSnapshot?.newState?.paymentMethod ||
+        displayedSnapshot?.paymentDetails?.method ||
+        displayedSnapshot?.transaction?.method ||
+        appointmentSnapshot?.paymentMethod ||
+        appointmentSnapshot?.newState?.paymentMethod
   );
   const getPatientIdentity = (snapshot: any) => {
     const patient = snapshot?.patient;
@@ -977,6 +1346,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
   const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
+  const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
+  const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
+  const selectedScheduleDuration = String(normalizeBookingDuration(displayedSnapshot?.duration || 30));
+  const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
+  const repeatTargetDate = getRepeatTargetDate(displayedSnapshot?.date, repeatOption, customRepeatDate);
+  const repeatTargetLabel = repeatTargetDate ? formatWordyDate(repeatTargetDate) : "";
+  const canRepeatSchedule = Boolean(
+    canChangeSchedule &&
+    repeatSourceDate &&
+    displayedPatientId &&
+    displayedDoctorName &&
+    String(displayedSnapshot?.time || "").trim()
+  );
+  const canSaveRepeatSchedule = Boolean(
+    canRepeatSchedule &&
+    repeatTargetDate &&
+    !isSavingRepeatSchedule
+  );
+  const canSaveScheduleChange = Boolean(
+    canChangeSchedule &&
+    selectedScheduleDisplayDate &&
+    String(selectedScheduleTime || "").trim() &&
+    !isSavingScheduleChange
+  );
   const canChangeTreatment = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canSaveTreatmentChange = Boolean(
     canChangeTreatment &&
@@ -984,6 +1377,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     (!isCustomSelectedTreatment || customTreatmentName.trim()) &&
     Number.isFinite(Number(selectedTreatmentPrice)) &&
     Number(selectedTreatmentPrice) >= 0 &&
+    Boolean(selectedTreatmentDuration) &&
     !isSavingTreatmentChange &&
     !isLoadingTreatmentOptions
   );
@@ -1090,6 +1484,216 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
   };
 
+  const closeChangeScheduleModal = (force = false) => {
+    if (isSavingScheduleChange && !force) return;
+
+    setIsChangeScheduleOpen(false);
+    setIsScheduleDatePickerOpen(false);
+    setIsScheduleTimePickerOpen(false);
+    setSelectedScheduleDate(null);
+    setSelectedScheduleTime("");
+  };
+
+  const openChangeScheduleModal = () => {
+    if (!canChangeSchedule) {
+      toast.error("This snapshot cannot be edited");
+      return;
+    }
+
+    setSelectedScheduleDate(resolveScheduleDateValue(displayedSnapshot?.date));
+    setSelectedScheduleTime(String(displayedSnapshot?.time || ""));
+    setIsChangeScheduleOpen(true);
+  };
+
+  const handleScheduleDateSelect = (date: Date) => {
+    setSelectedScheduleDate(date);
+  };
+
+  const handleScheduleTimeSelect = (time: string) => {
+    setSelectedScheduleTime(time);
+  };
+
+  const handleSaveScheduleChange = async () => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const nextDate = formatDateToYYYYMMDD(selectedScheduleDisplayDate);
+    const nextTime = String(selectedScheduleTime || "").trim();
+
+    if (!nextDate) {
+      toast.error("Please select a date");
+      return;
+    }
+
+    if (!nextTime) {
+      toast.error("Please select a time");
+      return;
+    }
+
+    setIsSavingScheduleChange(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), {
+        date: nextDate,
+        time: nextTime,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        date: updated?.date ?? nextDate,
+        time: updated?.time ?? nextTime,
+      }));
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Schedule updated");
+      closeChangeScheduleModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update schedule:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update schedule");
+    } finally {
+      setIsSavingScheduleChange(false);
+    }
+  };
+
+  const closeRepeatScheduleModal = (force = false) => {
+    if (isSavingRepeatSchedule && !force) return;
+
+    setIsRepeatScheduleOpen(false);
+    setIsCustomRepeatDatePickerOpen(false);
+  };
+
+  const openRepeatScheduleModal = () => {
+    if (!canChangeSchedule) {
+      toast.error("This snapshot cannot be repeated");
+      return;
+    }
+
+    if (!displayedPatientId) {
+      toast.error("No patient is assigned to this appointment");
+      return;
+    }
+
+    if (!displayedDoctorName) {
+      toast.error("Assign a doctor before repeating this schedule");
+      return;
+    }
+
+    if (!repeatSourceDate || !displayedSnapshot?.time) {
+      toast.error("This appointment does not have a complete schedule");
+      return;
+    }
+
+    setRepeatOption("next-week");
+    setCustomRepeatDate("");
+    setIsCustomRepeatDatePickerOpen(false);
+    setIsRepeatScheduleOpen(true);
+  };
+
+  const handleRepeatOptionChange = (value: string) => {
+    setRepeatOption(value);
+    setIsCustomRepeatDatePickerOpen(value === "custom");
+  };
+
+  const handleSaveRepeatSchedule = async () => {
+    if (!canSaveRepeatSchedule || !repeatSourceDate || !repeatTargetDate) {
+      toast.error("Please choose a repeat schedule");
+      return;
+    }
+
+    const sourceTime = String(displayedSnapshot?.time || "").trim();
+    const patientId = String(displayedPatientId || "").trim();
+    const doctorName = displayedDoctorName || resolveDoctorName(displayedSnapshot?.doctor || displayedSnapshot?.doctorName || "");
+    const basePrice = Number(displayedBasePrice) || 0;
+    const discountAmount = Number(displayedDiscountAmount) || 0;
+    const sourceTypeNumber =
+      typeof displayedSnapshot?.type === "number"
+        ? displayedSnapshot.type
+        : typeof displayedSnapshot?.type === "string" && displayedSnapshot.type.trim()
+          ? Number(displayedSnapshot.type)
+          : NaN;
+    const appointmentType = Number.isFinite(sourceTypeNumber) ? sourceTypeNumber : OTHER_APPOINTMENT_TYPE_INDEX;
+    const customType = appointmentType === OTHER_APPOINTMENT_TYPE_INDEX
+      ? String(displayedSnapshot?.customType || typeName || "Appointment").trim()
+      : displayedSnapshot?.customType;
+
+    setIsSavingRepeatSchedule(true);
+    try {
+      const resolvedRepeatSlot = await findNextAvailableRepeatSlot({
+        startDate: repeatTargetDate,
+        doctorToCheck: doctorName,
+        durationToCheck: selectedScheduleDuration,
+        patientToCheck: patientId,
+        timeToCheck: sourceTime,
+        availabilityMode: "authenticated",
+      });
+
+      if (!resolvedRepeatSlot) {
+        toast.error("No available repeat schedule found in the next 30 days");
+        return;
+      }
+
+      const followUpDate = resolvedRepeatSlot.date;
+      const followUpDateStr = formatDateToYYYYMMDD(followUpDate);
+      const movedFromRequestedDate = followUpDateStr !== formatDateToYYYYMMDD(repeatTargetDate);
+
+      const newAppointment = await addAppointment({
+        patientId,
+        patientName,
+        doctor: doctorName,
+        doctorId: displayedSnapshot?.doctorId,
+        doctorName,
+        date: followUpDateStr,
+        time: resolvedRepeatSlot.time || sourceTime,
+        type: appointmentType,
+        customType,
+        duration: normalizeBookingDuration(displayedSnapshot?.duration || 30),
+        price: basePrice,
+        discount: discountAmount,
+        notes: buildRepeatScheduleNotes(displayedSnapshot?.notes, repeatSourceDate),
+        treatmentNotes: displayedTreatmentNotesComparisonText || displayedSnapshot?.treatmentNotes || "",
+        toothNumbers: displayedToothNumbersText || displayedSnapshot?.toothNumbers || "",
+        serviceType: displayedSnapshot?.serviceType,
+        status: "scheduled",
+        paymentStatus: "unpaid",
+        paymentMethod: "",
+        totalPaid: 0,
+        balance: Math.max(0, basePrice - discountAmount),
+      } as any);
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: newAppointment, appointmentId: newAppointment?.id },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      if (movedFromRequestedDate) {
+        toast.success(`Repeat schedule moved to ${formatWordyDate(followUpDate)} because the requested date was unavailable.`);
+      } else {
+        toast.success("Repeat schedule created");
+      }
+
+      closeRepeatScheduleModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to repeat schedule:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to repeat schedule");
+    } finally {
+      setIsSavingRepeatSchedule(false);
+    }
+  };
+
   const closeChangeTreatmentModal = (force = false) => {
     if (isSavingTreatmentChange && !force) return;
 
@@ -1097,6 +1701,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setSelectedTreatmentId(null);
     setCustomTreatmentName("");
     setSelectedTreatmentPrice("");
+    setSelectedTreatmentDuration("30");
     setTreatmentToothNumberEntries([""]);
   };
 
@@ -1122,6 +1727,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     );
     const nextSelectedTreatmentId = matchedTreatment?.id ?? OTHER_APPOINTMENT_TYPE_INDEX;
     const currentPrice = pickNumericValue(displayedSnapshot.price, displayedBasePrice, matchedTreatment?.price) ?? 0;
+    const currentDuration = normalizeBookingDuration(displayedSnapshot.duration || matchedTreatment?.duration || 30);
 
     setSelectedTreatmentId(nextSelectedTreatmentId);
     setCustomTreatmentName(
@@ -1130,6 +1736,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         : ""
     );
     setSelectedTreatmentPrice(String(Math.max(0, Number(currentPrice) || 0)));
+    setSelectedTreatmentDuration(String(currentDuration));
     setTreatmentToothNumberEntries(getBookingToothNumberEntries(displayedToothNumbersText));
     setIsChangeTreatmentOpen(true);
   };
@@ -1158,10 +1765,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       return;
     }
 
-    const previousDuration = normalizeBookingDuration(displayedSnapshot.duration || selectedTreatmentOption.duration || 30);
-    const nextDuration = isCustomTreatment
-      ? previousDuration
-      : normalizeBookingDuration(selectedTreatmentOption.duration || 30);
+    const nextDuration = normalizeBookingDuration(selectedTreatmentDuration || selectedTreatmentOption.duration || displayedSnapshot.duration || 30);
     const nextToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
 
     setIsSavingTreatmentChange(true);
@@ -1500,6 +2104,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Stethoscope className="mr-2 h-4 w-4" />}
                         Change treatment
                       </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={openChangeScheduleModal} disabled={!canChangeSchedule}>
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        Change schedule
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={openRepeatScheduleModal} disabled={!canRepeatSchedule}>
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Repeat Schedule
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
                         {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
                         Edit payment
@@ -1639,9 +2251,21 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </section>
 
                   <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex items-center gap-3 text-violet-700">
-                      <CalendarIcon className="h-6 w-6" />
-                      <Label className="text-sm font-black uppercase tracking-wide">Schedule</Label>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
+                      <div className="flex items-center gap-3">
+                        <CalendarIcon className="h-6 w-6" />
+                        <Label className="text-sm font-black uppercase tracking-wide">Schedule</Label>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={openChangeScheduleModal}
+                        disabled={!canChangeSchedule}
+                        className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Change
+                      </Button>
                     </div>
                     <div className="mt-5 grid gap-4 sm:grid-cols-2">
                       <div className="min-w-0 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -1722,17 +2346,60 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <div className="mt-10 border-t border-slate-200 pt-8">
                     <div className="flex items-center gap-3 text-slate-500">
                       <History className="h-5 w-5" />
-                      <Label className="text-sm font-black uppercase tracking-wide">Latest Payment</Label>
+                      <Label className="text-sm font-black uppercase tracking-wide">{paymentSectionTitle}</Label>
                     </div>
-                    {shouldShowPaymentLine ? (
-                      <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
-                        <p className="text-xs font-black uppercase tracking-widest text-emerald-700">{snapshotPaymentLabel}</p>
+                    {hasAppointmentLifecycleAction ? (
+                      <div className={`mt-5 rounded-2xl border p-4 ${appointmentLifecycleClass}`}>
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm">
+                            <AppointmentLifecycleIcon className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-black uppercase tracking-widest">{appointmentLifecycleLabel}</p>
+                            <p className="mt-2 text-sm font-bold leading-6">{appointmentLifecycleDetail}</p>
+                            <p className="mt-2 text-xs font-bold opacity-75">
+                              Logged on {snapshotDate}{changedByName ? ` by ${changedByName}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : shouldShowPaymentLine ? (
+                      <div className={`mt-5 rounded-2xl border p-4 ${mainPaymentCardClass}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <p className={`text-xs font-black uppercase tracking-widest ${mainPaymentTextClass}`}>{snapshotPaymentLabel}</p>
+                          <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
+                        </div>
                         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                          <p className="text-2xl font-black text-emerald-700">{snapshotPaymentAmountLabel}</p>
-                          <p className="text-sm font-bold text-emerald-700/70">
-                            {snapshotPaymentMethodLabel}{snapshotPaymentDateLabel ? ` - ${snapshotPaymentDateLabel}` : ""}
+                          <p className={`text-2xl font-black ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
+                          <p className={`text-sm font-bold ${mainPaymentMutedTextClass}`}>
+                            {snapshotPaymentDateLabel || "No date"}
                           </p>
                         </div>
+                        {additionalPaymentRows.length > 0 ? (
+                          <div className="mt-4">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => setShowAdditionalPayments((current) => !current)}
+                              className={`h-9 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
+                            >
+                              {showAdditionalPayments ? "Show less" : `See more (${additionalPaymentRows.length})`}
+                            </Button>
+                            {showAdditionalPayments ? (
+                              <div className={`mt-2 space-y-2 border-t pt-3 ${mainPaymentDividerClass}`}>
+                                {additionalPaymentRows.map((payment) => (
+                                  <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
+                                    <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>
+                                    <div className="min-w-0 text-right">
+                                      <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
+                                      <p className="mt-0.5 text-xs font-bold text-emerald-700/60">{payment.dateLabel}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="mt-5 max-w-[18rem] text-base font-semibold italic leading-7 text-slate-500">
@@ -1800,6 +2467,196 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={isRepeatScheduleOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeRepeatScheduleModal();
+          else setIsRepeatScheduleOpen(true);
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="w-[calc(100vw-1.25rem)] max-w-[520px] gap-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl"
+        >
+          <DialogHeader className="border-b border-slate-100 px-6 pb-5 pt-6 text-left">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <RotateCcw className="h-6 w-6" />
+                </span>
+                <div className="min-w-0">
+                  <DialogTitle className="text-2xl font-black tracking-tight text-slate-950">Repeat Schedule</DialogTitle>
+                  <DialogDescription className="mt-1 text-sm font-semibold text-slate-500">
+                    {patientName ? `${typeName} for ${patientName}` : typeName}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => closeRepeatScheduleModal()}
+                disabled={isSavingRepeatSchedule}
+                className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100"
+                aria-label="Close repeat schedule"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-5 px-6 py-6">
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm font-bold text-slate-600">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">From</span>
+                <span className="text-right text-slate-900">
+                  {repeatSourceDate ? formatWordyDate(repeatSourceDate) : "No date"} at {formatAppointmentTimeRange(displayedSnapshot?.time, displayedSnapshot?.duration)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">Doctor</span>
+                <span className="truncate text-right text-slate-900">{displayedDoctorName || "No doctor assigned"}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Repeat this appointment</Label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Select value={repeatOption} onValueChange={handleRepeatOptionChange} disabled={isSavingRepeatSchedule}>
+                  <SelectTrigger className="h-11 rounded-full border-0 bg-slate-100 px-4 text-sm font-black text-slate-900 shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-w-[190px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl border-none shadow-2xl">
+                    <SelectItem value={REPEAT_NONE_OPTION} className="mx-2 my-1 rounded-xl">
+                      Do not repeat
+                    </SelectItem>
+                    {REPEAT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value} className="mx-2 my-1 rounded-xl">
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {repeatOption === "custom" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-full border-0 bg-blue-50 px-4 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-100"
+                    onClick={() => setIsCustomRepeatDatePickerOpen(true)}
+                    disabled={isSavingRepeatSchedule}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {customRepeatDate
+                      ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
+                      : "Pick date"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            {repeatOption !== REPEAT_NONE_OPTION ? (
+              <p className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold leading-6 text-blue-700">
+                {repeatTargetDate
+                  ? `This appointment will be cloned to ${repeatTargetLabel}.`
+                  : "Choose a custom clone date to schedule the follow-up."}
+              </p>
+            ) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold leading-6 text-slate-500">
+                Select a repeat option to create another appointment from this schedule.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-3 border-t border-slate-200 bg-slate-50/80 p-5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => closeRepeatScheduleModal()}
+              disabled={isSavingRepeatSchedule}
+              className="h-12 flex-1 rounded-xl border-slate-200 bg-white text-sm font-black text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveRepeatSchedule}
+              disabled={!canSaveRepeatSchedule}
+              className="h-12 flex-1 rounded-xl bg-blue-600 text-sm font-black uppercase tracking-wide text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
+            >
+              {isSavingRepeatSchedule ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+              Create Repeat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DatePickerModal
+        open={isCustomRepeatDatePickerOpen}
+        onOpenChange={setIsCustomRepeatDatePickerOpen}
+        selectedDate={customRepeatDate || repeatTargetDate || repeatSourceDate}
+        onDateSelect={(date) => setCustomRepeatDate(formatDateToYYYYMMDD(date))}
+        doctorName={displayedDoctorName}
+        patientId={String(displayedPatientId || "")}
+        selectedTime={String(displayedSnapshot?.time || "")}
+        duration={selectedScheduleDuration}
+        minDate={repeatSourceDate}
+        title="Choose follow-up date"
+        subtitle="Pick a date for the cloned appointment."
+        disableDatesWithTimeConflict={true}
+        timeConflictMessage="This doctor already has an appointment at the selected time on this day."
+        disableDatesOnOrBeforeMinDate={true}
+      />
+
+      <SelectScheduleModal
+        open={isChangeScheduleOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeChangeScheduleModal();
+        }}
+        title="Change Schedule"
+        description={patientName ? `${typeName} for ${patientName}` : typeName}
+        appointmentLabel={typeName}
+        doctorLabel={displayedDoctorName || "No doctor assigned"}
+        selectedDate={selectedScheduleDisplayDate}
+        selectedTime={selectedScheduleTime}
+        onDateClick={() => setIsScheduleDatePickerOpen(true)}
+        onTimeClick={() => setIsScheduleTimePickerOpen(true)}
+        onSave={handleSaveScheduleChange}
+        onCancel={() => closeChangeScheduleModal()}
+        isSaving={isSavingScheduleChange}
+        canSave={canSaveScheduleChange}
+        saveLabel="Save Schedule"
+      />
+
+      <DatePickerModal
+        open={isScheduleDatePickerOpen}
+        onOpenChange={setIsScheduleDatePickerOpen}
+        selectedDate={selectedScheduleDisplayDate}
+        onDateSelect={handleScheduleDateSelect}
+        doctorName={displayedDoctorName}
+        patientId={String(displayedPatientId || "")}
+        selectedTime={selectedScheduleTime}
+        duration={selectedScheduleDuration}
+        dateSelectionMode="edit"
+        excludeAppointmentId={String(appointmentId || "")}
+      />
+
+      {selectedScheduleDisplayDate ? (
+        <TimePickerModal
+          open={isScheduleTimePickerOpen}
+          onOpenChange={setIsScheduleTimePickerOpen}
+          selectedDate={selectedScheduleDisplayDate}
+          selectedTime={selectedScheduleTime}
+          doctorName={displayedDoctorName}
+          duration={selectedScheduleDuration}
+          onTimeSelect={handleScheduleTimeSelect}
+          onDateChange={handleScheduleDateSelect}
+          excludeAppointmentId={String(appointmentId || "")}
+          patientId={String(displayedPatientId || "")}
+          dateSelectionMode="edit"
+        />
+      ) : null}
+
       <SelectTreatmentModal
         open={isChangeTreatmentOpen}
         onOpenChange={(nextOpen) => {
@@ -1812,13 +2669,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         currentTreatmentLabel={typeName}
         customTreatmentName={customTreatmentName}
         selectedPrice={selectedTreatmentPrice}
+        selectedDuration={selectedTreatmentDuration}
         toothNumberEntries={treatmentToothNumberEntries}
         onCustomTreatmentNameChange={setCustomTreatmentName}
         onSelectedPriceChange={setSelectedTreatmentPrice}
+        onSelectedDurationChange={setSelectedTreatmentDuration}
         onToothNumberEntriesChange={setTreatmentToothNumberEntries}
         onTreatmentSelect={(treatment) => {
           setSelectedTreatmentId(treatment.id);
           setSelectedTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
+          setSelectedTreatmentDuration(String(normalizeBookingDuration(treatment.duration || 30)));
           if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
             setCustomTreatmentName("");
           } else if (!customTreatmentName.trim()) {

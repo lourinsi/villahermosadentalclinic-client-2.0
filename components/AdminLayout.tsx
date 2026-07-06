@@ -8,7 +8,11 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -19,6 +23,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
 import { PatientProfileDraftRedirect } from "./PatientProfileDraftRedirect";
+import { MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH, isReceptionistLevelRole } from "@/lib/management-routes";
 
 export interface AdminLayoutTheme {
   sidebar: string;
@@ -56,7 +61,7 @@ const navItems = [
   { path: "/settings", label: "Settings", icon: Settings },
 ];
 
-const MANAGEMENT_LOGOUT_REDIRECT_KEY = "villahermosa-management-logout-redirect";
+const DEFAULT_STAFF_PASSWORD = "password";
 
 interface AdminLayoutShellProps {
   children: React.ReactNode;
@@ -67,12 +72,19 @@ interface AdminLayoutShellProps {
 export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutShellProps) => {
   const pathname = usePathname();
   const router = useRouter();
-  const { logout, user } = useAuth();
+  const { logout, user, checkAuth } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
   const { isReceptionistView, canSwitchAdminView, toggleViewMode } = useAdminViewMode();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
-  const managementBasePath = user?.role === "receptionist" ? "/receptionist" : "/admin";
+  const [isPasswordPromptOpen, setIsPasswordPromptOpen] = React.useState(false);
+  const [isChangingDefaultPassword, setIsChangingDefaultPassword] = React.useState(false);
+  const [passwordForm, setPasswordForm] = React.useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const managementBasePath = isReceptionistLevelRole(user?.role) ? "/receptionist" : "/admin";
   const {
     notifications,
     markAsRead,
@@ -115,6 +127,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
+  const mustChangePassword = Boolean(user?.mustChangePassword && isReceptionistLevelRole(user?.role));
   const visibleNavItems = navItems.filter((item) => !item.hideForReceptionist || !isReceptionistView);
   const mobilePrimaryNavItems = visibleNavItems.filter((item) =>
     ["Dashboard", "Requests", "Calendar", "Settings"].includes(item.label)
@@ -164,18 +177,78 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   const handleLogout = async () => {
     try {
-      const logoutRedirect = user?.role === "receptionist" ? "/receptionist/login" : "/admin/login";
       try {
-        sessionStorage.setItem(MANAGEMENT_LOGOUT_REDIRECT_KEY, logoutRedirect);
+        sessionStorage.setItem(MANAGEMENT_LOGOUT_REDIRECT_KEY, STAFF_PORTAL_LOGIN_PATH);
       } catch {
         // Ignore storage failures; the explicit router push below still handles normal logout.
       }
       await logout();
       toast.success("Logged out successfully");
-      router.push(logoutRedirect);
+      router.push(STAFF_PORTAL_LOGIN_PATH);
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout");
+    }
+  };
+
+  const handlePasswordFieldChange =
+    (field: "currentPassword" | "newPassword" | "confirmPassword") =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setPasswordForm((current) => ({ ...current, [field]: event.target.value }));
+    };
+
+  const handleChangeDefaultPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+
+    if (passwordForm.newPassword === DEFAULT_STAFF_PASSWORD) {
+      toast.error("Choose a password different from the default password");
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+
+    setIsChangingDefaultPassword(true);
+    try {
+      const response = await fetch(apiUrl("/api/auth/change-password"), {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Failed to change password");
+      }
+
+      if (payload.token) {
+        localStorage.setItem("authToken", payload.token);
+      }
+
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      await checkAuth();
+      setIsPasswordPromptOpen(false);
+      toast.success("Password changed successfully");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to change password");
+    } finally {
+      setIsChangingDefaultPassword(false);
     }
   };
 
@@ -183,7 +256,17 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
     `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 
   React.useEffect(() => {
-    if (user?.role !== "receptionist" || !pathname.startsWith("/admin/")) return;
+    if (mustChangePassword) {
+      setIsPasswordPromptOpen(true);
+      return;
+    }
+
+    setIsPasswordPromptOpen(false);
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  }, [mustChangePassword]);
+
+  React.useEffect(() => {
+    if (!isReceptionistLevelRole(user?.role) || !pathname.startsWith("/admin/")) return;
     router.replace(pathname.replace(/^\/admin/, "/receptionist"));
   }, [pathname, router, user?.role]);
 
@@ -276,6 +359,14 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-base font-black text-white shadow-lg shadow-violet-200">
             {userInitials}
             <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-white bg-emerald-500" />
+            {mustChangePassword && (
+              <span
+                className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-amber-950"
+                title="Change your default password"
+              >
+                <AlertTriangle className="h-3 w-3" />
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -402,9 +493,25 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           </ul>
         </nav>
         <div className={`${theme.footer} ${isSidebarCollapsed ? "md:flex md:flex-col md:items-center md:gap-3 md:space-y-0" : ""}`}>
-          <div className={`${theme.userBox} ${isSidebarCollapsed ? "md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0" : ""}`}>
+          <div className={`${theme.userBox} relative ${isSidebarCollapsed ? "md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0" : ""}`}>
             <User className={theme.userIcon} />
             <span className={`text-sm font-medium truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{user?.username || portalTitle}</span>
+            {mustChangePassword && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={`ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-300 text-amber-950 shadow-sm ring-1 ring-amber-100 ${isSidebarCollapsed ? "md:absolute md:-right-1 md:-top-1 md:ml-0 md:h-4 md:w-4" : ""}`}
+                    tabIndex={0}
+                    aria-label="Change your default password"
+                  >
+                    <AlertTriangle className={`${isSidebarCollapsed ? "md:h-3 md:w-3" : "h-3.5 w-3.5"}`} />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side={isSidebarCollapsed ? "right" : "top"}>
+                  Change your default password.
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <Button
             onClick={handleLogout}
@@ -545,6 +652,84 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           />
         )}
       </div>
+      <Dialog
+        open={mustChangePassword && isPasswordPromptOpen}
+        onOpenChange={(open) => {
+          if (mustChangePassword && !open) {
+            setIsPasswordPromptOpen(true);
+            return;
+          }
+          setIsPasswordPromptOpen(open);
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-md"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+        >
+          <form onSubmit={handleChangeDefaultPassword} className="space-y-5">
+            <DialogHeader>
+              <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <DialogTitle>Change your default password</DialogTitle>
+              <DialogDescription>
+                Your staff account is still using the default password. Change it before continuing.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="default-current-password">Current Password</Label>
+                <Input
+                  id="default-current-password"
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={handlePasswordFieldChange("currentPassword")}
+                  autoComplete="current-password"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="default-new-password">New Password</Label>
+                <Input
+                  id="default-new-password"
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={handlePasswordFieldChange("newPassword")}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="default-confirm-password">Confirm New Password</Label>
+                <Input
+                  id="default-confirm-password"
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={handlePasswordFieldChange("confirmPassword")}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleLogout}
+                disabled={isChangingDefaultPassword}
+              >
+                Logout
+              </Button>
+              <Button type="submit" disabled={isChangingDefaultPassword}>
+                {isChangingDefaultPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Change Password
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

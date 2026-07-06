@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 type TreatmentOption = {
   id: number;
@@ -36,9 +37,11 @@ type SelectTreatmentModalProps = {
   currentTreatmentLabel?: string;
   customTreatmentName?: string;
   selectedPrice?: string | number;
+  selectedDuration?: string | number;
   toothNumberEntries?: string[];
   onCustomTreatmentNameChange?: (value: string) => void;
   onSelectedPriceChange?: (value: string) => void;
+  onSelectedDurationChange?: (value: string) => void;
   onToothNumberEntriesChange?: (entries: string[]) => void;
   onTreatmentSelect?: (treatment: TreatmentOption) => void;
   onSave?: () => void | Promise<void>;
@@ -73,9 +76,11 @@ export function SelectTreatmentModal({
   currentTreatmentLabel,
   customTreatmentName = "",
   selectedPrice,
+  selectedDuration: selectedDurationInput,
   toothNumberEntries,
   onCustomTreatmentNameChange,
   onSelectedPriceChange,
+  onSelectedDurationChange,
   onToothNumberEntriesChange,
   onTreatmentSelect,
   onSave,
@@ -99,7 +104,8 @@ export function SelectTreatmentModal({
       ? String(selectedTreatment?.price ?? 0)
       : String(selectedPrice);
   const selectedPriceNumber = Math.max(0, Number(selectedPriceValue) || 0);
-  const selectedDuration = Number(selectedTreatment?.duration || 0) || 30;
+  const selectedDuration = normalizeBookingDuration(selectedDurationInput ?? selectedTreatment?.duration ?? 30);
+  const canEditDuration = Boolean(onSelectedDurationChange && selectedTreatment);
   const showToothNumberField = Boolean(toothNumberEntries || onToothNumberEntriesChange);
   const resolvedToothNumberEntries = toothNumberEntries && toothNumberEntries.length > 0 ? toothNumberEntries : [""];
   const filledToothNumbers = resolvedToothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
@@ -337,10 +343,29 @@ export function SelectTreatmentModal({
             <div className="grid content-start gap-3 bg-slate-50/70 p-4 sm:grid-cols-2 sm:p-5">
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Duration</p>
-                <p className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
-                  <Clock className="h-4 w-4 text-blue-600" />
-                  {selectedDuration} mins
-                </p>
+                <div className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
+                  <Clock className="h-4 w-4 shrink-0 text-blue-600" />
+                  {canEditDuration ? (
+                    <Select
+                      value={String(selectedDuration)}
+                      onValueChange={(value) => onSelectedDurationChange?.(String(normalizeBookingDuration(value)))}
+                      disabled={isSaving}
+                    >
+                      <SelectTrigger className="h-auto min-h-0 border-0 bg-transparent px-0 py-0 text-left text-lg font-black text-slate-950 shadow-none focus:ring-0 focus:ring-offset-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {ALLOWED_BOOKING_DURATIONS.map((duration) => (
+                          <SelectItem key={duration} value={String(duration)}>
+                            {duration} mins
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span>{selectedDuration} mins</span>
+                  )}
+                </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Catalog Price</p>
