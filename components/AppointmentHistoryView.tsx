@@ -887,9 +887,41 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
+  const isDeletedAppointmentState = (state: any) =>
+    Boolean(state?.deleted || state?.deletedAt) ||
+    normalizeBookingHistoryStatus(state?.status) === "deleted";
+  const derivedLifecycleAction = (() => {
+    const wasDeleted = isDeletedAppointmentState(prevState);
+    const isDeleted = isDeletedAppointmentState(nextState);
+
+    if (!wasDeleted && isDeleted) return "deleted";
+    if (wasDeleted && !isDeleted) return "restored";
+    return "";
+  })();
+  const appointmentLifecycleAction =
+    displayedSnapshot?._appointmentHistoryAction ||
+    (openedFromBookingModal ? derivedLifecycleAction : "");
+  const hasAppointmentLifecycleAction =
+    appointmentLifecycleAction === "deleted" || appointmentLifecycleAction === "restored";
+  const appointmentLifecycleLabel =
+    appointmentLifecycleAction === "deleted" ? "Appointment Deleted" : "Appointment Restored";
+  const appointmentLifecycleDetail =
+    appointmentLifecycleAction === "deleted"
+      ? "This snapshot was logged when the appointment was deleted."
+      : "This snapshot was logged when the appointment was restored.";
+  const appointmentLifecycleClass =
+    appointmentLifecycleAction === "deleted"
+      ? "border-red-100 bg-red-50/70 text-red-700"
+      : "border-emerald-100 bg-emerald-50/70 text-emerald-700";
+  const AppointmentLifecycleIcon = appointmentLifecycleAction === "deleted" ? AlertTriangle : RefreshCw;
+
   const focusedPaymentSnapshot = selectedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
   const focusedPaymentAmount = focusedPaymentSnapshot ? getPaymentLogAmountValue(focusedPaymentSnapshot) : 0;
   const hasFocusedPaymentSnapshot = focusedPaymentAmount > 0;
+  const focusedPaymentAction =
+    focusedPaymentSnapshot?._paymentHistoryAction ||
+    displayedSnapshot?._paymentHistoryAction ||
+    "";
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
   const paymentAdjustment = getBookingPaymentAdjustment(displayedSnapshot);
   const isPaymentAdjustmentSnapshot = paymentAdjustment.isAdjustment;
@@ -929,8 +961,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? paymentAdjustment.delta < 0
       ? "Payment Reduced"
       : "Payment Adjusted"
-    : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
-  const paymentSectionTitle = hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
+    : focusedPaymentAction === "deleted"
+      ? "Deleted Payment"
+      : focusedPaymentAction === "restored"
+        ? "Restored Payment"
+        : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+  const paymentSectionTitle = hasAppointmentLifecycleAction
+    ? "Appointment Activity"
+    : hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
+  const mainPaymentTone = focusedPaymentAction === "deleted" ? "deleted" : "default";
+  const mainPaymentCardClass = mainPaymentTone === "deleted"
+    ? "border-red-100 bg-red-50/70"
+    : "border-emerald-100 bg-emerald-50/60";
+  const mainPaymentTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700"
+    : "text-emerald-700";
+  const mainPaymentMutedTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700/70"
+    : "text-emerald-700/70";
+  const mainPaymentMethodTextClass = mainPaymentTone === "deleted"
+    ? "text-red-700/80"
+    : "text-emerald-700/80";
+  const mainPaymentDividerClass = mainPaymentTone === "deleted"
+    ? "border-red-100"
+    : "border-emerald-100";
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
@@ -2095,15 +2149,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       <History className="h-5 w-5" />
                       <Label className="text-sm font-black uppercase tracking-wide">{paymentSectionTitle}</Label>
                     </div>
-                    {shouldShowPaymentLine ? (
-                      <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+                    {hasAppointmentLifecycleAction ? (
+                      <div className={`mt-5 rounded-2xl border p-4 ${appointmentLifecycleClass}`}>
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm">
+                            <AppointmentLifecycleIcon className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-black uppercase tracking-widest">{appointmentLifecycleLabel}</p>
+                            <p className="mt-2 text-sm font-bold leading-6">{appointmentLifecycleDetail}</p>
+                            <p className="mt-2 text-xs font-bold opacity-75">
+                              Logged on {snapshotDate}{changedByName ? ` by ${changedByName}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : shouldShowPaymentLine ? (
+                      <div className={`mt-5 rounded-2xl border p-4 ${mainPaymentCardClass}`}>
                         <div className="flex items-start justify-between gap-3">
-                          <p className="text-xs font-black uppercase tracking-widest text-emerald-700">{snapshotPaymentLabel}</p>
-                          <p className="max-w-[45%] text-right text-sm font-black text-emerald-700/80">{snapshotPaymentMethodLabel}</p>
+                          <p className={`text-xs font-black uppercase tracking-widest ${mainPaymentTextClass}`}>{snapshotPaymentLabel}</p>
+                          <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
                         </div>
                         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                          <p className="text-2xl font-black text-emerald-700">{snapshotPaymentAmountLabel}</p>
-                          <p className="text-sm font-bold text-emerald-700/70">
+                          <p className={`text-2xl font-black ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
+                          <p className={`text-sm font-bold ${mainPaymentMutedTextClass}`}>
                             {snapshotPaymentDateLabel || "No date"}
                           </p>
                         </div>
@@ -2113,12 +2182,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               type="button"
                               variant="ghost"
                               onClick={() => setShowAdditionalPayments((current) => !current)}
-                              className="h-9 rounded-full px-0 text-sm font-black text-emerald-700 hover:bg-transparent hover:text-emerald-800"
+                              className={`h-9 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
                             >
                               {showAdditionalPayments ? "Show less" : `See more (${additionalPaymentRows.length})`}
                             </Button>
                             {showAdditionalPayments ? (
-                              <div className="mt-2 space-y-2 border-t border-emerald-100 pt-3">
+                              <div className={`mt-2 space-y-2 border-t pt-3 ${mainPaymentDividerClass}`}>
                                 {additionalPaymentRows.map((payment) => (
                                   <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
                                     <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>

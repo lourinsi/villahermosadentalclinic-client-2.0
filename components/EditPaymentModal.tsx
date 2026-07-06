@@ -23,13 +23,14 @@ import {
 import { Textarea } from "./ui/textarea";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
 import { CreditCard, DollarSign, Edit, Loader2, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
-import { formatWordyDate } from "@/lib/utils";
+import { cn, formatWordyDate } from "@/lib/utils";
 import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
 import {
   BookingPaymentPage,
@@ -80,6 +81,12 @@ const getPaymentOptionLabel = (payment?: any) => {
   return `${id}${amount} (${method})`;
 };
 
+const formatPaymentAmount = (value: number) =>
+  `PHP ${Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 const EDIT_PAYMENT_METHOD_OPTIONS = [
   NO_PAYMENT_METHOD_LABEL,
   "GCash",
@@ -114,6 +121,7 @@ export function EditPaymentModal() {
     appointments: contextAppointments,
   } = usePaymentModal();
   const { refreshPatients, updateAppointment } = useAppointmentModal();
+  const { isReceptionistView } = useAdminViewMode();
 
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [amount, setAmount] = useState<string>("");
@@ -414,6 +422,36 @@ export function EditPaymentModal() {
   const selectedTreatmentName = selectedAppointmentRecord
     ? getAppointmentTypeName(selectedAppointmentRecord.type, selectedAppointmentRecord.customType)
     : effectivePaymentData?.appointmentSnapshot?.customType || effectivePaymentData?.appointmentSnapshot?.type || "Selected appointment";
+  const appointmentSnapshot = effectivePaymentData?.appointmentSnapshot || {};
+  const paymentAmountForSummary = toPaymentNumber(
+    effectivePaymentData?.amount ??
+    effectivePaymentData?.paymentAmount ??
+    effectivePaymentData?.value ??
+    amount
+  );
+  const paymentMethodForSummary = normalizeBookingPaymentMethod(paymentMethod || getPaymentMethodValue(effectivePaymentData));
+  const paymentSummaryTitle = paymentAmountForSummary > 0
+    ? `${formatPaymentAmount(paymentAmountForSummary)} ${paymentMethodForSummary && paymentMethodForSummary !== NO_PAYMENT_METHOD_LABEL ? paymentMethodForSummary : "payment"}`
+    : `${paymentMethodForSummary && paymentMethodForSummary !== NO_PAYMENT_METHOD_LABEL ? paymentMethodForSummary : "Selected"} payment`;
+  const paymentSummaryDate = formatWordyDate(
+    effectivePaymentData?.paymentDate || effectivePaymentData?.date || paymentDate,
+    { fallback: "selected date" }
+  );
+  const appointmentDateSummary = formatWordyDate(
+    selectedAppointmentRecord?.date || effectivePaymentData?.appointmentDate || appointmentSnapshot?.date,
+    { fallback: "" }
+  );
+  const patientSummaryName = String(
+    effectivePaymentData?.patientName ||
+    appointmentSnapshot?.patientName ||
+    appointmentSnapshot?.patient?.name ||
+    appointmentSnapshot?.patient?.fullName ||
+    ""
+  ).trim();
+  const editPaymentTitle = isReceptionistView ? "Edit This Payment" : "Edit Payment";
+  const editPaymentDescription = isReceptionistView
+    ? "Update the amount, date, method, and notes for the selected payment."
+    : "Update payment details and appointment link.";
 
   const performUpdatePayment = async ({ adjustedTotalDue }: { adjustedTotalDue?: number } = {}): Promise<boolean> => {
     if (isSubmittingPayment) return false;
@@ -525,19 +563,24 @@ export function EditPaymentModal() {
     <Dialog key={paymentId} open={isPaymentModalOpen} onOpenChange={closePaymentModal}>
       <DialogContent
         showCloseButton={false}
-        className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(56rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+        className={cn(
+          "!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(56rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+        )}
       >
         <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 shadow-sm sm:px-6">
           <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+              <div className={cn(
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl",
+                isReceptionistView ? "bg-blue-50 text-blue-600" : "bg-violet-50 text-violet-600"
+              )}>
                 <CreditCard className="h-5 w-5" />
               </div>
               <div className="min-w-0 text-left">
-                <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Edit Payment</DialogTitle>
+                <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">{editPaymentTitle}</DialogTitle>
                 <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
-                  Update payment details and appointment link.
+                  {editPaymentDescription}
                 </DialogDescription>
               </div>
             </div>
@@ -548,8 +591,8 @@ export function EditPaymentModal() {
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-6">
           <BookingPaymentPage
-            title="Edit Payment"
-            description="Update payment details and appointment link."
+            title={editPaymentTitle}
+            description={editPaymentDescription}
             selectedTreatmentName={selectedTreatmentName}
             totalBilled={totalBilled}
             totalPaid={totalPaid}
@@ -568,7 +611,38 @@ export function EditPaymentModal() {
                 Loading payment record...
               </div>
             ) : null}
-            paymentIdSelector={(
+            appointmentSelector={isReceptionistView ? (
+              <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+                      <CreditCard className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-widest text-blue-700">Editing this payment</p>
+                      <h3 className="mt-1 text-xl font-black leading-tight text-slate-950">{paymentSummaryTitle}</h3>
+                      <p className="mt-1 text-sm font-semibold leading-snug text-slate-500">
+                        {patientSummaryName ? `For ${patientSummaryName}` : `For ${selectedTreatmentName}`}
+                        {patientSummaryName && selectedTreatmentName ? ` - ${selectedTreatmentName}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-2 rounded-2xl bg-blue-50/80 p-3 text-xs font-bold text-blue-800 sm:min-w-[15rem]">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-blue-600">Payment date</span>
+                      <span className="text-right text-blue-950">{paymentSummaryDate}</span>
+                    </div>
+                    {appointmentDateSummary ? (
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-blue-600">Appointment</span>
+                        <span className="text-right text-blue-950">{appointmentDateSummary}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : undefined}
+            paymentIdSelector={!isReceptionistView ? (
               <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm">
                 <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment ID</Label>
                 <Select
@@ -602,8 +676,8 @@ export function EditPaymentModal() {
                   </SelectContent>
                 </Select>
               </div>
-            )}
-            appointmentIdField={(
+            ) : undefined}
+            appointmentIdField={!isReceptionistView ? (
               <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm">
                 <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Appointment ID</Label>
                 <Input
@@ -612,7 +686,7 @@ export function EditPaymentModal() {
                   className="mt-2 h-12 rounded-xl border-slate-200 bg-slate-100 font-mono text-xs font-semibold text-slate-600 shadow-sm"
                 />
               </div>
-            )}
+            ) : undefined}
             transactionIdField={(
               <div className="space-y-2">
                 <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Transaction ID</Label>
@@ -795,11 +869,16 @@ export function EditPaymentModal() {
             </Button>
             <Button
               onClick={handleSubmit}
-              className="h-12 rounded-full bg-violet-600 font-black text-white shadow-lg shadow-violet-100 hover:bg-violet-700"
+              className={cn(
+                "h-12 rounded-full font-black text-white shadow-lg",
+                isReceptionistView
+                  ? "bg-blue-600 shadow-blue-100 hover:bg-blue-700"
+                  : "bg-violet-600 shadow-violet-100 hover:bg-violet-700"
+              )}
               disabled={isSubmittingPayment || isFetchingPayment || !paymentMethod || !amount || parseFloat(amount) <= 0}
             >
               {isSubmittingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Edit className="h-4 w-4 mr-2" />}
-              {isSubmittingPayment ? "Updating..." : "Update"}
+              {isSubmittingPayment ? "Updating..." : isReceptionistView ? "Save Changes" : "Update"}
             </Button>
           </div>
         </div>

@@ -760,8 +760,9 @@ export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { openEditPaymentModal } = usePaymentModal();
-  const canManageExpenseStatus = normalizeFilterValue(effectiveRole) === "admin";
-  const canSeeDeletedPayments = normalizeFilterValue(effectiveRole) !== "receptionist";
+  const normalizedEffectiveRole = normalizeFilterValue(effectiveRole);
+  const canManageExpenseStatus = normalizedEffectiveRole === "admin";
+  const canSeeDeletedPayments = normalizedEffectiveRole === "admin" || normalizedEffectiveRole === "doctor";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
@@ -838,6 +839,7 @@ export function FinanceView() {
   const fetchData = async (payrollMonth = selectedPayrollMonth) => {
     setIsLoading(true);
     try {
+      const recentTransactionsPath = `/api/finance/recent-transactions?limit=500${canSeeDeletedPayments ? "&includeDeleted=true" : ""}`;
       const payrollDataRequest = PAYROLL_DISABLED
         ? Promise.resolve([] as PayrollEntry[])
         : fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data");
@@ -854,7 +856,7 @@ export function FinanceView() {
         fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
         payrollDataRequest,
-        fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions?limit=500", "recent transactions"),
+        fetchApiData<RecentTransaction[]>(recentTransactionsPath, "recent transactions"),
       ]);
 
       setRevenueData(revenueData || []);
@@ -959,7 +961,7 @@ export function FinanceView() {
 
   useEffect(() => {
     fetchData();
-  }, []); // Empty dependency array means this effect runs once on mount
+  }, [canSeeDeletedPayments]);
 
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);
@@ -2336,7 +2338,8 @@ export function FinanceView() {
     setLoadingAppointmentId(loadingKey);
     try {
       if (!appointmentId && !transactionToView.appointmentSnapshot) {
-        const refreshedTransactions = await fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions?limit=500", "recent transactions");
+        const recentTransactionsPath = `/api/finance/recent-transactions?limit=500${canSeeDeletedPayments ? "&includeDeleted=true" : ""}`;
+        const refreshedTransactions = await fetchApiData<RecentTransaction[]>(recentTransactionsPath, "recent transactions");
         setRecentTransactions(refreshedTransactions || []);
 
         transactionToView =
