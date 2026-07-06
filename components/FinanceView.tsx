@@ -824,6 +824,7 @@ export function FinanceView() {
   const [isSavingPayroll, setIsSavingPayroll] = useState(false);
   const [isAppointmentHistoryOpen, setIsAppointmentHistoryOpen] = useState(false);
   const [appointmentSnapshot, setAppointmentSnapshot] = useState<any | null>(null);
+  const [appointmentPaymentSnapshot, setAppointmentPaymentSnapshot] = useState<any | null>(null);
   const [appointmentSnapshotLogDate, setAppointmentSnapshotLogDate] = useState("");
   const [appointmentSnapshotIsHistorical, setAppointmentSnapshotIsHistorical] = useState(false);
   const [loadingAppointmentId, setLoadingAppointmentId] = useState<string | null>(null);
@@ -2315,6 +2316,7 @@ export function FinanceView() {
     try {
       const live = await fetchApiData<any>(`/api/appointments/${encodeURIComponent(appointmentId)}`, "current appointment");
       setAppointmentSnapshot(live);
+      setAppointmentPaymentSnapshot(null);
       setAppointmentSnapshotLogDate(live?.updatedAt || live?.createdAt || "");
       setAppointmentSnapshotIsHistorical(false);
       setIsAppointmentHistoryOpen(true);
@@ -2348,9 +2350,11 @@ export function FinanceView() {
         return;
       }
 
-      // Prefer any snapshot attached to the transaction
+      // Payment transaction views should show the live appointment details and
+      // keep only the selected payment amount/date/method fixed to the row.
       let snapshot = transactionToView.appointmentSnapshot || null;
       const resolvedAppointmentId = appointmentId || getAppointmentIdFromSnapshot(snapshot);
+      const isPaymentSnapshot = isPaymentTransactionRow(transactionToView);
       // Determine whether this snapshot should be treated as historical (older log).
       // Priority: explicit _isHistorical flag (from fetchSnapshotFromLogs) > logDate alone > default false
       let isHistorical = false;
@@ -2362,8 +2366,23 @@ export function FinanceView() {
         isHistorical = true;
       }
 
+      if (isPaymentSnapshot && resolvedAppointmentId) {
+        try {
+          const liveSnapshot = await fetchApiData<any>(
+            `/api/appointments/${encodeURIComponent(resolvedAppointmentId)}?t=${Date.now()}`,
+            "current appointment"
+          );
+          if (liveSnapshot) {
+            snapshot = liveSnapshot;
+            isHistorical = false;
+          }
+        } catch (error) {
+          console.warn("Failed to load current appointment for payment transaction:", error);
+        }
+      }
+
       // If no snapshot and we have a logDate, try reconstructing from logs
-      if (!snapshot && resolvedAppointmentId && transactionToView.logDate) {
+      if (!snapshot && !isPaymentSnapshot && resolvedAppointmentId && transactionToView.logDate) {
         try {
           const fromLogs = await fetchSnapshotFromLogs(resolvedAppointmentId, transactionToView.logDate);
           if (fromLogs) {
@@ -2399,7 +2418,22 @@ export function FinanceView() {
       const resolvedTransactionId = transactionToView.transactionId || transactionToView.id || snapshot?.transactionId || paymentTxnId;
       const resolvedPaymentDate = transactionToView.paymentDate || transactionToView.date || snapshot?.paymentDate;
 
-      const isPaymentSnapshot = isPaymentTransactionRow(transactionToView);
+      const selectedPaymentForDialog = isPaymentSnapshot
+        ? {
+            ...transactionToView,
+            id: transactionToView.paymentId || transactionToView.paymentRecordId || transactionToView.id,
+            paymentId: transactionToView.paymentId || transactionToView.paymentRecordId || transactionToView.id,
+            paymentRecordId: transactionToView.paymentRecordId || transactionToView.paymentId || transactionToView.id,
+            transactionId: resolvedTransactionId,
+            amount: resolvedPaymentAmount || 0,
+            paymentAmount: resolvedPaymentAmount || 0,
+            date: resolvedPaymentDate,
+            paymentDate: resolvedPaymentDate,
+            method: resolvedPaymentMethod,
+            paymentMethod: resolvedPaymentMethod,
+            changedAt: transactionToView.logDate || transactionToView.date,
+          }
+        : null;
       const enrichedSnapshot = {
         ...snapshot,
         transactionId: resolvedTransactionId,
@@ -2415,15 +2449,19 @@ export function FinanceView() {
         changedByName: transactionToView.changedByName ?? snapshot?.changedByName,
         // preserve any explicit _isHistorical flag from fetched snapshot; otherwise
         // derive from the isHistorical value we computed earlier.
-        _isHistorical: Boolean(snapshot?._isHistorical) || Boolean(isHistorical),
-        // mark log/change type when coming from a transaction log
-        logType: isPaymentSnapshot ? "payment" : snapshot?.logType || (transactionToView.source ? String(transactionToView.source) : undefined) || (isHistorical ? "payment" : snapshot?.logType),
-        changeType: isPaymentSnapshot ? "payment" : snapshot?.changeType || (isHistorical ? "payment" : snapshot?.changeType),
+        _isHistorical: isPaymentSnapshot ? false : Boolean(snapshot?._isHistorical) || Boolean(isHistorical),
+        logType: isPaymentSnapshot ? snapshot?.logType : snapshot?.logType || (transactionToView.source ? String(transactionToView.source) : undefined) || (isHistorical ? "payment" : snapshot?.logType),
+        changeType: isPaymentSnapshot ? snapshot?.changeType : snapshot?.changeType || (isHistorical ? "payment" : snapshot?.changeType),
       };
 
       setAppointmentSnapshot(enrichedSnapshot);
-      setAppointmentSnapshotLogDate(transactionToView.logDate || transactionToView.date || enrichedSnapshot?.changedAt || enrichedSnapshot?.updatedAt || "");
-      setAppointmentSnapshotIsHistorical(Boolean(enrichedSnapshot._isHistorical));
+      setAppointmentPaymentSnapshot(selectedPaymentForDialog);
+      setAppointmentSnapshotLogDate(
+        isPaymentSnapshot
+          ? enrichedSnapshot?.updatedAt || enrichedSnapshot?.createdAt || transactionToView.logDate || transactionToView.date || ""
+          : transactionToView.logDate || transactionToView.date || enrichedSnapshot?.changedAt || enrichedSnapshot?.updatedAt || ""
+      );
+      setAppointmentSnapshotIsHistorical(isPaymentSnapshot ? false : Boolean(enrichedSnapshot._isHistorical));
       setIsAppointmentHistoryOpen(true);
     } catch (error) {
       console.error("Error loading appointment snapshot:", error);
@@ -3831,6 +3869,7 @@ export function FinanceView() {
           setIsAppointmentHistoryOpen(open);
           if (!open) {
             setAppointmentSnapshot(null);
+            setAppointmentPaymentSnapshot(null);
             setAppointmentSnapshotLogDate("");
             setAppointmentSnapshotIsHistorical(false);
           }
@@ -3842,6 +3881,8 @@ export function FinanceView() {
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
         openedFromBookingModal={false}
+        selectedPaymentSnapshot={appointmentPaymentSnapshot}
+        useCurrentAppointmentDetails
       />
     </div>
   );

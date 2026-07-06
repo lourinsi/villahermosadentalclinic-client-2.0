@@ -64,6 +64,8 @@ interface AppointmentHistoryViewProps {
   onRestoreNotification?: (notificationId: string) => void | Promise<void>;
   openedFromBookingModal?: boolean;
   showPreviousInputChanges?: boolean;
+  selectedPaymentSnapshot?: any;
+  useCurrentAppointmentDetails?: boolean;
 }
 
 type SnapshotState = "historical" | "latest" | "current";
@@ -385,17 +387,64 @@ const resolveScheduleDateValue = (value: unknown): Date | null => {
 const getPaymentLogAmountValue = (payment: any) => Number(payment?.amount || payment?.paymentAmount || 0);
 
 const getPaymentLogDateValue = (payment: any) =>
-  payment?.paymentDate || payment?.date || payment?.changedAt || payment?.createdAt || "";
+  payment?.paymentDate ||
+  payment?.date ||
+  payment?.paymentDetails?.paymentDate ||
+  payment?.paymentDetails?.date ||
+  payment?.transaction?.paymentDate ||
+  payment?.transaction?.date ||
+  "";
+
+const getPaymentLogFallbackDateValue = (payment: any) =>
+  payment?.changedAt || payment?.createdAt || payment?.updatedAt || "";
 
 const getPaymentLogMethodValue = (payment: any) =>
   payment?.paymentMethod || payment?.method || payment?.paymentDetails?.method || "";
 
 const getPaymentLogSortTime = (payment: any) => {
-  const parsedDate = new Date(getPaymentLogDateValue(payment));
-  return Number.isNaN(parsedDate.getTime()) ? 0 : parsedDate.getTime();
+  const primaryDate = getPaymentLogDateValue(payment);
+  const parsedPrimary = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(primaryDate)) ? `${primaryDate}T00:00:00` : String(primaryDate));
+  if (!Number.isNaN(parsedPrimary.getTime())) return parsedPrimary.getTime();
+
+  const fallbackDate = getPaymentLogFallbackDateValue(payment);
+  const parsedFallback = new Date(fallbackDate);
+  return Number.isNaN(parsedFallback.getTime()) ? 0 : parsedFallback.getTime();
 };
 
-export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true }: AppointmentHistoryViewProps) {
+const getPaymentEntryIdentity = (payment: any) =>
+  String(
+    payment?.paymentId ||
+    payment?.paymentRecordId ||
+    payment?.transactionId ||
+    payment?._paymentTransactionId ||
+    payment?._transactionId ||
+    payment?.id ||
+    ""
+  ).trim();
+
+const normalizePaymentEntryMethod = (payment: any) =>
+  String(getPaymentLogMethodValue(payment) || "").trim().toLowerCase();
+
+const isSamePaymentEntry = (first: any, second: any) => {
+  if (!first || !second) return false;
+
+  const firstIdentity = getPaymentEntryIdentity(first);
+  const secondIdentity = getPaymentEntryIdentity(second);
+  if (firstIdentity && secondIdentity && firstIdentity === secondIdentity) return true;
+
+  const firstAmount = getPaymentLogAmountValue(first);
+  const secondAmount = getPaymentLogAmountValue(second);
+  const firstDate = String(getPaymentLogDateValue(first) || "").trim();
+  const secondDate = String(getPaymentLogDateValue(second) || "").trim();
+
+  return (
+    Math.abs(firstAmount - secondAmount) <= 0.01 &&
+    Boolean(firstDate && secondDate && firstDate === secondDate) &&
+    normalizePaymentEntryMethod(first) === normalizePaymentEntryMethod(second)
+  );
+};
+
+export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true, selectedPaymentSnapshot, useCurrentAppointmentDetails = false }: AppointmentHistoryViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
@@ -439,17 +488,20 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const shouldShowPreviousInputChanges = openedFromBookingModal || showPreviousInputChanges;
+  const shouldUseCurrentAppointmentDetails = Boolean(useCurrentAppointmentDetails && !openedFromBookingModal);
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
     // `_isHistorical` (set by `fetchSnapshotFromLogs`), honor that value. Otherwise
     // fall back to the `isHistorical` prop provided by the caller.
-    const derivedHistorical = appointmentSnapshot && Object.prototype.hasOwnProperty.call(appointmentSnapshot, "_isHistorical")
+    const derivedHistorical = shouldUseCurrentAppointmentDetails
+      ? false
+      : appointmentSnapshot && Object.prototype.hasOwnProperty.call(appointmentSnapshot, "_isHistorical")
       ? Boolean(appointmentSnapshot._isHistorical)
       : Boolean(isHistorical);
     setSnapshotState(derivedHistorical ? "historical" : "current");
-  }, [appointmentSnapshot, isHistorical]);
+  }, [appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
 
   useEffect(() => {
     if (!open) {
@@ -541,6 +593,49 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   }, [open, displayedAppointmentId]);
 
   useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !shouldUseCurrentAppointmentDetails || !appointmentId) return;
+
+    const controller = new AbortController();
+    const loadCurrentAppointmentDetails = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        const currentAppointment = response.ok && result?.data ? result.data : null;
+        if (!currentAppointment) return;
+
+        setDisplayedSnapshot((current: any) => ({
+          ...(current || {}),
+          ...currentAppointment,
+          id: currentAppointment.id || appointmentId,
+          appointmentId,
+          changedAt: currentAppointment.changedAt || currentAppointment.updatedAt || currentAppointment.createdAt || current?.changedAt,
+          _isHistorical: false,
+        }));
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(currentAppointment);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load current appointment details:", error);
+        }
+      }
+    };
+
+    loadCurrentAppointmentDetails();
+
+    return () => controller.abort();
+  }, [
+    open,
+    displayedAppointmentId,
+    shouldUseCurrentAppointmentDetails,
+    paymentLogsRefreshKey,
+  ]);
+
+  useEffect(() => {
     setLatestPaymentLogAmount(null);
     setLatestPaymentLogDate("");
     setLatestPaymentLogMethod("");
@@ -556,13 +651,40 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const controller = new AbortController();
     const loadLatestPaymentLogAmount = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/payments`), {
-          credentials: "include",
-          headers: getAuthHeaders(),
-          signal: controller.signal,
-        });
-        const result = await response.json().catch(() => null);
-        const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+        const fetchPaymentRows = async (path: string, normalizeRow: (row: any) => any) => {
+          const response = await fetch(apiUrl(path), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+            signal: controller.signal,
+          });
+          const result = await response.json().catch(() => null);
+          return response.ok && result?.success && Array.isArray(result.data)
+            ? result.data.map(normalizeRow)
+            : [];
+        };
+
+        const paymentRecords = await fetchPaymentRows(
+          `/api/payments/appointment/${encodeURIComponent(appointmentId)}`,
+          (payment: any) => ({
+            ...payment,
+            paymentId: payment.paymentId || payment.id,
+            paymentRecordId: payment.paymentRecordId || payment.id,
+            paymentAmount: payment.paymentAmount ?? payment.amount,
+            paymentDate: getPaymentLogDateValue(payment) || payment.date,
+            paymentMethod: getPaymentLogMethodValue(payment) || payment.method,
+          })
+        );
+        const logs = paymentRecords.length > 0
+          ? paymentRecords
+          : await fetchPaymentRows(
+              `/api/appointments/${encodeURIComponent(appointmentId)}/payments`,
+              (log: any) => ({
+                ...log,
+                paymentAmount: log.paymentAmount ?? log.amount,
+                paymentDate: getPaymentLogDateValue(log) || getPaymentLogFallbackDateValue(log),
+                paymentMethod: getPaymentLogMethodValue(log),
+              })
+            );
         const positiveLogs = logs
           .filter((log: any) => getPaymentLogAmountValue(log) > 0)
           .sort((a: any, b: any) => getPaymentLogSortTime(b) - getPaymentLogSortTime(a));
@@ -658,7 +780,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     fallback: String(displayedSnapshot.date || "No date"),
   });
 
-  const resolvedLogDate = logDate || displayedSnapshot.changedAt || displayedSnapshot.updatedAt || displayedSnapshot.createdAt || new Date().toISOString();
+  const resolvedLogDate = shouldUseCurrentAppointmentDetails
+    ? displayedSnapshot.updatedAt || displayedSnapshot.changedAt || displayedSnapshot.createdAt || logDate || new Date().toISOString()
+    : logDate || displayedSnapshot.changedAt || displayedSnapshot.updatedAt || displayedSnapshot.createdAt || new Date().toISOString();
   const isDateOnlyLog = typeof resolvedLogDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(resolvedLogDate);
   const snapshotDate = formatWordyDate(resolvedLogDate, {
     fallback: String(resolvedLogDate),
@@ -763,6 +887,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
+  const focusedPaymentSnapshot = selectedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
+  const focusedPaymentAmount = focusedPaymentSnapshot ? getPaymentLogAmountValue(focusedPaymentSnapshot) : 0;
+  const hasFocusedPaymentSnapshot = focusedPaymentAmount > 0;
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
   const paymentAdjustment = getBookingPaymentAdjustment(displayedSnapshot);
   const isPaymentAdjustmentSnapshot = paymentAdjustment.isAdjustment;
@@ -786,10 +913,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     isPaymentAdjustmentSnapshot ||
     isSeedPaymentId
   );
-  const paidInSnapshotAmount = explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
-    ? explicitSnapshotPaymentAmount
-    : 0;
-  const hasPaidInSnapshot = !isPaymentAdjustmentSnapshot && isPaymentLogSnapshot && paidInSnapshotAmount > 0;
+  const paidInSnapshotAmount = hasFocusedPaymentSnapshot
+    ? focusedPaymentAmount
+    : explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0
+      ? explicitSnapshotPaymentAmount
+      : 0;
+  const hasPaidInSnapshot = !isPaymentAdjustmentSnapshot && (
+    hasFocusedPaymentSnapshot ||
+    (openedFromBookingModal && isPaymentLogSnapshot && paidInSnapshotAmount > 0)
+  );
   const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
   const shouldShowLatestPayment = !isPaymentAdjustmentSnapshot && !hasPaidInSnapshot && latestPaymentAmount > 0;
   const shouldShowPaymentLine = isPaymentAdjustmentSnapshot || hasPaidInSnapshot || shouldShowLatestPayment;
@@ -798,6 +930,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? "Payment Reduced"
       : "Payment Adjusted"
     : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
+  const paymentSectionTitle = hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
@@ -827,6 +960,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       fallback: formatChangeValue(value || "No date"),
     });
   const paidInSnapshotPaymentDateRaw =
+    (focusedPaymentSnapshot ? getPaymentLogDateValue(focusedPaymentSnapshot) || getPaymentLogFallbackDateValue(focusedPaymentSnapshot) : "") ||
     displayedSnapshot?.paymentDate ||
     displayedSnapshot?.newState?.paymentDate ||
     displayedSnapshot?.previousState?.paymentDate ||
@@ -860,6 +994,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
       return {
         id: String(payment?.id || `${dateValue}-${amount}`),
+        raw: payment,
         amount,
         amountLabel: `\u20b1${amount.toLocaleString()}`,
         dateLabel: dateValue ? formatLongDate(dateValue) : "No date",
@@ -867,17 +1002,43 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       };
     })
     .filter((payment) => payment.amount > 0);
-  const additionalPaymentRows = paymentLogRows.slice(1);
+  const selectedPaymentRow = hasFocusedPaymentSnapshot
+    ? {
+        id: getPaymentEntryIdentity(focusedPaymentSnapshot) || `selected-${getPaymentLogDateValue(focusedPaymentSnapshot)}-${focusedPaymentAmount}`,
+        raw: focusedPaymentSnapshot,
+        amount: focusedPaymentAmount,
+        amountLabel: `\u20b1${focusedPaymentAmount.toLocaleString()}`,
+        dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
+        methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
+      }
+    : null;
+  const mainPaymentRow = hasPaidInSnapshot
+    ? selectedPaymentRow || {
+        id: getPaymentEntryIdentity(displayedSnapshot) || `snapshot-${paidInSnapshotPaymentDateRaw}-${paidInSnapshotAmount}`,
+        raw: displayedSnapshot,
+        amount: paidInSnapshotAmount,
+        amountLabel: `\u20b1${paidInSnapshotAmount.toLocaleString()}`,
+        dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
+        methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(displayedSnapshot)),
+      }
+    : shouldShowLatestPayment
+      ? paymentLogRows[0] || null
+      : null;
+  const additionalPaymentRows = paymentLogRows.filter((payment) =>
+    mainPaymentRow ? !isSamePaymentEntry(payment.raw, mainPaymentRow.raw) : true
+  );
   const snapshotPaymentMethodLabel = normalizeBookingPaymentMethod(
-    shouldShowLatestPayment
-      ? latestPaymentLogMethod ||
+    hasFocusedPaymentSnapshot
+      ? getPaymentLogMethodValue(focusedPaymentSnapshot)
+      : shouldShowLatestPayment
+        ? latestPaymentLogMethod ||
         displayedSnapshot?.paymentMethod ||
         displayedSnapshot?.newState?.paymentMethod ||
         displayedSnapshot?.paymentDetails?.method ||
         displayedSnapshot?.transaction?.method ||
         appointmentSnapshot?.paymentMethod ||
         appointmentSnapshot?.newState?.paymentMethod
-      : displayedSnapshot?.paymentMethod ||
+        : displayedSnapshot?.paymentMethod ||
         displayedSnapshot?.newState?.paymentMethod ||
         displayedSnapshot?.paymentDetails?.method ||
         displayedSnapshot?.transaction?.method ||
@@ -1932,7 +2093,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <div className="mt-10 border-t border-slate-200 pt-8">
                     <div className="flex items-center gap-3 text-slate-500">
                       <History className="h-5 w-5" />
-                      <Label className="text-sm font-black uppercase tracking-wide">Latest Payment</Label>
+                      <Label className="text-sm font-black uppercase tracking-wide">{paymentSectionTitle}</Label>
                     </div>
                     {shouldShowPaymentLine ? (
                       <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">

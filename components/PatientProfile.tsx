@@ -2247,6 +2247,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   // Snapshot states
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
+  const [selectedPaymentSnapshot, setSelectedPaymentSnapshot] = useState<any | null>(null);
   const [selectedSnapshotIsHistorical, setSelectedSnapshotIsHistorical] = useState(false);
   const [snapshotLogDate, setSnapshotLogDate] = useState("");
   const selectedSnapshotAppointmentId = selectedSnapshot?.id || selectedSnapshot?.appointmentId || "";
@@ -2335,24 +2336,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       : undefined;
 
     const isPaymentSnapshot = Boolean(transaction);
-    const isHistoricalPaymentSnapshot = Boolean(transaction && isPaymentLogTransaction(transaction));
+    const isHistoricalPaymentSnapshot = false;
     const snapshotBase = {
       ...(originalAppointment || {}),
       ...appointment,
-      ...(transactionSnapshot ? transactionSnapshot : {}),
+      ...(!isPaymentSnapshot && transactionSnapshot ? transactionSnapshot : {}),
     } as Appointment & Record<string, any>;
     const displayDate = toDateOnly(snapshotBase.date);
     const displayTime = snapshotBase.time || String(snapshotBase.date || "").split(" ")[1] || "";
     const price = Number(snapshotBase.price ?? 0);
-    const transactionNewBalance = Number(transactionRow?.newBalance);
-    const hasTransactionBalance = isPaymentSnapshot && Number.isFinite(transactionNewBalance);
-    const totalPaid = hasTransactionBalance
-      ? Math.max(0, price - transactionNewBalance)
-      : Number(snapshotBase.totalPaid ?? 0);
+    const totalPaid = Number(snapshotBase.totalPaid ?? 0);
     const snapshotBalance = Number(snapshotBase.balance);
-    const balance = hasTransactionBalance
-      ? transactionNewBalance
-      : Number.isFinite(snapshotBalance)
+    const balance = Number.isFinite(snapshotBalance)
         ? snapshotBalance
         : Math.max(0, price - totalPaid);
     const transactionPaymentDate =
@@ -2366,6 +2361,22 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       originalAppointment?.patientName ||
       patient.name ||
       [patient.firstName, patient.lastName].filter(Boolean).join(" ");
+    const paymentSnapshotForDialog = transactionRow
+      ? {
+          ...transactionRow,
+          id: transactionRow.paymentId || transactionRow.paymentRecordId || transactionRow.id,
+          paymentId: transactionRow.paymentId || transactionRow.paymentRecordId || transactionRow.id,
+          paymentRecordId: transactionRow.paymentRecordId || transactionRow.paymentId || transactionRow.id,
+          transactionId: transactionRow.transactionId || transactionRow.id,
+          amount: Number(transactionRow.amount || 0),
+          paymentAmount: Number(transactionRow.amount || 0),
+          date: transactionPaymentDate || toDateOnly(transactionRow.date),
+          paymentDate: transactionPaymentDate || toDateOnly(transactionRow.date),
+          method: transactionRow.method,
+          paymentMethod: transactionRow.method,
+          changedAt: transactionRow.changedAt || transactionRow.updatedAt || transactionRow.createdAt,
+        }
+      : null;
 
     const tryResolveFromSnapshot = (s: any) => {
       if (!s) return undefined;
@@ -2423,10 +2434,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       price,
       totalPaid,
       balance,
-      amount: transaction?.amount,
-      paymentAmount: transaction?.amount,
-      paymentDate: transactionPaymentDate || snapshotBase.paymentDate,
-      paymentMethod: transaction?.method,
+      amount: paymentSnapshotForDialog?.amount,
+      paymentAmount: paymentSnapshotForDialog?.amount,
+      paymentDate: paymentSnapshotForDialog?.paymentDate || snapshotBase.paymentDate,
+      paymentMethod: paymentSnapshotForDialog?.paymentMethod || snapshotBase.paymentMethod,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
       transactionId: transaction?.transactionId,
       _paymentTransactionId: transaction?.transactionId || transaction?.id || snapshotBase._paymentTransactionId,
@@ -2435,6 +2446,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
       _isHistorical: isHistoricalPaymentSnapshot,
     });
+    setSelectedPaymentSnapshot(paymentSnapshotForDialog);
     setSelectedSnapshotIsHistorical(isHistoricalPaymentSnapshot);
     setSnapshotLogDate(logDate);
     setIsSnapshotOpen(true);
@@ -5561,13 +5573,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       {/* Appointment Snapshot Dialog */}
       <AppointmentHistoryView
         open={isSnapshotOpen}
-        onOpenChange={setIsSnapshotOpen}
+        onOpenChange={(open) => {
+          setIsSnapshotOpen(open);
+          if (!open) setSelectedPaymentSnapshot(null);
+        }}
         appointmentSnapshot={selectedSnapshot}
         logDate={snapshotLogDate}
         onOpenAppointment={onOpenBookingModal ? handleOpenSnapshotAppointment : undefined}
         isAppointmentOpen={isSelectedSnapshotAppointmentOpen}
         isHistorical={selectedSnapshotIsHistorical}
         openedFromBookingModal={false}
+        selectedPaymentSnapshot={selectedPaymentSnapshot}
+        useCurrentAppointmentDetails
       />
 
       </div>
