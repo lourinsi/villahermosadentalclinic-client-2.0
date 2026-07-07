@@ -938,9 +938,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
-  const isDeletedAppointmentState = (state: any) =>
-    Boolean(state?.deleted || state?.deletedAt) ||
-    normalizeBookingHistoryStatus(state?.status) === "deleted";
+  const isDeletedAppointmentState = (state: any) => {
+    const status = normalizeBookingHistoryStatus(state?.status);
+    if (state?.deleted === true || status === "deleted") return true;
+    if (state?.deleted === false || status) return false;
+    return Boolean(state?.deletedAt);
+  };
   const derivedLifecycleAction = (() => {
     const wasDeleted = isDeletedAppointmentState(prevState);
     const isDeleted = isDeletedAppointmentState(nextState);

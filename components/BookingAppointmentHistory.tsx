@@ -105,9 +105,12 @@ const getHistoryPaymentAmount = (log: BookingHistoryLog) => Number(log.amount ||
 
 const getHistoryActor = (log: BookingHistoryLog) => log.changedByName || log.changedBy || "";
 
-const isDeletedAppointmentState = (state: any) =>
-  Boolean(state?.deleted || state?.deletedAt) ||
-  normalizeBookingHistoryStatus(state?.status) === "deleted";
+const isDeletedAppointmentState = (state: any) => {
+  const status = normalizeBookingHistoryStatus(state?.status);
+  if (state?.deleted === true || status === "deleted") return true;
+  if (state?.deleted === false || status) return false;
+  return Boolean(state?.deletedAt);
+};
 
 const getAppointmentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restored" | "" => {
   if (log.logType !== "appointment") return "";

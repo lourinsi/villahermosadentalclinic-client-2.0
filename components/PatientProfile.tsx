@@ -969,7 +969,6 @@ const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 op
 const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
 const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
   Boolean(appointment?.deleted) ||
-  Boolean((appointment as any)?.deletedAt) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
 const getEditablePaymentId = (txn: RecentTransaction) => {
   if (isStoredPaymentLogRow(txn)) return "";
@@ -2624,14 +2623,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const updated = await updateAppointment(appointmentId, {
         status: "cancelled",
         deleted: false,
-        deletedAt: null,
       } as any);
+      const restoredDeletedAt = updated?.deletedAt ?? (appointment as any).deletedAt ?? null;
       const restored = {
         ...appointment,
         ...updated,
         status: "cancelled",
         deleted: false,
-        deletedAt: null,
+        deletedAt: restoredDeletedAt,
         updatedAt: new Date().toISOString(),
       } as Appointment;
       const patchAppointment = (apt: Appointment) =>
