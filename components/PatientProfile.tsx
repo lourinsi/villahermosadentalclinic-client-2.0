@@ -92,6 +92,7 @@ import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import {
@@ -136,6 +137,7 @@ import {
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { AppointmentActionsMenu, createVisitHistoryActions } from "./AppointmentActionsMenu";
 
 export interface Patient {
   id?: string;
@@ -2138,6 +2140,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [selectedPaymentSnapshot, setSelectedPaymentSnapshot] = useState<any | null>(null);
   const [selectedSnapshotIsHistorical, setSelectedSnapshotIsHistorical] = useState(false);
   const [snapshotLogDate, setSnapshotLogDate] = useState("");
+  
+  // Booking history state
+  const [isBookingHistoryOpen, setIsBookingHistoryOpen] = useState(false);
+  const [bookingHistoryAppointment, setBookingHistoryAppointment] = useState<any>(null);
+  const [bookingHistoryLogs, setBookingHistoryLogs] = useState<any[]>([]);
+  const [bookingPaymentLogs, setBookingPaymentLogs] = useState<any[]>([]);
+  const [isLoadingBookingHistory, setIsLoadingBookingHistory] = useState(false);
   const selectedSnapshotAppointmentId = selectedSnapshot?.id || selectedSnapshot?.appointmentId || "";
   const isSelectedSnapshotAppointmentOpen = Boolean(
     openBookingAppointmentId &&
@@ -2338,6 +2347,47 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setSelectedSnapshotIsHistorical(isHistoricalPaymentSnapshot);
     setSnapshotLogDate(logDate);
     setIsSnapshotOpen(true);
+  };
+
+  const handleOpenBookingHistory = async (appointment: Appointment | HistoryAppointment) => {
+    const appointmentId = appointment?.id;
+    if (!appointmentId) {
+      toast.error("Could not load appointment history");
+      return;
+    }
+
+    try {
+      setIsLoadingBookingHistory(true);
+      setBookingHistoryAppointment(appointment);
+
+      // Fetch appointment logs
+      const logsResponse = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/logs`), {
+        headers: getAuthHeaders(),
+      });
+
+      const logsData = await logsResponse.json();
+      const appointmentLogs = logsResponse.ok && logsData?.success && Array.isArray(logsData.data) ? logsData.data : [];
+
+      // Fetch payment logs
+      const paymentResponse = await fetch(
+        apiUrl(`/api/payments/appointment/${encodeURIComponent(String(appointmentId))}`),
+        { headers: getAuthHeaders() }
+      );
+
+      const paymentData = await paymentResponse.json();
+      const paymentLogs = paymentResponse.ok && paymentData?.success && Array.isArray(paymentData.data)
+        ? paymentData.data
+        : [];
+
+      setBookingHistoryLogs(appointmentLogs);
+      setBookingPaymentLogs(paymentLogs);
+      setIsBookingHistoryOpen(true);
+    } catch (error) {
+      console.error("Error loading booking history:", error);
+      toast.error("Failed to load appointment history");
+    } finally {
+      setIsLoadingBookingHistory(false);
+    }
   };
 
   const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any) => {
@@ -4702,70 +4752,47 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </Button>
                             </div>
 
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-9 w-9 justify-self-end rounded-xl text-slate-500 hover:bg-slate-100">
-                                  <MoreVertical className="h-4 w-4" />
-                                  <span className="sr-only">Visit actions</span>
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-52">
-                                <DropdownMenuItem onClick={() => handleOpenSnapshot(appointment)}>
-                                  <Eye className="mr-2 h-4 w-4" />
-                                  View Details
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!patient.id || isVoidedAppointment}
-                                  onClick={() => {
+                            <AppointmentActionsMenu
+                              actions={createVisitHistoryActions(
+                                {
+                                  onViewDetails: () => handleOpenSnapshot(appointment),
+                                  onViewHistory: () => handleOpenBookingHistory(appointment),
+                                  onRecordPayment: () => {
                                     if (patient.id && !isVoidedAppointment) {
                                       openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
                                     }
-                                  }}
-                                >
-                                  <DollarSign className="mr-2 h-4 w-4" />
-                                  Record Payment
-                                </DropdownMenuItem>
-                                {canRestoreAppointment ? (
-                                  <DropdownMenuItem onClick={() => handleRestoreVisitAppointment(appointment)}>
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                    Restore Appointment
-                                  </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onRestoreAppointment: () => handleRestoreVisitAppointment(appointment),
+                                  onReschedule: () => {
                                     if (originalAppointment) {
                                       openRescheduleModal(originalAppointment);
                                     }
-                                  }}
-                                >
-                                  <Calendar className="mr-2 h-4 w-4" />
-                                  Reschedule
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onUpdateTreatment: () => {
                                     if (originalAppointment) {
                                       openUpdateTreatmentModal(originalAppointment);
                                     }
-                                  }}
-                                >
-                                  <ClipboardList className="mr-2 h-4 w-4" />
-                                  Update Treatment
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onAssignDoctor: () => {
                                     if (originalAppointment) {
                                       setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment);
                                     }
-                                  }}
-                                >
-                                  <Stethoscope className="mr-2 h-4 w-4" />
-                                  {isDoctorUnassigned ? "Assign Doctor" : "Change Doctor"}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                  },
+                                },
+                                {
+                                  canRestoreAppointment,
+                                  canReschedule: Boolean(originalAppointment && !isDeletedAppointment),
+                                  canUpdateTreatment: Boolean(originalAppointment && !isDeletedAppointment),
+                                  canAssignDoctor: Boolean(originalAppointment && !isDeletedAppointment),
+                                  isDoctorUnassigned,
+                                }
+                              )}
+                              triggerVariant="ghost"
+                              triggerSize="icon"
+                              triggerClassName="h-9 w-9 justify-self-end rounded-xl text-slate-500 hover:bg-slate-100"
+                              triggerIcon={<MoreVertical className="h-4 w-4" />}
+                              ariaLabel="Visit actions"
+                            />
                           </div>
 
                           {visitTransactions.length > 0 ? (
@@ -5436,6 +5463,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         openedFromBookingModal={false}
         selectedPaymentSnapshot={selectedPaymentSnapshot}
         useCurrentAppointmentDetails
+      />
+
+      {/* Booking Appointment History Dialog */}
+      <BookingAppointmentHistory
+        open={isBookingHistoryOpen}
+        onOpenChange={setIsBookingHistoryOpen}
+        appointmentLogs={bookingHistoryLogs}
+        paymentLogs={bookingPaymentLogs}
+        appointmentToEdit={bookingHistoryAppointment}
+        onViewSnapshot={(snapshot: any, isHistorical: boolean) => handleOpenSnapshot(snapshot)}
+        triggerVariant="section"
+        showTrigger={false}
       />
 
       </div>

@@ -17,6 +17,7 @@ import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
@@ -2169,52 +2170,35 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </Button>
                 ) : null}
                 {canUseSnapshotActions ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button type="button" variant="outline" size="icon" className="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14" aria-label="More appointment actions">
-                        <EllipsisVertical className="h-5 w-5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
-                      <DropdownMenuItem onSelect={handleOpenAppointment}>
-                        <Eye className="mr-2 h-4 w-4" />
-                        Open
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setIsHistoryDialogOpen(true)}>
-                        <History className="mr-2 h-4 w-4" />
-                        View history
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openChangeTreatmentModal} disabled={!canChangeTreatment || isLoadingTreatmentOptions}>
-                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Stethoscope className="mr-2 h-4 w-4" />}
-                        Change treatment
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openChangeScheduleModal} disabled={!canChangeSchedule}>
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        Change schedule
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openRepeatScheduleModal} disabled={!canRepeatSchedule}>
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        Repeat Schedule
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
-                        {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
-                        Edit payment
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={handleAddPayment}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add payment
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={goToPatient} disabled={!canGoToPatient}>
-                        <User className="mr-2 h-4 w-4" />
-                        Go to patient
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={goToDoctor} disabled={!canGoToDoctor}>
-                        <Stethoscope className="mr-2 h-4 w-4" />
-                        Go to doctor
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <AppointmentActionsMenu
+                    actions={createAppointmentHistoryActions(
+                      {
+                        onOpen: handleOpenAppointment,
+                        onViewHistory: () => setIsHistoryDialogOpen(true),
+                        onChangeTreatment: openChangeTreatmentModal,
+                        onChangeSchedule: openChangeScheduleModal,
+                        onRepeatSchedule: openRepeatScheduleModal,
+                        onEditPayment: handleEditPayment,
+                        onAddPayment: handleAddPayment,
+                        onGoToPatient: goToPatient,
+                        onGoToDoctor: goToDoctor,
+                      },
+                      {
+                        canChangeTreatment,
+                        isLoadingTreatmentOptions,
+                        canChangeSchedule,
+                        canRepeatSchedule,
+                        isOpeningPaymentEdit,
+                        canGoToPatient,
+                        canGoToDoctor,
+                      }
+                    )}
+                    triggerVariant="outline"
+                    triggerSize="icon"
+                    triggerClassName="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14"
+                    triggerIcon={<EllipsisVertical className="h-5 w-5" />}
+                    ariaLabel="More appointment actions"
+                  />
                 ) : null}
                 <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-xl text-slate-600 hover:bg-slate-100 sm:h-14 sm:w-14" aria-label="Close snapshot">
                   <X className="h-7 w-7" />
