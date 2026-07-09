@@ -2358,17 +2358,33 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     : 'Book Appointment'
                 )}
               </DialogTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                disabled={isBooking}
-                aria-label="Close booking modal"
-                className="absolute right-0 h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
-              >
-                <X className="h-5 w-5" />
-              </Button>
+              <div className="absolute right-0 flex items-center gap-1">
+                {appointmentToEdit ? (
+                  <BookingAppointmentHistory
+                    appointmentLogs={appointmentLogs}
+                    paymentLogs={paymentLogs}
+                    appointmentToEdit={appointmentToEdit}
+                    triggerVariant="icon"
+                    userRole={effectiveRole}
+                    onViewSnapshot={(snapshot, isHistorical) => {
+                      setSnapshotToView(snapshot);
+                      setSnapshotIsHistorical(isHistorical);
+                      setIsSnapshotModalOpen(true);
+                    }}
+                  />
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleClose}
+                  disabled={isBooking}
+                  aria-label="Close booking modal"
+                  className="h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
 
             </div>
             {!(isCancelled && user?.role === 'patient') && (

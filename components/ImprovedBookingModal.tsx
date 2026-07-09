@@ -3226,7 +3226,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </DialogTitle>
               <div className="absolute right-0 flex items-center gap-1">
                 {isEditMode ? (
-                  <div className="hidden sm:block">
+                  <div className="flex items-center">
                     <BookingAppointmentHistory
                       appointmentLogs={appointmentLogs}
                       paymentLogs={paymentLogs}

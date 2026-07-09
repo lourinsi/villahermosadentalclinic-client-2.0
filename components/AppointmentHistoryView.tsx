@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
+import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
@@ -501,6 +502,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [paymentLogEntries, setPaymentLogEntries] = useState<any[]>([]);
   const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
   const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
+  const [historyLogs, setHistoryLogs] = useState<any[]>([]);
+  const [paymentHistoryLogs, setPaymentHistoryLogs] = useState<any[]>([]);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [isLoadingHistoryLogs, setIsLoadingHistoryLogs] = useState(false);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
   const [isChangeScheduleOpen, setIsChangeScheduleOpen] = useState(false);
@@ -824,6 +829,61 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     snapshotState,
     appointmentSnapshot,
   ]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || typeof window === "undefined") {
+      setHistoryLogs([]);
+      setPaymentHistoryLogs([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadHistoryLogs = async () => {
+      setIsLoadingHistoryLogs(true);
+      try {
+        const [appointmentResponse, paymentResponse] = await Promise.all([
+          fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+          }),
+          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}`), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+          }),
+        ]);
+
+        const appointmentPayload = await appointmentResponse.json().catch(() => null);
+        const paymentPayload = await paymentResponse.json().catch(() => null);
+        const fetchedAppointmentLogs = appointmentResponse.ok && appointmentPayload?.success && Array.isArray(appointmentPayload.data)
+          ? appointmentPayload.data
+          : [];
+        const fetchedPaymentLogs = paymentResponse.ok && paymentPayload?.success && Array.isArray(paymentPayload.data)
+          ? paymentPayload.data
+          : [];
+
+        if (!cancelled) {
+          setHistoryLogs(fetchedAppointmentLogs);
+          setPaymentHistoryLogs(fetchedPaymentLogs);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("[AppointmentHistoryView] Failed to load history logs:", error);
+          setHistoryLogs([]);
+          setPaymentHistoryLogs([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingHistoryLogs(false);
+        }
+      }
+    };
+
+    loadHistoryLogs();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, displayedAppointmentId]);
 
   if (!displayedSnapshot) return null;
 
@@ -2033,6 +2093,23 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   return (
     <>
+      <BookingAppointmentHistory
+        appointmentLogs={historyLogs}
+        paymentLogs={paymentHistoryLogs}
+        appointmentToEdit={displayedSnapshot}
+        onViewSnapshot={(snapshot) => {
+          setDisplayedSnapshot(snapshot);
+          setSnapshotState("historical");
+          setLatestComparisonSnapshot(null);
+          setIsHistoryDialogOpen(false);
+        }}
+        triggerVariant="section"
+        userRole={undefined}
+        showTrigger={false}
+        open={isHistoryDialogOpen}
+        onOpenChange={setIsHistoryDialogOpen}
+      />
+
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
@@ -2102,6 +2179,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       <DropdownMenuItem onSelect={handleOpenAppointment}>
                         <Eye className="mr-2 h-4 w-4" />
                         Open
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setIsHistoryDialogOpen(true)}>
+                        <History className="mr-2 h-4 w-4" />
+                        View history
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={openChangeTreatmentModal} disabled={!canChangeTreatment || isLoadingTreatmentOptions}>
                         {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Stethoscope className="mr-2 h-4 w-4" />}
