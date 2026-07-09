@@ -134,12 +134,10 @@ const getPaymentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restore
 };
 
 const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
-  const paymentAction = getPaymentLifecycleAction(log);
-  if (!paymentAction) return undefined;
-
   const amount = Math.abs(getHistoryPaymentAmount(log));
   if (amount <= 0) return undefined;
 
+  const paymentAction = getPaymentLifecycleAction(log);
   const paymentDate =
     log.paymentDate ||
     log.newState?.paymentDate ||
@@ -179,7 +177,7 @@ const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
     paymentMethod,
     changedAt: log.changedAt,
     notes: log.notes,
-    _paymentHistoryAction: paymentAction,
+    _paymentHistoryAction: paymentAction || undefined,
   };
 };
 

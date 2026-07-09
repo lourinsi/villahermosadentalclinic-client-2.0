@@ -2226,14 +2226,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     try {
       console.log("[PatientProfile] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
     } catch (e) {}
+    
+    // Check if this snapshot has a focused payment from history (from BookingAppointmentHistory)
+    const focusedPaymentSnapshot = (appointment as any)?._focusedPaymentSnapshot;
+    const effectiveTransaction = transaction || focusedPaymentSnapshot;
+    
     const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
-    const transactionRow = transaction as (RecentTransaction & Record<string, any>) | undefined;
+    const transactionRow = effectiveTransaction as (RecentTransaction & Record<string, any>) | undefined;
     const transactionSnapshot = transactionRow?.appointmentSnapshot && typeof transactionRow.appointmentSnapshot === "object"
       ? transactionRow.appointmentSnapshot
       : undefined;
 
-    const isPaymentSnapshot = Boolean(transaction);
-    const isHistoricalPaymentSnapshot = false;
+    const isPaymentSnapshot = Boolean(effectiveTransaction);
+    const isHistoricalPaymentSnapshot = (appointment as any)?._isHistorical || false;
     const snapshotBase = {
       ...(originalAppointment || {}),
       ...appointment,
@@ -2249,9 +2254,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : Math.max(0, price - totalPaid);
     const transactionPaymentDate =
       toDateOnly(transactionRow?.paymentDate) ||
-      toDateOnly(transaction?.date) ||
+      toDateOnly(effectiveTransaction?.date) ||
       toDateOnly(snapshotBase.paymentDate);
-    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
+    const logDate = (appointment as any)?.changedAt || transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
       snapshotBase.patientName ||
       appointment.patientName ||
@@ -2336,9 +2341,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       paymentDate: paymentSnapshotForDialog?.paymentDate || snapshotBase.paymentDate,
       paymentMethod: paymentSnapshotForDialog?.paymentMethod || snapshotBase.paymentMethod,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
-      transactionId: transaction?.transactionId,
-      _paymentTransactionId: transaction?.transactionId || transaction?.id || snapshotBase._paymentTransactionId,
-      _transactionId: transaction?.transactionId || transaction?.id || snapshotBase._transactionId,
+      transactionId: effectiveTransaction?.transactionId,
+      _paymentTransactionId: effectiveTransaction?.transactionId || effectiveTransaction?.id || snapshotBase._paymentTransactionId,
+      _transactionId: effectiveTransaction?.transactionId || effectiveTransaction?.id || snapshotBase._transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
       _isHistorical: isHistoricalPaymentSnapshot,
@@ -5472,7 +5477,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         appointmentLogs={bookingHistoryLogs}
         paymentLogs={bookingPaymentLogs}
         appointmentToEdit={bookingHistoryAppointment}
-        onViewSnapshot={(snapshot: any, isHistorical: boolean) => handleOpenSnapshot(snapshot)}
+        onViewSnapshot={(snapshot: any, isHistorical: boolean) => {
+          // handleOpenSnapshot will extract _focusedPaymentSnapshot and set it appropriately
+          handleOpenSnapshot(snapshot);
+        }}
         triggerVariant="section"
         showTrigger={false}
       />

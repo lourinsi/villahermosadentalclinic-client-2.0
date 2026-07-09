@@ -508,6 +508,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const [isLoadingHistoryLogs, setIsLoadingHistoryLogs] = useState(false);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
+  const [selectedFocusedPaymentSnapshot, setSelectedFocusedPaymentSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
   const [isChangeScheduleOpen, setIsChangeScheduleOpen] = useState(false);
   const [isSavingScheduleChange, setIsSavingScheduleChange] = useState(false);
@@ -544,6 +545,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
+    setSelectedFocusedPaymentSnapshot(null);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
     // `_isHistorical` (set by `fetchSnapshotFromLogs`), honor that value. Otherwise
     // fall back to the `isHistorical` prop provided by the caller.
@@ -1030,7 +1032,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : "border-emerald-100 bg-emerald-50/70 text-emerald-700";
   const AppointmentLifecycleIcon = appointmentLifecycleAction === "deleted" ? AlertTriangle : RefreshCw;
 
-  const focusedPaymentSnapshot = selectedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
+  const focusedPaymentSnapshot = selectedPaymentSnapshot || selectedFocusedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
   const focusedPaymentAmount = focusedPaymentSnapshot ? getPaymentLogAmountValue(focusedPaymentSnapshot) : 0;
   const hasFocusedPaymentSnapshot = focusedPaymentAmount > 0;
   const focusedPaymentAction =
@@ -2099,6 +2101,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         paymentLogs={paymentHistoryLogs}
         appointmentToEdit={displayedSnapshot}
         onViewSnapshot={(snapshot) => {
+          setSelectedFocusedPaymentSnapshot(snapshot?._focusedPaymentSnapshot || snapshot?._selectedPaymentSnapshot || null);
           setDisplayedSnapshot(snapshot);
           setSnapshotState("historical");
           setLatestComparisonSnapshot(null);
