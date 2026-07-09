@@ -734,8 +734,14 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   );
 };
 
-const AdminLayout = ({ children }: { children: React.ReactNode }) => (
-  <AdminLayoutShell portalTitle="Admin" theme={adminLayoutTheme}>
+interface AdminLayoutProps {
+  children: React.ReactNode;
+  portalTitle?: string;
+  theme?: AdminLayoutTheme;
+}
+
+const AdminLayout = ({ children, portalTitle = "Admin", theme = adminLayoutTheme }: AdminLayoutProps) => (
+  <AdminLayoutShell portalTitle={portalTitle} theme={theme}>
     <PatientProfileDraftRedirect />
     {children}
   </AdminLayoutShell>

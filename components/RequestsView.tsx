@@ -971,7 +971,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </h1>
           <p className="mt-1 text-lg font-medium text-gray-500 md:text-base">Review and manage requests</p>
         </div>
-        {(effectiveRole === "admin" || effectiveRole === "doctor") && (
+        {(effectiveRole === "admin" || effectiveRole === "doctor" || effectiveRole === "receptionist") && (
           <Button
             type="button"
             onClick={() => openCreateModal()}
