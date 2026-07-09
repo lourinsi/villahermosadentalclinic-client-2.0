@@ -2663,14 +2663,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const updated = await updateAppointment(appointmentId, {
         status: "cancelled",
         deleted: false,
+        deletedAt: null,
       } as any);
-      const restoredDeletedAt = updated?.deletedAt ?? (appointment as any).deletedAt ?? null;
       const restored = {
         ...appointment,
         ...updated,
         status: "cancelled",
         deleted: false,
-        deletedAt: restoredDeletedAt,
+        deletedAt: null,
         updatedAt: new Date().toISOString(),
       } as Appointment;
       const patchAppointment = (apt: Appointment) =>

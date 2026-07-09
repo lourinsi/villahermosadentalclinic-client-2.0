@@ -3019,14 +3019,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const restoredAppointment = await updateAppointment(appointmentToEdit.id, {
         status: "cancelled",
         deleted: false,
+        deletedAt: null,
       } as any);
-      const restoredDeletedAt = restoredAppointment?.deletedAt ?? appointmentToEdit.deletedAt ?? null;
       const restored = {
         ...appointmentToEdit,
         ...restoredAppointment,
         status: "cancelled",
         deleted: false,
-        deletedAt: restoredDeletedAt,
+        deletedAt: null,
         updatedAt: new Date().toISOString(),
       };
 

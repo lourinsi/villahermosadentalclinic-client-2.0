@@ -24,6 +24,7 @@ const hasDeletedDate = (value: unknown) => {
 };
 
 const hasTrueFlag = (value: unknown) => value === true || String(value).trim().toLowerCase() === "true";
+const hasFalseFlag = (value: unknown) => value === false || String(value).trim().toLowerCase() === "false";
 
 const normalizeStatus = (value: unknown) =>
   String(value || "").trim().toLowerCase().replace(/_/g, "-");
@@ -43,12 +44,23 @@ export const isAppointmentDeletedStatusTransaction = (
     appointmentSnapshot.appointmentStatus ||
     row?.appointmentStatus
   );
+  const hasActiveAppointmentSignal =
+    hasFalseFlag(row?.appointmentDeleted) ||
+    hasFalseFlag(appointmentSnapshot.deleted) ||
+    Boolean(appointmentStatus && appointmentStatus !== "deleted");
+
+  if (
+    hasTrueFlag(row?.appointmentDeleted) ||
+    appointmentStatus === "deleted" ||
+    hasTrueFlag(appointmentSnapshot.deleted)
+  ) {
+    return true;
+  }
+
+  if (hasActiveAppointmentSignal) return false;
 
   return (
-    hasTrueFlag(row?.appointmentDeleted) ||
     hasDeletedDate(row?.appointmentDeletedAt) ||
-    appointmentStatus === "deleted" ||
-    hasTrueFlag(appointmentSnapshot.deleted) ||
     hasDeletedDate(appointmentSnapshot.deletedAt)
   );
 };
@@ -60,7 +72,9 @@ export const isActualDeletedPaymentTransaction = (
   if (!row) return false;
 
   if (row.paymentDeleted !== undefined) {
-    return hasTrueFlag(row.paymentDeleted) || hasDeletedDate(row.paymentDeletedAt);
+    if (hasTrueFlag(row.paymentDeleted)) return true;
+    if (hasFalseFlag(row.paymentDeleted)) return false;
+    return hasDeletedDate(row.paymentDeletedAt);
   }
 
   if (hasDeletedDate(row.paymentDeletedAt)) return true;
@@ -68,7 +82,9 @@ export const isActualDeletedPaymentTransaction = (
   const appointmentDeleted = isAppointmentDeletedStatusTransaction(transaction);
   if (appointmentDeleted) return false;
 
-  return hasTrueFlag(row.deleted) || hasDeletedDate(row.deletedAt);
+  if (hasTrueFlag(row.deleted)) return true;
+  if (hasFalseFlag(row.deleted)) return false;
+  return hasDeletedDate(row.deletedAt);
 };
 
 export const isSoftDeletedPaymentTransaction = (
