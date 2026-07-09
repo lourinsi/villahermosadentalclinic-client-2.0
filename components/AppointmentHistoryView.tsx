@@ -27,6 +27,8 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import type { Appointment } from "@/hooks/useAppointments";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import {
@@ -46,6 +48,7 @@ import {
 } from "./sharedBookingLogic";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
+import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { SelectDoctorModal } from "./SelectDoctorModal";
@@ -53,6 +56,7 @@ import { SelectTreatmentModal } from "./SelectTreatmentModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
+import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -529,6 +533,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [selectedTreatmentDuration, setSelectedTreatmentDuration] = useState("30");
   const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const { effectiveRole } = useAdminViewMode();
   const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(open);
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
@@ -1413,6 +1419,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canGoToDoctor = Boolean(doctorRouteName);
   const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
+  const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
   const selectedScheduleDuration = String(normalizeBookingDuration(displayedSnapshot?.duration || 30));
   const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
@@ -1503,6 +1510,34 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     } catch (error) {
       console.error("[AppointmentHistoryView] Failed to open appointment:", error);
       toast.error("Failed to open appointment");
+    }
+  };
+
+  const handleStatusChange = async (nextStatus: string) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const normalizedStatus = normalizeAppointmentStatus(nextStatus);
+    if (!normalizedStatus || isCartAppointmentStatus(normalizedStatus)) return;
+    if (normalizedStatus === normalizeAppointmentStatus(String(displayedSnapshot?.status || ""))) return;
+
+    try {
+      const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
+      if (isDeletedAppointmentState(displayedSnapshot) || normalizedStatus === "deleted") {
+        (statusPatch as any).deleted = false;
+        if (normalizedStatus === "deleted") (statusPatch as any).deletedAt = displayedSnapshot?.deletedAt || new Date().toISOString();
+      }
+      const updated = await updateAppointment(String(appointmentId), statusPatch);
+      setDisplayedSnapshot((current: any) => ({ ...current, ...updated, ...statusPatch }));
+      setLatestComparisonSnapshot(null);
+      window.dispatchEvent(new CustomEvent("appointments:updated", { detail: { appointment: updated, appointmentId: String(appointmentId) } }));
+      window.dispatchEvent(new Event("refreshNotifications"));
+      toast.success("Status updated");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update status:", error);
+      toast.error("Failed to update status");
     }
   };
 
@@ -2221,9 +2256,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       </span>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <p className={`truncate text-base font-black ${displayedStatusColors.textColor}`}>
-                            {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
-                          </p>
+                          {canChangeStatus ? (
+                            <AppointmentStatusSelect
+                              value={nextStatus || displayedSnapshot.status}
+                              statuses={APPOINTMENT_STATUSES}
+                              includeDeleted={effectiveRole === "admin"}
+                              onChange={handleStatusChange}
+                              badgeClassName="text-base font-black capitalize"
+                            />
+                          ) : (
+                            <p className={`truncate text-base font-black ${displayedStatusColors.textColor}`}>
+                              {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
+                            </p>
+                          )}
                           <CurrentChangeIndicator change={statusCurrentChange} />
                         </div>
                         {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (

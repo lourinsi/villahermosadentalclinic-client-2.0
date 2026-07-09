@@ -92,11 +92,11 @@ import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import {
-  getAppointmentStatusOptionWithColors,
   getPaymentStatusOptionWithColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
@@ -2957,14 +2957,32 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     return normalizePaymentStatus(value);
   };
 
-  const getAppointmentStatusBadge = (status: string) => {
-    const statusOption = getAppointmentStatusOptionWithColors(status || "scheduled", APPOINTMENT_STATUSES);
+  const handleVisitStatusChange = async (appointment: Appointment | HistoryAppointment, nextStatus: string) => {
+    const appointmentId = String(appointment.id || "");
+    const normalizedStatus = normalizeAppointmentStatus(nextStatus);
+    if (!appointmentId || !normalizedStatus) return;
+    if (normalizedStatus === normalizeAppointmentStatus(String(appointment.status || ""))) return;
 
-    return (
-      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-        {statusOption.label || status}
-      </Badge>
-    );
+    try {
+      const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
+      if (isSoftDeletedAppointment(appointment) || normalizedStatus === "deleted") {
+        (statusPatch as any).deleted = false;
+        if (normalizedStatus === "deleted") (statusPatch as any).deletedAt = (appointment as any).deletedAt || new Date().toISOString();
+      }
+      const updated = await updateAppointment(appointmentId, statusPatch);
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId ? ({ ...apt, ...updated, ...statusPatch } as Appointment) : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      window.dispatchEvent(new CustomEvent("appointments:updated", { detail: { appointment: updated, appointmentId } }));
+      toast.success("Status updated");
+    } catch (error) {
+      console.error("[PatientProfile] Failed to update status:", error);
+      toast.error("Failed to update status");
+    }
   };
 
   const getPaymentStatusBadge = (status: string) => {
@@ -4662,12 +4680,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     <Clock className="h-3.5 w-3.5" />
                                     {appointmentTime}
                                   </span>
-                                  {getAppointmentStatusBadge(isDeletedAppointment ? "deleted" : String(appointment.status || ''))}
-                                  {isDeletedAppointment ? (
-                                    <Badge variant="outline" className="border-slate-300 bg-slate-100 text-slate-700">
-                                      Deleted
-                                    </Badge>
-                                  ) : null}
+                                  <AppointmentStatusSelect
+                                    value={isDeletedAppointment ? "deleted" : String(appointment.status || "")}
+                                    statuses={APPOINTMENT_STATUSES}
+                                    includeDeleted={effectiveRole === "admin"}
+                                    onChange={(nextStatus) => handleVisitStatusChange(appointment, nextStatus)}
+                                  />
                                   <span className="inline-flex min-w-0 items-center gap-1 text-slate-500">
                                     <FileText className="h-3.5 w-3.5 shrink-0" />
                                     <span className="truncate">{notesText}</span>
