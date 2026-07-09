@@ -64,5 +64,9 @@ export interface RecentTransaction {
   changedByName?: string;
   deleted?: boolean;
   deletedAt?: string | Date | null;
+  paymentDeleted?: boolean;
+  paymentDeletedAt?: string | Date | null;
+  appointmentDeleted?: boolean;
+  appointmentDeletedAt?: string | Date | null;
   source?: string;
 }

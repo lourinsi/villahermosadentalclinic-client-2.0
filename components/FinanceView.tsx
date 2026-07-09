@@ -33,6 +33,14 @@ import { FinancePayrollBonusModal, type PayrollBonusForm } from "./FinancePayrol
 import { FinancePayrollEditModal, type PayrollEditForm } from "./FinancePayrollEditModal";
 import type { FinanceHistoryEntityType, FinanceHistoryLog } from "./FinanceHistoryDialog";
 import {
+  PaymentTransactionStatusBadge,
+  deletedPaymentBadgeClass,
+  deletedPaymentRowClass,
+  getDeletedPaymentLabel,
+  isActualDeletedPaymentTransaction,
+  isSoftDeletedPaymentTransaction,
+} from "./PaymentTransactionStatusBadge";
+import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
   PAYMENT_METHOD_OPTIONS,
@@ -81,8 +89,7 @@ import {
   Menu,
   Search,
   ShieldCheck,
-  Trash2,
-  X
+  Trash2
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -561,6 +568,10 @@ export interface RecentTransaction {
   currentPaymentStatus?: string;
   deleted?: boolean;
   deletedAt?: string | null;
+  paymentDeleted?: boolean;
+  paymentDeletedAt?: string | null;
+  appointmentDeleted?: boolean;
+  appointmentDeletedAt?: string | null;
 }
 
 type TransactionLedgerMode = "all" | "patients" | "doctors";
@@ -722,8 +733,6 @@ const getFinanceAppointmentType = (transaction: RecentTransaction) => {
 
 const PAYMENT_BALANCE_EPSILON = 0.01;
 const PAYMENT_TRANSACTION_STATUS_VALUES = new Set(["paid", "half-paid", "over-paid", "unpaid", "overdue"]);
-const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
-const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
 
 const toFinitePaymentNumber = (value: unknown): number | undefined => {
   const number = Number(value);
@@ -755,7 +764,7 @@ const getFinancePaymentStatusValue = (transaction: RecentTransaction) => {
 const getFinancePaymentStatusDisplay = (transaction: RecentTransaction) => {
   if (isSoftDeletedPaymentTransaction(transaction)) {
     return {
-      label: "Deleted",
+      label: getDeletedPaymentLabel(transaction),
       status: "deleted",
       className: deletedPaymentBadgeClass,
     };
@@ -770,9 +779,6 @@ const getFinancePaymentStatusDisplay = (transaction: RecentTransaction) => {
     className: `${statusOption.bgColor} ${statusOption.textColor} border-transparent`,
   };
 };
-
-const isSoftDeletedPaymentTransaction = (transaction?: Partial<RecentTransaction> | null) =>
-  Boolean(transaction?.deleted) || Boolean(transaction?.deletedAt);
 
 const isCountableIncomeTransaction = (transaction: RecentTransaction) =>
   transaction.type === "income" && !isSoftDeletedPaymentTransaction(transaction);
@@ -2164,8 +2170,12 @@ export function FinanceView() {
   };
 
   const getPaymentEditUnavailableMessage = (transaction: RecentTransaction) => {
-    if (isSoftDeletedPaymentTransaction(transaction)) {
+    if (isActualDeletedPaymentTransaction(transaction)) {
       return "This payment has been deleted.";
+    }
+
+    if (isSoftDeletedPaymentTransaction(transaction)) {
+      return "This payment belongs to a deleted appointment.";
     }
 
     if (isPaymentLogLikeTransaction(transaction)) {
@@ -2564,6 +2574,7 @@ export function FinanceView() {
                 const canEditPayment = isEditablePaymentTransaction(payment);
                 const paymentStatusDisplay = getFinancePaymentStatusDisplay(payment);
                 const isDeletedPayment = isSoftDeletedPaymentTransaction(payment);
+                const isActualDeletedPayment = isActualDeletedPaymentTransaction(payment);
                 const restorablePaymentId = getRestorablePaymentId(payment);
 
                 return (
@@ -2581,9 +2592,11 @@ export function FinanceView() {
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
                       <div className="text-right">
                         <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatCurrency(Math.abs(payment.amount))}</div>
-                        <Badge variant="outline" className={`mt-1 rounded-md px-2.5 py-0.5 text-xs font-bold ${paymentStatusDisplay.className}`}>
-                          {paymentStatusDisplay.label}
-                        </Badge>
+                        <PaymentTransactionStatusBadge
+                          display={paymentStatusDisplay}
+                          className="mt-1 px-2.5 py-0.5 text-xs"
+                          showIcon={false}
+                        />
                       </div>
                       <Button
                         variant="outline"
@@ -2619,7 +2632,7 @@ export function FinanceView() {
                             <span className="sr-only">Delete Payment</span>
                           </Button>
                         </>
-                      ) : canManageExpenseStatus && restorablePaymentId ? (
+                      ) : canManageExpenseStatus && isActualDeletedPayment && restorablePaymentId ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -3568,6 +3581,7 @@ export function FinanceView() {
                       const shouldShowPaymentEdit = isPaymentTransactionRow(transaction);
                       const paymentStatusDisplay = shouldShowPaymentEdit ? getFinancePaymentStatusDisplay(transaction) : null;
                       const isDeletedPayment = isSoftDeletedPaymentTransaction(transaction);
+                      const isActualDeletedPayment = isActualDeletedPaymentTransaction(transaction);
                       const restorablePaymentId = getRestorablePaymentId(transaction);
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
@@ -3575,6 +3589,13 @@ export function FinanceView() {
                       const statusLabel = transaction.type === "income"
                         ? paymentStatusDisplay?.label || "Paid"
                         : formatOptionLabel(expenseForTransaction?.status || transaction.type, EXPENSE_STATUS_OPTIONS);
+                      const timelineStatusDisplay = paymentStatusDisplay || {
+                        label: statusLabel,
+                        status: transaction.type === "income" ? "paid" : transaction.type,
+                        className: transaction.type === "income"
+                          ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                          : "border-red-100 bg-red-50 text-red-700",
+                      };
                       const amountPrefix = transaction.type === "income" ? "+" : "-";
 
                       // Resolve avatar src: prefer explicit changedByAvatar, then look for admin/user who made the change.
@@ -3645,21 +3666,10 @@ export function FinanceView() {
                                     {amountPrefix}{formatCurrency(Math.abs(transaction.amount))}
                                   </div>
                                   <div className="mt-2">
-                                    <Badge
-                                      variant="outline"
-                                      className={`rounded-md px-3 py-1 text-sm font-bold ${paymentStatusDisplay ? paymentStatusDisplay.className : transaction.type === "income" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-red-100 bg-red-50 text-red-700"}`}
-                                    >
-                                      {statusLabel}
-                                      {paymentStatusDisplay?.status === "deleted" ? (
-                                        <X className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentStatusDisplay?.status === "over-paid" ? (
-                                        <AlertTriangle className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentStatusDisplay?.status === "half-paid" ? (
-                                        <Clock className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : transaction.type === "income" ? (
-                                        <CheckCircle2 className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : null}
-                                    </Badge>
+                                    <PaymentTransactionStatusBadge
+                                      display={timelineStatusDisplay}
+                                      showIcon={Boolean(paymentStatusDisplay || transaction.type === "income")}
+                                    />
                                   </div>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-3">
@@ -3704,7 +3714,7 @@ export function FinanceView() {
                                       <span className="sr-only">Delete Payment</span>
                                     </Button>
                                   )}
-                                  {shouldShowPaymentEdit && isDeletedPayment && canManageExpenseStatus && restorablePaymentId && (
+                                  {shouldShowPaymentEdit && isActualDeletedPayment && canManageExpenseStatus && restorablePaymentId && (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"

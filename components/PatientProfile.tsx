@@ -114,6 +114,14 @@ import {
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 import {
+  PaymentTransactionStatusBadge,
+  deletedPaymentBadgeClass,
+  deletedPaymentRowClass,
+  getDeletedPaymentLabel,
+  isActualDeletedPaymentTransaction,
+  isSoftDeletedPaymentTransaction,
+} from "./PaymentTransactionStatusBadge";
+import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
   normalizeBookingDuration,
@@ -963,10 +971,6 @@ const isPaymentLogLikeRow = (row?: Partial<RecentTransaction> | Record<string, a
 const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
 const isStoredPaymentLogRow = (txn: RecentTransaction) => isPaymentLogLikeRow(txn);
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
-const isSoftDeletedPaymentTransaction = (txn?: Partial<RecentTransaction> | null) =>
-  Boolean((txn as any)?.deleted) || Boolean((txn as any)?.deletedAt);
-const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
-const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
 const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
   Boolean(appointment?.deleted) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
@@ -997,8 +1001,12 @@ const getRestorablePaymentId = (txn: RecentTransaction) => {
 };
 
 const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
-  if (isSoftDeletedPaymentTransaction(txn)) {
+  if (isActualDeletedPaymentTransaction(txn)) {
     return "This payment has been deleted.";
+  }
+
+  if (isSoftDeletedPaymentTransaction(txn)) {
+    return "This payment belongs to a deleted appointment.";
   }
 
   if (isLegacyPaymentRow(txn)) {
@@ -1836,6 +1844,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       transactionId: `LEGACY-${apt.id}`,
       notes: "Imported from appointment total paid because no individual payment record exists.",
       status: apt.paymentStatus === "unpaid" ? "pending" : "completed",
+      deleted: false,
+      deletedAt: null,
+      paymentDeleted: false,
+      paymentDeletedAt: null,
+      appointmentDeleted: isSoftDeletedAppointment(apt),
+      appointmentDeletedAt: (apt as any).deletedAt ?? null,
     };
   }, [getHistoryAppointmentType]);
 
@@ -1850,6 +1864,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
         const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
         const paymentDate = toDateOnly(payment.date) || toDateOnly(payment.createdAt);
+        const appointmentDeleted = Boolean((payment as any).appointmentDeleted) || isSoftDeletedAppointment(appointment);
+        const appointmentDeletedAt = (payment as any).appointmentDeletedAt || (appointment as any)?.deletedAt || null;
+        const paymentDeleted =
+          (payment as any).paymentDeleted !== undefined
+            ? Boolean((payment as any).paymentDeleted)
+            : Boolean(payment.deleted) && !appointmentDeleted;
+        const paymentDeletedAt = paymentDeleted
+          ? ((payment as any).paymentDeletedAt || payment.deletedAt || null)
+          : null;
 
         return {
           ...payment,
@@ -1866,8 +1889,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentDate,
           doctor: payment.doctor || appointment?.doctor || "",
           status: payment.status || "completed",
-          deleted: Boolean(payment.deleted),
-          deletedAt: payment.deletedAt,
+          deleted: paymentDeleted,
+          deletedAt: paymentDeletedAt,
+          paymentDeleted,
+          paymentDeletedAt,
+          appointmentDeleted,
+          appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
         } as RecentTransaction;
       });
 
@@ -1880,6 +1907,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentType = rawTxn.appointmentType || getHistoryAppointmentType(apt);
         const appointmentDate = rawTxn.appointmentDate || String(apt.date || "");
         const paymentDate = toDateOnly(rawTxn.paymentDate) || toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt);
+        const appointmentDeleted = Boolean(rawTxn.appointmentDeleted) || isSoftDeletedAppointment(apt);
+        const appointmentDeletedAt = rawTxn.appointmentDeletedAt || (apt as any).deletedAt || null;
+        const paymentDeleted =
+          rawTxn.paymentDeleted !== undefined
+            ? Boolean(rawTxn.paymentDeleted)
+            : Boolean(rawTxn.deleted) && !appointmentDeleted;
+        const paymentDeletedAt = paymentDeleted ? (rawTxn.paymentDeletedAt || rawTxn.deletedAt || null) : null;
         const txn: RecentTransaction = {
           ...rawTxn,
           id: rawTxn.id || rawTxn.transactionId || `apt-${apt.id}-txn-${rawTxn.date || ''}-${rawTxn.method || ''}-${rawTxn.amount || 0}`,
@@ -1895,6 +1929,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentDate,
           doctor: rawTxn.doctor || apt.doctor || "",
           status: rawTxn.status || "completed",
+          deleted: paymentDeleted,
+          deletedAt: paymentDeletedAt,
+          paymentDeleted,
+          paymentDeletedAt,
+          appointmentDeleted,
+          appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
         } as RecentTransaction;
 
         const key = getPaymentTransactionKey(txn);
@@ -2580,7 +2620,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
     if (isSoftDeletedPaymentTransaction(transaction)) {
       return {
-        label: "Deleted",
+        label: getDeletedPaymentLabel(transaction),
         status: "deleted",
         className: deletedPaymentBadgeClass,
         isLog: false,
@@ -3340,7 +3380,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           String(txn.transactionId || "") === paymentId;
         const markDeletedPayment = (txn: RecentTransaction) =>
           matchesDeletedPayment(txn)
-            ? ({ ...txn, deleted: true, deletedAt } as RecentTransaction)
+            ? ({
+                ...txn,
+                deleted: true,
+                deletedAt,
+                paymentDeleted: true,
+                paymentDeletedAt: deletedAt,
+              } as RecentTransaction)
             : txn;
 
         toast.success("Payment deleted successfully");
@@ -3402,6 +3448,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               source: (txn as any).source || "payment",
               deleted: false,
               deletedAt: null,
+              paymentDeleted: false,
+              paymentDeletedAt: null,
             } as RecentTransaction)
           : txn;
 
@@ -4744,9 +4792,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                               <span className="font-semibold text-slate-400">-</span>
                                               <span className={`font-bold ${isDeletedPayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                               {paymentDisplay.label ? (
-                                                <Badge variant="outline" className={paymentDisplay.className}>
-                                                  {paymentDisplay.label}
-                                                </Badge>
+                                                <PaymentTransactionStatusBadge
+                                                  display={paymentDisplay}
+                                                  className="rounded-full px-2.5 py-0.5 text-xs"
+                                                  showIcon={false}
+                                                />
                                               ) : null}
                                             </div>
                                             {txn.notes ? (
@@ -4804,7 +4854,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                                 <span className="sr-only">Delete payment</span>
                                               </Button>
                                             </>
-                                          ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                          ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                             <Button
                                               type="button"
                                               variant="outline"
@@ -5052,18 +5102,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     <span className={isDeletedPayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                   </div>
                                   <div className="mt-2">
-                                    <Badge variant="outline" className={`rounded-md px-3 py-1 text-sm font-bold ${paymentDisplay.className}`}>
-                                      {paymentDisplay.label}
-                                      {paymentDisplay.status === "deleted" ? (
-                                        <X className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentDisplay.status === "over-paid" ? (
-                                        <AlertTriangle className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentDisplay.status === "half-paid" ? (
-                                        <Clock className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : (
-                                        <CheckCircle className="ml-1.5 h-3.5 w-3.5" />
-                                      )}
-                                    </Badge>
+                                    <PaymentTransactionStatusBadge display={paymentDisplay} />
                                   </div>
                                   <div className="mt-2 text-xs font-medium text-slate-400">Payment Date: {txnPaymentDate}</div>
                                 </div>
@@ -5100,7 +5139,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         <span className="sr-only">Delete Payment</span>
                                       </Button>
                                     </>
-                                  ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                  ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
