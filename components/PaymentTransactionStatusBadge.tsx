@@ -8,6 +8,7 @@ import { Badge } from "./ui/badge";
 
 export const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
 export const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
+export const cancelledPaymentBadgeClass = "bg-red-100 text-red-700 border-transparent";
 
 export type PaymentStatusDisplay = {
   label: string;
@@ -91,6 +92,20 @@ export const isSoftDeletedPaymentTransaction = (
   transaction?: Partial<RecentTransaction> | null
 ) => isActualDeletedPaymentTransaction(transaction) || isAppointmentDeletedStatusTransaction(transaction);
 
+export const isAppointmentCancelledStatusTransaction = (
+  transaction?: Partial<RecentTransaction> | null
+) => {
+  const row = transaction as PaymentTransactionLike | null | undefined;
+  const appointmentSnapshot = getAppointmentSnapshot(row);
+  const appointmentStatus = normalizeStatus(
+    row?.appointmentStatus ||
+    appointmentSnapshot.status ||
+    appointmentSnapshot.appointmentStatus
+  );
+
+  return appointmentStatus === "cancelled" || appointmentStatus === "canceled";
+};
+
 export const getDeletedPaymentLabel = (
   transaction: Partial<RecentTransaction> | null | undefined
 ) => {
@@ -116,7 +131,7 @@ export function PaymentTransactionStatusBadge({
 
   const status = normalizeStatus(display.status);
   const StatusIcon =
-    status === "deleted"
+    status === "deleted" || status === "cancelled" || status === "canceled"
       ? X
       : status === "over-paid"
         ? AlertTriangle

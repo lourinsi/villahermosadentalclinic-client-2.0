@@ -44,6 +44,7 @@ export interface RecentTransaction {
   updatedAt?: string | Date;
   appointmentType?: string;
   appointmentDate?: string;
+  appointmentStatus?: string | null;
   doctor?: string;
   doctorName?: string;
   transactionId?: string;

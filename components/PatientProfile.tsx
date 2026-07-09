@@ -102,6 +102,7 @@ import {
 import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import {
   buildPatientAppointmentSummary,
+  getAppointmentOutstandingBalance,
 } from "@/lib/patient-aggregates";
 import {
   clearPatientProfileDraft,
@@ -115,9 +116,11 @@ import {
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 import {
   PaymentTransactionStatusBadge,
+  cancelledPaymentBadgeClass,
   deletedPaymentBadgeClass,
   deletedPaymentRowClass,
   getDeletedPaymentLabel,
+  isAppointmentCancelledStatusTransaction,
   isActualDeletedPaymentTransaction,
   isSoftDeletedPaymentTransaction,
 } from "./PaymentTransactionStatusBadge";
@@ -1850,6 +1853,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       paymentDeletedAt: null,
       appointmentDeleted: isSoftDeletedAppointment(apt),
       appointmentDeletedAt: (apt as any).deletedAt ?? null,
+      appointmentStatus: apt.status,
     };
   }, [getHistoryAppointmentType]);
 
@@ -1895,6 +1899,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           paymentDeletedAt,
           appointmentDeleted,
           appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
+          appointmentStatus: appointment?.status,
         } as RecentTransaction;
       });
 
@@ -1935,6 +1940,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           paymentDeletedAt,
           appointmentDeleted,
           appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
+          appointmentStatus: apt.status,
         } as RecentTransaction;
 
         const key = getPaymentTransactionKey(txn);
@@ -2631,6 +2637,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const currentAppointment =
       mockAppointmentHistoryLocal.find((apt) => String(apt.id) === appointmentId) ||
       patientAppointments.find((apt) => String(apt.id) === appointmentId);
+    const isCancelledAppointment =
+      normalizeAppointmentStatus(String(currentAppointment?.status || "")) === "cancelled" ||
+      isAppointmentCancelledStatusTransaction(transaction);
+
+    if (isCancelledAppointment) {
+      return {
+        label: "Cancelled",
+        status: "cancelled",
+        className: cancelledPaymentBadgeClass,
+        isLog: false,
+      };
+    }
+
     const transactionSnapshot = (transaction as any).appointmentSnapshot || {};
     const currentTransactionState = {
       currentAppointmentBalance: (transaction as any).currentAppointmentBalance,
@@ -2840,7 +2859,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         summary.totalBilled += billed;
         summary.totalPaid += paid;
-        summary.outstanding += Math.max(0, billed - paid);
+        summary.outstanding += getAppointmentOutstandingBalance(apt);
 
         return summary;
       },
@@ -4774,12 +4793,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     const restorablePaymentId = getRestorablePaymentId(txn);
                                     const isCashPayment = methodLabel.toLowerCase() === "cash";
                                     const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                                    const isCancelledPayment =
+                                      appointmentStatus === "cancelled" ||
+                                      isAppointmentCancelledStatusTransaction(txn);
+                                    const isInactivePayment = isDeletedPayment || isCancelledPayment;
 
                                     return (
                                       <div
                                         key={transactionKey}
                                         className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${
-                                          isDeletedPayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                          isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
                                         }`}
                                       >
                                         <div className="flex min-w-0 items-center gap-3">
@@ -4788,9 +4811,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                           </div>
                                           <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                              <span className={`truncate font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
+                                              <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
                                               <span className="font-semibold text-slate-400">-</span>
-                                              <span className={`font-bold ${isDeletedPayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                               {paymentDisplay.label ? (
                                                 <PaymentTransactionStatusBadge
                                                   display={paymentDisplay}
@@ -4807,7 +4830,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                          <span className={`font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
@@ -5059,11 +5082,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       const editablePaymentId = getEditablePaymentId(txn);
                       const restorablePaymentId = getRestorablePaymentId(txn);
                       const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                      const isCancelledPayment = isAppointmentCancelledStatusTransaction(txn);
+                      const isInactivePayment = isDeletedPayment || isCancelledPayment;
 
                       return (
                         <div key={txn.id} className="relative">
-                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedPayment ? "bg-gray-400 shadow-gray-100" : "bg-violet-600 shadow-violet-200"}`} />
-                          <div className={`rounded-lg border p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedPayment ? `border-slate-200 ${deletedPaymentRowClass}` : paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200 bg-white"}`}>
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isInactivePayment ? "bg-gray-400 shadow-gray-100" : "bg-violet-600 shadow-violet-200"}`} />
+                          <div className={`rounded-lg border p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isInactivePayment ? `border-slate-200 ${deletedPaymentRowClass}` : paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200 bg-white"}`}>
                             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                               <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                                 <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -5074,7 +5099,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   </div>
                                 </div>
                                 <div className="min-w-0">
-                                  <h4 className={`truncate text-lg font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-950"}`}>{txn.doctor || "Unassigned Doctor"}</h4>
+                                  <h4 className={`truncate text-lg font-black ${isInactivePayment ? "text-gray-700" : "text-slate-950"}`}>{txn.doctor || "Unassigned Doctor"}</h4>
                                   <p className="mt-1 truncate text-base font-medium text-slate-500">{txn.appointmentType || "Appointment Payment"}</p>
                                   <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
                                     <span className="inline-flex items-center gap-2">
@@ -5099,7 +5124,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className="text-2xl font-black text-emerald-600">
-                                    <span className={isDeletedPayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                    <span className={isInactivePayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                   </div>
                                   <div className="mt-2">
                                     <PaymentTransactionStatusBadge display={paymentDisplay} />
