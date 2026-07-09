@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
@@ -1541,6 +1541,130 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
   };
 
+  const isStoredPaymentLogRow = (payment: any) => {
+    const source = String(payment?.source || "").trim().toLowerCase();
+    if (source === "payment-log" || source === "appointment-log") return true;
+
+    return [payment?.id, payment?.transactionId, payment?.paymentId, payment?.paymentRecordId].some((value) => {
+      const id = String(value || "").trim();
+      return (
+        id.startsWith("pay_log_") ||
+        id.startsWith("payment-log-") ||
+        id.startsWith("appointment-log-") ||
+        id.startsWith("apt_log_")
+      );
+    });
+  };
+
+  const isLegacyPaymentRow = (payment: any) => String(payment?.id || "").startsWith("legacy-");
+  const isReadOnlyPaymentRow = (payment: any) => isLegacyPaymentRow(payment) || isStoredPaymentLogRow(payment);
+
+  const getEditablePaymentEntryId = (payment: any) => {
+    if (isReadOnlyPaymentRow(payment)) return "";
+    if (payment?.deleted || payment?.paymentDeleted || payment?.deletedAt || payment?.paymentDeletedAt) return "";
+
+    const explicitPaymentId = payment?.paymentId || payment?.paymentRecordId || payment?.id;
+    return explicitPaymentId ? String(explicitPaymentId).trim() : "";
+  };
+
+  const getPaymentEntryEditUnavailableMessage = (payment: any) => {
+    if (payment?.deleted || payment?.paymentDeleted) {
+      return "This payment has already been deleted.";
+    }
+
+    if (isLegacyPaymentRow(payment)) {
+      return "This is a legacy recorded total and cannot be edited as a payment record.";
+    }
+
+    if (isStoredPaymentLogRow(payment)) {
+      return "This payment log is not linked to an editable payment record.";
+    }
+
+    return "Could not find an editable payment record.";
+  };
+
+  const handleRecordPayment = () => {
+    const appointment = getAppointmentForPayment();
+    openPaymentFor(appointment, displayedPatientId || undefined, patientName || undefined);
+  };
+
+  const handleEditPaymentEntry = async (payment: any) => {
+    const paymentId = getEditablePaymentEntryId(payment);
+    if (!paymentId) {
+      toast.error(getPaymentEntryEditUnavailableMessage(payment));
+      return;
+    }
+
+    setIsOpeningPaymentEdit(true);
+    try {
+      openEditPaymentModal(
+        paymentId,
+        payment,
+        String(displayedPatientId || payment?.patientId || ""),
+        [getAppointmentForPayment()]
+      );
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open payment edit:", error);
+      toast.error("Failed to open payment editor");
+    } finally {
+      setIsOpeningPaymentEdit(false);
+    }
+  };
+
+  const handleDeletePaymentEntry = async (payment: any) => {
+    const paymentId = getEditablePaymentEntryId(payment);
+    if (!paymentId) {
+      toast.error(getPaymentEntryEditUnavailableMessage(payment));
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/payments/${encodeURIComponent(paymentId)}`), {
+        method: "DELETE",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        toast.error(result?.message || "Failed to delete payment");
+        return;
+      }
+
+      const markDeletedPayment = (entry: any) => {
+        const entryPaymentId = String(entry?.paymentId || entry?.paymentRecordId || entry?.id || entry?.transactionId || "").trim();
+        if (!entryPaymentId) {
+          return entry;
+        }
+
+        return entryPaymentId === paymentId || String(entry?.id || "") === String(payment?.id || "")
+          ? {
+              ...entry,
+              deleted: true,
+              deletedAt: new Date().toISOString(),
+              paymentDeleted: true,
+              paymentDeletedAt: new Date().toISOString(),
+            }
+          : entry;
+      };
+
+      setPaymentLogEntries((current: any[]) => current.map(markDeletedPayment));
+      setPaymentHistoryLogs((current: any[]) => current.map(markDeletedPayment));
+      setSelectedFocusedPaymentSnapshot((current: any) => (current ? markDeletedPayment(current) : current));
+      setPaymentLogsRefreshKey((key) => key + 1);
+      window.dispatchEvent(new CustomEvent("payments:updated", {
+        detail: {
+          appointmentId: String(appointmentId),
+          payment: { id: paymentId, appointmentId: String(appointmentId) },
+        },
+      }));
+      toast.success("Payment deleted successfully");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to delete payment:", error);
+      toast.error("Failed to delete payment");
+    }
+  };
+
   const handleAddPayment = () => {
     if (!appointmentId) {
       toast.error("No appointment id available");
@@ -2438,9 +2562,20 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </div>
 
                 <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm lg:min-h-[28.25rem]">
-                  <div className="flex items-center gap-3 text-violet-700">
-                    <WalletCards className="h-6 w-6" />
-                    <Label className="text-sm font-black uppercase tracking-wide">Payment</Label>
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
+                    <div className="flex items-center gap-3">
+                      <WalletCards className="h-6 w-6" />
+                      <Label className="text-sm font-black uppercase tracking-wide">Payment</Label>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRecordPayment}
+                      className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Record Payment
+                    </Button>
                   </div>
                   <div className="mt-12">
                     <div className="flex items-center gap-2">
@@ -2481,9 +2616,41 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       </div>
                     ) : shouldShowPaymentLine ? (
                       <div className={`mt-5 rounded-2xl border p-4 ${mainPaymentCardClass}`}>
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
                           <p className={`text-xs font-black uppercase tracking-widest ${mainPaymentTextClass}`}>{snapshotPaymentLabel}</p>
-                          <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
+                                  title="Payment actions"
+                                >
+                                  <EllipsisVertical className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-36">
+                                <DropdownMenuItem
+                                  onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
+                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                >
+                                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
+                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                  className="text-red-600 focus:text-red-600"
+                                >
+                                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </div>
                         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
                           <p className={`text-2xl font-black ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
@@ -2503,15 +2670,54 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                             </Button>
                             {showAdditionalPayments ? (
                               <div className={`mt-2 space-y-2 border-t pt-3 ${mainPaymentDividerClass}`}>
-                                {additionalPaymentRows.map((payment) => (
-                                  <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
-                                    <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>
-                                    <div className="min-w-0 text-right">
-                                      <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
-                                      <p className="mt-0.5 text-xs font-bold text-emerald-700/60">{payment.dateLabel}</p>
+                                {additionalPaymentRows.map((payment) => {
+                                  const paymentId = getEditablePaymentEntryId(payment.raw);
+                                  const paymentUnavailableMessage = getPaymentEntryEditUnavailableMessage(payment.raw);
+
+                                  return (
+                                    <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
+                                      <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>
+                                      <div className="flex min-w-0 items-center gap-2 text-right">
+                                        <div className="min-w-0">
+                                          <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
+                                          <p className="mt-0.5 text-xs font-bold text-emerald-700/60">{payment.dateLabel}</p>
+                                        </div>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
+                                              title="Payment actions"
+                                            >
+                                              <EllipsisVertical className="h-3 w-3" />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end" className="w-36">
+                                            <DropdownMenuItem
+                                              onClick={() => handleEditPaymentEntry(payment.raw)}
+                                              disabled={!paymentId}
+                                              title={paymentId ? "Edit payment" : paymentUnavailableMessage}
+                                            >
+                                              <Pencil className="mr-2 h-3 w-3" />
+                                              Edit
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => handleDeletePaymentEntry(payment.raw)}
+                                              disabled={!paymentId}
+                                              title={paymentId ? "Delete payment" : paymentUnavailableMessage}
+                                              className="text-red-600 focus:text-red-600"
+                                            >
+                                              <Trash2 className="mr-2 h-3 w-3" />
+                                              Delete
+                                            </DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : null}
                           </div>
