@@ -2277,6 +2277,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           method: transactionRow.method,
           paymentMethod: transactionRow.method,
           changedAt: transactionRow.changedAt || transactionRow.updatedAt || transactionRow.createdAt,
+          _paymentHistoryAction: isActualDeletedPaymentTransaction(transactionRow) ? "deleted" : undefined,
         }
       : null;
 

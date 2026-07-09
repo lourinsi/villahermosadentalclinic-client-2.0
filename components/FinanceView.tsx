@@ -2482,6 +2482,7 @@ export function FinanceView() {
             method: resolvedPaymentMethod,
             paymentMethod: resolvedPaymentMethod,
             changedAt: transactionToView.logDate || transactionToView.date,
+            _paymentHistoryAction: isActualDeletedPaymentTransaction(transactionToView) ? "deleted" : undefined,
           }
         : null;
       const enrichedSnapshot = {
