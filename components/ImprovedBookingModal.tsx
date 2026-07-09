@@ -2972,7 +2972,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const deletedAppointment = {
           ...appointmentToEdit,
           status: "deleted",
-          deleted: true,
+          deleted: false,
           deletedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -3042,6 +3042,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     } catch (err) {
       console.error('Restore appointment error:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to restore appointment');
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
+  const handleHardDeleteAppointment = async () => {
+    if (!appointmentToEdit || !canRestoreDeletedAppointment) return;
+
+    // Show confirmation before hard delete
+    const confirmed = window.confirm(
+      'This will permanently delete the appointment and all associated data (payments, logs, notifications). This action cannot be undone. Are you sure?'
+    );
+    if (!confirmed) return;
+
+    setIsBooking(true);
+    try {
+      await deleteAppointment(appointmentToEdit.id, { hardDelete: true });
+      try {
+        window.dispatchEvent(new CustomEvent('appointments:updated', {
+          detail: { appointment: null, appointmentId: appointmentToEdit.id, hardDeleted: true },
+        }));
+      } catch {}
+      if (onDeleted) onDeleted(null);
+      toast?.success?.('Appointment permanently deleted');
+      closeAfterCommittedBookingAction();
+    } catch (err) {
+      console.error('Hard delete appointment error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to permanently delete appointment');
     } finally {
       setIsBooking(false);
     }
@@ -3198,7 +3226,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </DialogTitle>
               <div className="absolute right-0 flex items-center gap-1">
                 {isEditMode ? (
-                  <div className="hidden sm:block">
+                  <div className="flex items-center">
                     <BookingAppointmentHistory
                       appointmentLogs={appointmentLogs}
                       paymentLogs={paymentLogs}
@@ -4053,44 +4081,62 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </Button>
                 )}
                 {canRestoreDeletedAppointment && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={handleHardDeleteAppointment}
+                      disabled={isBooking}
+                      className="h-12 w-full rounded-2xl bg-red-600 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-700 hover:shadow-red-200 sm:w-auto sm:mr-auto transition-all"
+                    >
+                      {isBooking ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                      )}
+                      {isBooking ? "Processing..." : "Hard Delete"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRestoreAppointment}
+                      disabled={isBooking}
+                      className="h-12 w-full rounded-2xl border-emerald-200 bg-emerald-50 px-6 font-black uppercase tracking-widest text-emerald-700 shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-100 hover:shadow-emerald-200 sm:w-auto sm:ml-auto"
+                    >
+                      {isBooking ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                      )}
+                      {isBooking ? "Processing..." : "Restore Appointment"}
+                    </Button>
+                  </>
+                )}
+                {!canRestoreDeletedAppointment && (
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={handleRestoreAppointment}
+                    onClick={handlePrimaryBookingAction}
                     disabled={isBooking}
-                    className="h-12 w-full rounded-2xl border-emerald-200 bg-emerald-50 px-6 font-black uppercase tracking-widest text-emerald-700 shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-100 hover:shadow-emerald-200 sm:mr-auto sm:w-auto"
+                    data-tour-id="booking-next-button"
+                    className={`w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
+                      modalStep === 'payment'
+                        ? 'h-16 rounded-full bg-emerald-600 uppercase tracking-widest shadow-xl shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:h-12 sm:min-w-[260px] sm:rounded-2xl'
+                      : modalStep === 'treatment'
+                        ? 'h-12 bg-blue-600 text-sm normal-case tracking-normal shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[16rem] sm:text-base'
+                        : 'h-12 bg-blue-600 uppercase tracking-widest shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'
+                    }`}
                   >
-                    {isBooking ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RotateCcw className="mr-2 h-4 w-4" />
+                    {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                      <div className="flex items-center justify-center gap-2">
+                        {modalStep === 'payment' ? <Lock className="h-4 w-4" /> : null}
+                        <span>
+                          {getNextButtonLabel()}
+                        </span>
+                        {modalStep === 'payment' ? null : <ChevronLeft className="w-4 h-4 rotate-180" />}
+                      </div>
                     )}
-                    {isBooking ? "Processing..." : "Restore Appointment"}
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  onClick={handlePrimaryBookingAction}
-                  disabled={isBooking}
-                  data-tour-id="booking-next-button"
-                  className={`w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
-                    modalStep === 'payment'
-                      ? 'h-16 rounded-full bg-emerald-600 uppercase tracking-widest shadow-xl shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 sm:h-12 sm:min-w-[260px] sm:rounded-2xl'
-                    : modalStep === 'treatment'
-                      ? 'h-12 bg-blue-600 text-sm normal-case tracking-normal shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[16rem] sm:text-base'
-                      : 'h-12 bg-blue-600 uppercase tracking-widest shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 sm:min-w-[200px]'
-                  }`}
-                >
-                  {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-                    <div className="flex items-center justify-center gap-2">
-                      {modalStep === 'payment' ? <Lock className="h-4 w-4" /> : null}
-                      <span>
-                        {getNextButtonLabel()}
-                      </span>
-                      {modalStep === 'payment' ? null : <ChevronLeft className="w-4 h-4 rotate-180" />}
-                    </div>
-                  )}
-                </Button>
               </>
             )}
           </DialogFooter>

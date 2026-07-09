@@ -92,6 +92,7 @@ import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import {
@@ -102,6 +103,7 @@ import {
 import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import {
   buildPatientAppointmentSummary,
+  getAppointmentOutstandingBalance,
 } from "@/lib/patient-aggregates";
 import {
   clearPatientProfileDraft,
@@ -114,6 +116,16 @@ import {
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
 import {
+  PaymentTransactionStatusBadge,
+  cancelledPaymentBadgeClass,
+  deletedPaymentBadgeClass,
+  deletedPaymentRowClass,
+  getDeletedPaymentLabel,
+  isAppointmentCancelledStatusTransaction,
+  isActualDeletedPaymentTransaction,
+  isSoftDeletedPaymentTransaction,
+} from "./PaymentTransactionStatusBadge";
+import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
   normalizeBookingDuration,
@@ -125,6 +137,7 @@ import {
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { AppointmentActionsMenu, createVisitHistoryActions } from "./AppointmentActionsMenu";
 
 export interface Patient {
   id?: string;
@@ -963,13 +976,8 @@ const isPaymentLogLikeRow = (row?: Partial<RecentTransaction> | Record<string, a
 const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
 const isStoredPaymentLogRow = (txn: RecentTransaction) => isPaymentLogLikeRow(txn);
 const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
-const isSoftDeletedPaymentTransaction = (txn?: Partial<RecentTransaction> | null) =>
-  Boolean((txn as any)?.deleted) || Boolean((txn as any)?.deletedAt);
-const deletedPaymentRowClass = "bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75";
-const deletedPaymentBadgeClass = "bg-gray-200 text-gray-700 border-transparent";
 const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
   Boolean(appointment?.deleted) ||
-  Boolean((appointment as any)?.deletedAt) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
 const getEditablePaymentId = (txn: RecentTransaction) => {
   if (isStoredPaymentLogRow(txn)) return "";
@@ -998,8 +1006,12 @@ const getRestorablePaymentId = (txn: RecentTransaction) => {
 };
 
 const getPaymentEditUnavailableMessage = (txn: RecentTransaction) => {
-  if (isSoftDeletedPaymentTransaction(txn)) {
+  if (isActualDeletedPaymentTransaction(txn)) {
     return "This payment has been deleted.";
+  }
+
+  if (isSoftDeletedPaymentTransaction(txn)) {
+    return "This payment belongs to a deleted appointment.";
   }
 
   if (isLegacyPaymentRow(txn)) {
@@ -1837,6 +1849,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       transactionId: `LEGACY-${apt.id}`,
       notes: "Imported from appointment total paid because no individual payment record exists.",
       status: apt.paymentStatus === "unpaid" ? "pending" : "completed",
+      deleted: false,
+      deletedAt: null,
+      paymentDeleted: false,
+      paymentDeletedAt: null,
+      appointmentDeleted: isSoftDeletedAppointment(apt),
+      appointmentDeletedAt: (apt as any).deletedAt ?? null,
+      appointmentStatus: apt.status,
     };
   }, [getHistoryAppointmentType]);
 
@@ -1851,6 +1870,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
         const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
         const paymentDate = toDateOnly(payment.date) || toDateOnly(payment.createdAt);
+        const appointmentDeleted = Boolean((payment as any).appointmentDeleted) || isSoftDeletedAppointment(appointment);
+        const appointmentDeletedAt = (payment as any).appointmentDeletedAt || (appointment as any)?.deletedAt || null;
+        const paymentDeleted =
+          (payment as any).paymentDeleted !== undefined
+            ? Boolean((payment as any).paymentDeleted)
+            : Boolean(payment.deleted) && !appointmentDeleted;
+        const paymentDeletedAt = paymentDeleted
+          ? ((payment as any).paymentDeletedAt || payment.deletedAt || null)
+          : null;
 
         return {
           ...payment,
@@ -1867,8 +1895,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentDate,
           doctor: payment.doctor || appointment?.doctor || "",
           status: payment.status || "completed",
-          deleted: Boolean(payment.deleted),
-          deletedAt: payment.deletedAt,
+          deleted: paymentDeleted,
+          deletedAt: paymentDeletedAt,
+          paymentDeleted,
+          paymentDeletedAt,
+          appointmentDeleted,
+          appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
+          appointmentStatus: appointment?.status,
         } as RecentTransaction;
       });
 
@@ -1881,6 +1914,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentType = rawTxn.appointmentType || getHistoryAppointmentType(apt);
         const appointmentDate = rawTxn.appointmentDate || String(apt.date || "");
         const paymentDate = toDateOnly(rawTxn.paymentDate) || toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.createdAt) || toDateOnly(apt.updatedAt);
+        const appointmentDeleted = Boolean(rawTxn.appointmentDeleted) || isSoftDeletedAppointment(apt);
+        const appointmentDeletedAt = rawTxn.appointmentDeletedAt || (apt as any).deletedAt || null;
+        const paymentDeleted =
+          rawTxn.paymentDeleted !== undefined
+            ? Boolean(rawTxn.paymentDeleted)
+            : Boolean(rawTxn.deleted) && !appointmentDeleted;
+        const paymentDeletedAt = paymentDeleted ? (rawTxn.paymentDeletedAt || rawTxn.deletedAt || null) : null;
         const txn: RecentTransaction = {
           ...rawTxn,
           id: rawTxn.id || rawTxn.transactionId || `apt-${apt.id}-txn-${rawTxn.date || ''}-${rawTxn.method || ''}-${rawTxn.amount || 0}`,
@@ -1896,6 +1936,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           appointmentDate,
           doctor: rawTxn.doctor || apt.doctor || "",
           status: rawTxn.status || "completed",
+          deleted: paymentDeleted,
+          deletedAt: paymentDeletedAt,
+          paymentDeleted,
+          paymentDeletedAt,
+          appointmentDeleted,
+          appointmentDeletedAt: appointmentDeleted ? appointmentDeletedAt : null,
+          appointmentStatus: apt.status,
         } as RecentTransaction;
 
         const key = getPaymentTransactionKey(txn);
@@ -2093,6 +2140,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [selectedPaymentSnapshot, setSelectedPaymentSnapshot] = useState<any | null>(null);
   const [selectedSnapshotIsHistorical, setSelectedSnapshotIsHistorical] = useState(false);
   const [snapshotLogDate, setSnapshotLogDate] = useState("");
+  
+  // Booking history state
+  const [isBookingHistoryOpen, setIsBookingHistoryOpen] = useState(false);
+  const [bookingHistoryAppointment, setBookingHistoryAppointment] = useState<any>(null);
+  const [bookingHistoryLogs, setBookingHistoryLogs] = useState<any[]>([]);
+  const [bookingPaymentLogs, setBookingPaymentLogs] = useState<any[]>([]);
+  const [isLoadingBookingHistory, setIsLoadingBookingHistory] = useState(false);
   const selectedSnapshotAppointmentId = selectedSnapshot?.id || selectedSnapshot?.appointmentId || "";
   const isSelectedSnapshotAppointmentOpen = Boolean(
     openBookingAppointmentId &&
@@ -2172,14 +2226,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     try {
       console.log("[PatientProfile] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
     } catch (e) {}
+    
+    // Check if this snapshot has a focused payment from history (from BookingAppointmentHistory)
+    const focusedPaymentSnapshot = (appointment as any)?._focusedPaymentSnapshot;
+    const effectiveTransaction = transaction || focusedPaymentSnapshot;
+    
     const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
-    const transactionRow = transaction as (RecentTransaction & Record<string, any>) | undefined;
+    const transactionRow = effectiveTransaction as (RecentTransaction & Record<string, any>) | undefined;
     const transactionSnapshot = transactionRow?.appointmentSnapshot && typeof transactionRow.appointmentSnapshot === "object"
       ? transactionRow.appointmentSnapshot
       : undefined;
 
-    const isPaymentSnapshot = Boolean(transaction);
-    const isHistoricalPaymentSnapshot = false;
+    const isPaymentSnapshot = Boolean(effectiveTransaction);
+    const isHistoricalPaymentSnapshot = (appointment as any)?._isHistorical || false;
     const snapshotBase = {
       ...(originalAppointment || {}),
       ...appointment,
@@ -2195,9 +2254,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : Math.max(0, price - totalPaid);
     const transactionPaymentDate =
       toDateOnly(transactionRow?.paymentDate) ||
-      toDateOnly(transaction?.date) ||
+      toDateOnly(effectiveTransaction?.date) ||
       toDateOnly(snapshotBase.paymentDate);
-    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
+    const logDate = (appointment as any)?.changedAt || transactionRow?.changedAt || transactionRow?.createdAt || transactionPaymentDate || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
       snapshotBase.patientName ||
       appointment.patientName ||
@@ -2218,6 +2277,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           method: transactionRow.method,
           paymentMethod: transactionRow.method,
           changedAt: transactionRow.changedAt || transactionRow.updatedAt || transactionRow.createdAt,
+          _paymentHistoryAction: isActualDeletedPaymentTransaction(transactionRow) ? "deleted" : undefined,
         }
       : null;
 
@@ -2282,9 +2342,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       paymentDate: paymentSnapshotForDialog?.paymentDate || snapshotBase.paymentDate,
       paymentMethod: paymentSnapshotForDialog?.paymentMethod || snapshotBase.paymentMethod,
       paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
-      transactionId: transaction?.transactionId,
-      _paymentTransactionId: transaction?.transactionId || transaction?.id || snapshotBase._paymentTransactionId,
-      _transactionId: transaction?.transactionId || transaction?.id || snapshotBase._transactionId,
+      transactionId: effectiveTransaction?.transactionId,
+      _paymentTransactionId: effectiveTransaction?.transactionId || effectiveTransaction?.id || snapshotBase._paymentTransactionId,
+      _transactionId: effectiveTransaction?.transactionId || effectiveTransaction?.id || snapshotBase._transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
       _isHistorical: isHistoricalPaymentSnapshot,
@@ -2293,6 +2353,47 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setSelectedSnapshotIsHistorical(isHistoricalPaymentSnapshot);
     setSnapshotLogDate(logDate);
     setIsSnapshotOpen(true);
+  };
+
+  const handleOpenBookingHistory = async (appointment: Appointment | HistoryAppointment) => {
+    const appointmentId = appointment?.id;
+    if (!appointmentId) {
+      toast.error("Could not load appointment history");
+      return;
+    }
+
+    try {
+      setIsLoadingBookingHistory(true);
+      setBookingHistoryAppointment(appointment);
+
+      // Fetch appointment logs
+      const logsResponse = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/logs`), {
+        headers: getAuthHeaders(),
+      });
+
+      const logsData = await logsResponse.json();
+      const appointmentLogs = logsResponse.ok && logsData?.success && Array.isArray(logsData.data) ? logsData.data : [];
+
+      // Fetch payment logs
+      const paymentResponse = await fetch(
+        apiUrl(`/api/payments/appointment/${encodeURIComponent(String(appointmentId))}`),
+        { headers: getAuthHeaders() }
+      );
+
+      const paymentData = await paymentResponse.json();
+      const paymentLogs = paymentResponse.ok && paymentData?.success && Array.isArray(paymentData.data)
+        ? paymentData.data
+        : [];
+
+      setBookingHistoryLogs(appointmentLogs);
+      setBookingPaymentLogs(paymentLogs);
+      setIsBookingHistoryOpen(true);
+    } catch (error) {
+      console.error("Error loading booking history:", error);
+      toast.error("Failed to load appointment history");
+    } finally {
+      setIsLoadingBookingHistory(false);
+    }
   };
 
   const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any) => {
@@ -2581,7 +2682,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
     if (isSoftDeletedPaymentTransaction(transaction)) {
       return {
-        label: "Deleted",
+        label: getDeletedPaymentLabel(transaction),
         status: "deleted",
         className: deletedPaymentBadgeClass,
         isLog: false,
@@ -2592,6 +2693,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const currentAppointment =
       mockAppointmentHistoryLocal.find((apt) => String(apt.id) === appointmentId) ||
       patientAppointments.find((apt) => String(apt.id) === appointmentId);
+    const isCancelledAppointment =
+      normalizeAppointmentStatus(String(currentAppointment?.status || "")) === "cancelled" ||
+      isAppointmentCancelledStatusTransaction(transaction);
+
+    if (isCancelledAppointment) {
+      return {
+        label: "Cancelled",
+        status: "cancelled",
+        className: cancelledPaymentBadgeClass,
+        isLog: false,
+      };
+    }
+
     const transactionSnapshot = (transaction as any).appointmentSnapshot || {};
     const currentTransactionState = {
       currentAppointmentBalance: (transaction as any).currentAppointmentBalance,
@@ -2796,12 +2910,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const paymentSummary = React.useMemo(() => {
     return mockAppointmentHistoryLocal.reduce(
       (summary, apt: Appointment) => {
+        if (isSoftDeletedAppointment(apt)) return summary;
+
         const billed = Number(apt.price || 0);
         const paid = Number(apt.totalPaid || 0);
 
         summary.totalBilled += billed;
         summary.totalPaid += paid;
-        summary.outstanding += Math.max(0, billed - paid);
+        summary.outstanding += getAppointmentOutstandingBalance(apt);
 
         return summary;
       },
@@ -3341,7 +3457,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           String(txn.transactionId || "") === paymentId;
         const markDeletedPayment = (txn: RecentTransaction) =>
           matchesDeletedPayment(txn)
-            ? ({ ...txn, deleted: true, deletedAt } as RecentTransaction)
+            ? ({
+                ...txn,
+                deleted: true,
+                deletedAt,
+                paymentDeleted: true,
+                paymentDeletedAt: deletedAt,
+              } as RecentTransaction)
             : txn;
 
         toast.success("Payment deleted successfully");
@@ -3403,6 +3525,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               source: (txn as any).source || "payment",
               deleted: false,
               deletedAt: null,
+              paymentDeleted: false,
+              paymentDeletedAt: null,
             } as RecentTransaction)
           : txn;
 
@@ -4636,70 +4760,47 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </Button>
                             </div>
 
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-9 w-9 justify-self-end rounded-xl text-slate-500 hover:bg-slate-100">
-                                  <MoreVertical className="h-4 w-4" />
-                                  <span className="sr-only">Visit actions</span>
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-52">
-                                <DropdownMenuItem onClick={() => handleOpenSnapshot(appointment)}>
-                                  <Eye className="mr-2 h-4 w-4" />
-                                  View Details
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!patient.id || isVoidedAppointment}
-                                  onClick={() => {
+                            <AppointmentActionsMenu
+                              actions={createVisitHistoryActions(
+                                {
+                                  onViewDetails: () => handleOpenSnapshot(appointment),
+                                  onViewHistory: () => handleOpenBookingHistory(appointment),
+                                  onRecordPayment: () => {
                                     if (patient.id && !isVoidedAppointment) {
                                       openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
                                     }
-                                  }}
-                                >
-                                  <DollarSign className="mr-2 h-4 w-4" />
-                                  Record Payment
-                                </DropdownMenuItem>
-                                {canRestoreAppointment ? (
-                                  <DropdownMenuItem onClick={() => handleRestoreVisitAppointment(appointment)}>
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                    Restore Appointment
-                                  </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onRestoreAppointment: () => handleRestoreVisitAppointment(appointment),
+                                  onReschedule: () => {
                                     if (originalAppointment) {
                                       openRescheduleModal(originalAppointment);
                                     }
-                                  }}
-                                >
-                                  <Calendar className="mr-2 h-4 w-4" />
-                                  Reschedule
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onUpdateTreatment: () => {
                                     if (originalAppointment) {
                                       openUpdateTreatmentModal(originalAppointment);
                                     }
-                                  }}
-                                >
-                                  <ClipboardList className="mr-2 h-4 w-4" />
-                                  Update Treatment
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={!originalAppointment || isDeletedAppointment}
-                                  onClick={() => {
+                                  },
+                                  onAssignDoctor: () => {
                                     if (originalAppointment) {
                                       setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment);
                                     }
-                                  }}
-                                >
-                                  <Stethoscope className="mr-2 h-4 w-4" />
-                                  {isDoctorUnassigned ? "Assign Doctor" : "Change Doctor"}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                  },
+                                },
+                                {
+                                  canRestoreAppointment,
+                                  canReschedule: Boolean(originalAppointment && !isDeletedAppointment),
+                                  canUpdateTreatment: Boolean(originalAppointment && !isDeletedAppointment),
+                                  canAssignDoctor: Boolean(originalAppointment && !isDeletedAppointment),
+                                  isDoctorUnassigned,
+                                }
+                              )}
+                              triggerVariant="ghost"
+                              triggerSize="icon"
+                              triggerClassName="h-9 w-9 justify-self-end rounded-xl text-slate-500 hover:bg-slate-100"
+                              triggerIcon={<MoreVertical className="h-4 w-4" />}
+                              ariaLabel="Visit actions"
+                            />
                           </div>
 
                           {visitTransactions.length > 0 ? (
@@ -4727,12 +4828,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     const restorablePaymentId = getRestorablePaymentId(txn);
                                     const isCashPayment = methodLabel.toLowerCase() === "cash";
                                     const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                                    const isCancelledPayment =
+                                      appointmentStatus === "cancelled" ||
+                                      isAppointmentCancelledStatusTransaction(txn);
+                                    const isInactivePayment = isDeletedPayment || isCancelledPayment;
 
                                     return (
                                       <div
                                         key={transactionKey}
                                         className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${
-                                          isDeletedPayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                          isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
                                         }`}
                                       >
                                         <div className="flex min-w-0 items-center gap-3">
@@ -4741,13 +4846,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                           </div>
                                           <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                              <span className={`truncate font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
+                                              <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
                                               <span className="font-semibold text-slate-400">-</span>
-                                              <span className={`font-bold ${isDeletedPayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                               {paymentDisplay.label ? (
-                                                <Badge variant="outline" className={paymentDisplay.className}>
-                                                  {paymentDisplay.label}
-                                                </Badge>
+                                                <PaymentTransactionStatusBadge
+                                                  display={paymentDisplay}
+                                                  className="rounded-full px-2.5 py-0.5 text-xs"
+                                                  showIcon={false}
+                                                />
                                               ) : null}
                                             </div>
                                             {txn.notes ? (
@@ -4758,7 +4865,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                          <span className={`font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
@@ -4805,7 +4912,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                                 <span className="sr-only">Delete payment</span>
                                               </Button>
                                             </>
-                                          ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                          ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                             <Button
                                               type="button"
                                               variant="outline"
@@ -5010,11 +5117,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       const editablePaymentId = getEditablePaymentId(txn);
                       const restorablePaymentId = getRestorablePaymentId(txn);
                       const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                      const isCancelledPayment = isAppointmentCancelledStatusTransaction(txn);
+                      const isInactivePayment = isDeletedPayment || isCancelledPayment;
 
                       return (
                         <div key={txn.id} className="relative">
-                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedPayment ? "bg-gray-400 shadow-gray-100" : "bg-violet-600 shadow-violet-200"}`} />
-                          <div className={`rounded-lg border p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedPayment ? `border-slate-200 ${deletedPaymentRowClass}` : paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200 bg-white"}`}>
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isInactivePayment ? "bg-gray-400 shadow-gray-100" : "bg-violet-600 shadow-violet-200"}`} />
+                          <div className={`rounded-lg border p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isInactivePayment ? `border-slate-200 ${deletedPaymentRowClass}` : paymentDisplay.isLog ? "border-slate-200 bg-slate-50/70 opacity-90" : "border-slate-200 bg-white"}`}>
                             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                               <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                                 <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -5025,7 +5134,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   </div>
                                 </div>
                                 <div className="min-w-0">
-                                  <h4 className={`truncate text-lg font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-950"}`}>{txn.doctor || "Unassigned Doctor"}</h4>
+                                  <h4 className={`truncate text-lg font-black ${isInactivePayment ? "text-gray-700" : "text-slate-950"}`}>{txn.doctor || "Unassigned Doctor"}</h4>
                                   <p className="mt-1 truncate text-base font-medium text-slate-500">{txn.appointmentType || "Appointment Payment"}</p>
                                   <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-500">
                                     <span className="inline-flex items-center gap-2">
@@ -5050,21 +5159,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className="text-2xl font-black text-emerald-600">
-                                    <span className={isDeletedPayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                    <span className={isInactivePayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
                                   </div>
                                   <div className="mt-2">
-                                    <Badge variant="outline" className={`rounded-md px-3 py-1 text-sm font-bold ${paymentDisplay.className}`}>
-                                      {paymentDisplay.label}
-                                      {paymentDisplay.status === "deleted" ? (
-                                        <X className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentDisplay.status === "over-paid" ? (
-                                        <AlertTriangle className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : paymentDisplay.status === "half-paid" ? (
-                                        <Clock className="ml-1.5 h-3.5 w-3.5" />
-                                      ) : (
-                                        <CheckCircle className="ml-1.5 h-3.5 w-3.5" />
-                                      )}
-                                    </Badge>
+                                    <PaymentTransactionStatusBadge display={paymentDisplay} />
                                   </div>
                                   <div className="mt-2 text-xs font-medium text-slate-400">Payment Date: {txnPaymentDate}</div>
                                 </div>
@@ -5101,7 +5199,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         <span className="sr-only">Delete Payment</span>
                                       </Button>
                                     </>
-                                  ) : effectiveRole === "admin" && restorablePaymentId ? (
+                                  ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
@@ -5373,6 +5471,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         openedFromBookingModal={false}
         selectedPaymentSnapshot={selectedPaymentSnapshot}
         useCurrentAppointmentDetails
+      />
+
+      {/* Booking Appointment History Dialog */}
+      <BookingAppointmentHistory
+        open={isBookingHistoryOpen}
+        onOpenChange={setIsBookingHistoryOpen}
+        appointmentLogs={bookingHistoryLogs}
+        paymentLogs={bookingPaymentLogs}
+        appointmentToEdit={bookingHistoryAppointment}
+        onViewSnapshot={(snapshot: any, isHistorical: boolean) => {
+          // handleOpenSnapshot will extract _focusedPaymentSnapshot and set it appropriately
+          handleOpenSnapshot(snapshot);
+        }}
+        triggerVariant="section"
+        showTrigger={false}
       />
 
       </div>

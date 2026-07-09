@@ -64,7 +64,6 @@ interface AllAppointmentsViewProps {
 
 const isSoftDeletedAppointment = (appointment: Partial<Appointment>) =>
   Boolean(appointment.deleted) ||
-  Boolean((appointment as any).deletedAt) ||
   normalizeAppointmentStatus(String(appointment.status || "")) === "deleted";
 
 const getDisplayAppointmentStatus = (appointment: Partial<Appointment>) =>

@@ -34,6 +34,9 @@ interface BookingAppointmentHistoryProps {
   triggerVariant?: "icon" | "section";
   userRole?: string;
   className?: string;
+  showTrigger?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export const getMergedBookingLogs = (appointmentLogs: any[], paymentLogs: any[]): BookingHistoryLog[] => {
@@ -105,9 +108,12 @@ const getHistoryPaymentAmount = (log: BookingHistoryLog) => Number(log.amount ||
 
 const getHistoryActor = (log: BookingHistoryLog) => log.changedByName || log.changedBy || "";
 
-const isDeletedAppointmentState = (state: any) =>
-  Boolean(state?.deleted || state?.deletedAt) ||
-  normalizeBookingHistoryStatus(state?.status) === "deleted";
+const isDeletedAppointmentState = (state: any) => {
+  const status = normalizeBookingHistoryStatus(state?.status);
+  if (state?.deleted === true || status === "deleted") return true;
+  if (state?.deleted === false || status) return false;
+  return Boolean(state?.deletedAt);
+};
 
 const getAppointmentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restored" | "" => {
   if (log.logType !== "appointment") return "";
@@ -128,12 +134,10 @@ const getPaymentLifecycleAction = (log: BookingHistoryLog): "deleted" | "restore
 };
 
 const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
-  const paymentAction = getPaymentLifecycleAction(log);
-  if (!paymentAction) return undefined;
-
   const amount = Math.abs(getHistoryPaymentAmount(log));
   if (amount <= 0) return undefined;
 
+  const paymentAction = getPaymentLifecycleAction(log);
   const paymentDate =
     log.paymentDate ||
     log.newState?.paymentDate ||
@@ -173,7 +177,7 @@ const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
     paymentMethod,
     changedAt: log.changedAt,
     notes: log.notes,
-    _paymentHistoryAction: paymentAction,
+    _paymentHistoryAction: paymentAction || undefined,
   };
 };
 
@@ -359,12 +363,26 @@ export default function BookingAppointmentHistory({
   triggerVariant = "section",
   userRole,
   className = "",
+  showTrigger = true,
+  open,
+  onOpenChange,
 }: BookingAppointmentHistoryProps) {
-  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [internalIsHistoryDialogOpen, setInternalIsHistoryDialogOpen] = useState(false);
+  const isControlledDialogOpen = typeof open === "boolean";
+  const isHistoryDialogOpen = isControlledDialogOpen ? open : internalIsHistoryDialogOpen;
   const mergedHistoryLogs = useMemo(
     () => getMergedBookingLogs(appointmentLogs, paymentLogs),
     [appointmentLogs, paymentLogs]
   );
+
+  const setIsHistoryDialogOpen = (nextOpen: boolean) => {
+    if (isControlledDialogOpen) {
+      onOpenChange?.(nextOpen);
+      return;
+    }
+
+    setInternalIsHistoryDialogOpen(nextOpen);
+  };
 
   if (mergedHistoryLogs.length === 0) return null;
 
@@ -446,7 +464,7 @@ export default function BookingAppointmentHistory({
 
   return (
     <>
-      {trigger}
+      {showTrigger ? trigger : null}
 
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
         <DialogContent className="max-w-xl overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl">

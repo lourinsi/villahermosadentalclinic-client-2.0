@@ -13,9 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
+import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Eye, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
@@ -501,7 +503,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [paymentLogEntries, setPaymentLogEntries] = useState<any[]>([]);
   const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
   const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
+  const [historyLogs, setHistoryLogs] = useState<any[]>([]);
+  const [paymentHistoryLogs, setPaymentHistoryLogs] = useState<any[]>([]);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [isLoadingHistoryLogs, setIsLoadingHistoryLogs] = useState(false);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
+  const [selectedFocusedPaymentSnapshot, setSelectedFocusedPaymentSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
   const [isChangeScheduleOpen, setIsChangeScheduleOpen] = useState(false);
   const [isSavingScheduleChange, setIsSavingScheduleChange] = useState(false);
@@ -538,6 +545,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
+    setSelectedFocusedPaymentSnapshot(null);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
     // `_isHistorical` (set by `fetchSnapshotFromLogs`), honor that value. Otherwise
     // fall back to the `isHistorical` prop provided by the caller.
@@ -825,6 +833,61 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     appointmentSnapshot,
   ]);
 
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || typeof window === "undefined") {
+      setHistoryLogs([]);
+      setPaymentHistoryLogs([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadHistoryLogs = async () => {
+      setIsLoadingHistoryLogs(true);
+      try {
+        const [appointmentResponse, paymentResponse] = await Promise.all([
+          fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+          }),
+          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}`), {
+            credentials: "include",
+            headers: getAuthHeaders(),
+          }),
+        ]);
+
+        const appointmentPayload = await appointmentResponse.json().catch(() => null);
+        const paymentPayload = await paymentResponse.json().catch(() => null);
+        const fetchedAppointmentLogs = appointmentResponse.ok && appointmentPayload?.success && Array.isArray(appointmentPayload.data)
+          ? appointmentPayload.data
+          : [];
+        const fetchedPaymentLogs = paymentResponse.ok && paymentPayload?.success && Array.isArray(paymentPayload.data)
+          ? paymentPayload.data
+          : [];
+
+        if (!cancelled) {
+          setHistoryLogs(fetchedAppointmentLogs);
+          setPaymentHistoryLogs(fetchedPaymentLogs);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("[AppointmentHistoryView] Failed to load history logs:", error);
+          setHistoryLogs([]);
+          setPaymentHistoryLogs([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingHistoryLogs(false);
+        }
+      }
+    };
+
+    loadHistoryLogs();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, displayedAppointmentId]);
+
   if (!displayedSnapshot) return null;
 
   const formattedDate = formatWordyDate(displayedSnapshot.date, {
@@ -938,9 +1001,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // as the authoritative source.
   const openedFromLog = isPastSnapshot;
 
-  const isDeletedAppointmentState = (state: any) =>
-    Boolean(state?.deleted || state?.deletedAt) ||
-    normalizeBookingHistoryStatus(state?.status) === "deleted";
+  const isDeletedAppointmentState = (state: any) => {
+    const status = normalizeBookingHistoryStatus(state?.status);
+    if (state?.deleted === true || status === "deleted") return true;
+    if (state?.deleted === false || status) return false;
+    return Boolean(state?.deletedAt);
+  };
   const derivedLifecycleAction = (() => {
     const wasDeleted = isDeletedAppointmentState(prevState);
     const isDeleted = isDeletedAppointmentState(nextState);
@@ -966,7 +1032,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : "border-emerald-100 bg-emerald-50/70 text-emerald-700";
   const AppointmentLifecycleIcon = appointmentLifecycleAction === "deleted" ? AlertTriangle : RefreshCw;
 
-  const focusedPaymentSnapshot = selectedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
+  const focusedPaymentSnapshot = selectedPaymentSnapshot || selectedFocusedPaymentSnapshot || displayedSnapshot?._selectedPaymentSnapshot || displayedSnapshot?._focusedPaymentSnapshot || null;
   const focusedPaymentAmount = focusedPaymentSnapshot ? getPaymentLogAmountValue(focusedPaymentSnapshot) : 0;
   const hasFocusedPaymentSnapshot = focusedPaymentAmount > 0;
   const focusedPaymentAction =
@@ -2030,6 +2096,24 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   return (
     <>
+      <BookingAppointmentHistory
+        appointmentLogs={historyLogs}
+        paymentLogs={paymentHistoryLogs}
+        appointmentToEdit={displayedSnapshot}
+        onViewSnapshot={(snapshot) => {
+          setSelectedFocusedPaymentSnapshot(snapshot?._focusedPaymentSnapshot || snapshot?._selectedPaymentSnapshot || null);
+          setDisplayedSnapshot(snapshot);
+          setSnapshotState("historical");
+          setLatestComparisonSnapshot(null);
+          setIsHistoryDialogOpen(false);
+        }}
+        triggerVariant="section"
+        userRole={undefined}
+        showTrigger={false}
+        open={isHistoryDialogOpen}
+        onOpenChange={setIsHistoryDialogOpen}
+      />
+
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
@@ -2089,48 +2173,35 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </Button>
                 ) : null}
                 {canUseSnapshotActions ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button type="button" variant="outline" size="icon" className="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14" aria-label="More appointment actions">
-                        <EllipsisVertical className="h-5 w-5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
-                      <DropdownMenuItem onSelect={handleOpenAppointment}>
-                        <Eye className="mr-2 h-4 w-4" />
-                        Open
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openChangeTreatmentModal} disabled={!canChangeTreatment || isLoadingTreatmentOptions}>
-                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Stethoscope className="mr-2 h-4 w-4" />}
-                        Change treatment
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openChangeScheduleModal} disabled={!canChangeSchedule}>
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        Change schedule
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={openRepeatScheduleModal} disabled={!canRepeatSchedule}>
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        Repeat Schedule
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={handleEditPayment} disabled={isOpeningPaymentEdit}>
-                        {isOpeningPaymentEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
-                        Edit payment
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={handleAddPayment}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add payment
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={goToPatient} disabled={!canGoToPatient}>
-                        <User className="mr-2 h-4 w-4" />
-                        Go to patient
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={goToDoctor} disabled={!canGoToDoctor}>
-                        <Stethoscope className="mr-2 h-4 w-4" />
-                        Go to doctor
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <AppointmentActionsMenu
+                    actions={createAppointmentHistoryActions(
+                      {
+                        onOpen: handleOpenAppointment,
+                        onViewHistory: () => setIsHistoryDialogOpen(true),
+                        onChangeTreatment: openChangeTreatmentModal,
+                        onChangeSchedule: openChangeScheduleModal,
+                        onRepeatSchedule: openRepeatScheduleModal,
+                        onEditPayment: handleEditPayment,
+                        onAddPayment: handleAddPayment,
+                        onGoToPatient: goToPatient,
+                        onGoToDoctor: goToDoctor,
+                      },
+                      {
+                        canChangeTreatment,
+                        isLoadingTreatmentOptions,
+                        canChangeSchedule,
+                        canRepeatSchedule,
+                        isOpeningPaymentEdit,
+                        canGoToPatient,
+                        canGoToDoctor,
+                      }
+                    )}
+                    triggerVariant="outline"
+                    triggerSize="icon"
+                    triggerClassName="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14"
+                    triggerIcon={<EllipsisVertical className="h-5 w-5" />}
+                    ariaLabel="More appointment actions"
+                  />
                 ) : null}
                 <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-xl text-slate-600 hover:bg-slate-100 sm:h-14 sm:w-14" aria-label="Close snapshot">
                   <X className="h-7 w-7" />

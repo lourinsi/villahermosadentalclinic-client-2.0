@@ -44,6 +44,7 @@ export interface RecentTransaction {
   updatedAt?: string | Date;
   appointmentType?: string;
   appointmentDate?: string;
+  appointmentStatus?: string | null;
   doctor?: string;
   doctorName?: string;
   transactionId?: string;
@@ -64,5 +65,9 @@ export interface RecentTransaction {
   changedByName?: string;
   deleted?: boolean;
   deletedAt?: string | Date | null;
+  paymentDeleted?: boolean;
+  paymentDeletedAt?: string | Date | null;
+  appointmentDeleted?: boolean;
+  appointmentDeletedAt?: string | Date | null;
   source?: string;
 }

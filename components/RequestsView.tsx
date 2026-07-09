@@ -247,6 +247,32 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const canSeeDeletedAppointments = effectiveRole === "admin";
+  const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | null) =>
+    Boolean(appointment?.deleted) || canonicalStatus(appointment?.status) === "deleted";
+  const getAppointmentStatusForDisplay = (appointment: Appointment) => {
+    const normalizedStatus = normalizeAppointmentStatus(appointment.status);
+    return appointment.deleted || normalizedStatus === "deleted" ? "deleted" : normalizedStatus;
+  };
+  const buildStatusLifecycleUpdate = (appointment: Appointment | undefined, newStatus: string): Partial<Appointment> => {
+    const normalizedStatus = canonicalStatus(newStatus);
+
+    if (normalizedStatus === "deleted") {
+      return {
+        status: "deleted",
+        deleted: false,
+        deletedAt: appointment?.deletedAt || new Date().toISOString(),
+      } as Partial<Appointment>;
+    }
+
+    if (isSoftDeletedAppointment(appointment)) {
+      return {
+        status: "cancelled",
+        deleted: false,
+      } as Partial<Appointment>;
+    }
+
+    return { status: newStatus as Appointment["status"] };
+  };
   const appointmentStatusOptionsWithDeleted = (() => {
     const statuses = APPOINTMENT_STATUSES || [];
     const hasDeletedStatus = statuses.some((status: any) => canonicalStatus(status.value) === "deleted");
@@ -416,7 +442,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
       const data = (result.data || []).map((appointment: Appointment) => ({
         ...appointment,
-        status: normalizeAppointmentStatus(appointment.status),
+        status: getAppointmentStatusForDisplay(appointment),
       }));
       const serverReturnedPage = Boolean(result.meta);
       const clientFilteredData = data.filter((appointment: Appointment) => {
@@ -551,11 +577,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
       const data = (result.data || []).map((appointment: Appointment) => ({
         ...appointment,
-        status: normalizeAppointmentStatus(appointment.status),
+        status: getAppointmentStatusForDisplay(appointment),
       }));
       const serverReturnedPage = Boolean(result.meta);
       const clientFilteredData = data.filter((appointment: Appointment) => {
-        if (isPatientCartStatus(appointment.status) || !isHistoryStatus(appointment.status)) {
+        const appointmentIsDeleted = isSoftDeletedAppointment(appointment);
+        if (
+          isPatientCartStatus(appointment.status) ||
+          (!isHistoryStatus(appointment.status) && !(canSeeDeletedAppointments && appointmentIsDeleted))
+        ) {
           return false;
         }
 
@@ -809,9 +839,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
 
     try {
-      const updatedAppointment = await updateAppointment(appointmentId, { status: newStatus as any });
+      const appointment = [...history, ...requests, ...appointments].find(
+        (item) => String(item.id) === String(appointmentId)
+      );
+      const updatedAppointment = await updateAppointment(
+        appointmentId,
+        buildStatusLifecycleUpdate(appointment, newStatus)
+      );
       publishAppointmentUpdate(updatedAppointment);
-      toast.success(`Status updated to ${newStatus}`);
+      toast.success(`Status updated to ${updatedAppointment.status}`);
       refreshAppointmentLists();
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
@@ -826,7 +862,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     
     const { appointment, newStatus } = pendingStatusChange;
     try {
-      const updatedAppointment = await updateAppointment(appointment.id, { status: newStatus });
+      const updatedAppointment = await updateAppointment(
+        appointment.id,
+        buildStatusLifecycleUpdate(appointment, newStatus)
+      );
       const normalizedAppointment = publishAppointmentUpdate(updatedAppointment);
       toast.success(`Status for ${getCurrentPatientName(normalizedAppointment)} updated to ${normalizedAppointment.status}`);
       // Refresh appointments and notifications to show the new status change notification
@@ -932,7 +971,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </h1>
           <p className="mt-1 text-lg font-medium text-gray-500 md:text-base">Review and manage requests</p>
         </div>
-        {(effectiveRole === "admin" || effectiveRole === "doctor") && (
+        {(effectiveRole === "admin" || effectiveRole === "doctor" || effectiveRole === "receptionist") && (
           <Button
             type="button"
             onClick={() => openCreateModal()}

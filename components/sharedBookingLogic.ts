@@ -1123,7 +1123,6 @@ export function getBookingCancellationConfig({
   const isDeleted =
     currentStatus === "deleted" ||
     existingStatus === "deleted" ||
-    Boolean(appointmentToEdit?.deletedAt) ||
     appointmentToEdit?.deleted === true;
 
   return {

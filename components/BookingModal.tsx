@@ -125,13 +125,14 @@ interface BookingModalProps {
   doctorName?: string; // doctor's display name
   defaultPatientId?: string;
   onBooked?: (apt?: any) => void;
+  onDeleted?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
   bookingMode?: BookingMode;
   appointmentCreationMode?: BookingCreationMode;
 }
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
@@ -2190,7 +2191,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const deletedAppointment = {
           ...appointmentToEdit,
           status: "deleted",
-          deleted: true,
+          deleted: false,
           deletedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -2263,6 +2264,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  const handleHardDeleteAppointment = async () => {
+    if (!appointmentToEdit || !canRestoreDeletedAppointment) return;
+
+    // Show confirmation before hard delete
+    const confirmed = window.confirm(
+      'This will permanently delete the appointment and all associated data (payments, logs, notifications). This action cannot be undone. Are you sure?'
+    );
+    if (!confirmed) return;
+
+    setIsBooking(true);
+    try {
+      await deleteAppointment(appointmentToEdit.id, { hardDelete: true });
+      try {
+        window.dispatchEvent(new CustomEvent('appointments:updated', {
+          detail: { appointment: null, appointmentId: appointmentToEdit.id, hardDeleted: true },
+        }));
+      } catch {}
+      if (onDeleted) onDeleted(null);
+      toast?.success?.('Appointment permanently deleted');
+      closeAfterCommittedBookingAction();
+    } catch (err) {
+      console.error('Hard delete appointment error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to permanently delete appointment');
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
   const handleClose = () => {
     onOpenChange(false);
   };
@@ -2329,17 +2358,33 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     : 'Book Appointment'
                 )}
               </DialogTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                disabled={isBooking}
-                aria-label="Close booking modal"
-                className="absolute right-0 h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
-              >
-                <X className="h-5 w-5" />
-              </Button>
+              <div className="absolute right-0 flex items-center gap-1">
+                {appointmentToEdit ? (
+                  <BookingAppointmentHistory
+                    appointmentLogs={appointmentLogs}
+                    paymentLogs={paymentLogs}
+                    appointmentToEdit={appointmentToEdit}
+                    triggerVariant="icon"
+                    userRole={effectiveRole}
+                    onViewSnapshot={(snapshot, isHistorical) => {
+                      setSnapshotToView(snapshot);
+                      setSnapshotIsHistorical(isHistorical);
+                      setIsSnapshotModalOpen(true);
+                    }}
+                  />
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleClose}
+                  disabled={isBooking}
+                  aria-label="Close booking modal"
+                  className="h-9 w-9 rounded-full text-gray-600 hover:bg-gray-100"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
 
             </div>
             {!(isCancelled && user?.role === 'patient') && (
@@ -3018,56 +3063,76 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </Button>
             )}
             {canRestoreDeletedAppointment && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleRestoreAppointment}
-                disabled={isBooking}
-                className="h-12 w-full rounded-2xl border-emerald-200 bg-emerald-50 px-6 font-black uppercase tracking-widest text-emerald-700 shadow-lg shadow-emerald-100 hover:bg-emerald-100 sm:mr-auto sm:w-auto"
-              >
-                {isBooking ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                )}
-                {isBooking ? 'Processing...' : 'Restore Appointment'}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleHardDeleteAppointment}
+                  disabled={isBooking}
+                  className="h-12 w-full rounded-2xl bg-red-600 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-700 sm:w-auto sm:mr-auto transition-all"
+                >
+                  {isBooking ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                  )}
+                  {isBooking ? 'Processing...' : 'Hard Delete'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRestoreAppointment}
+                  disabled={isBooking}
+                  className="h-12 w-full rounded-2xl border-emerald-200 bg-emerald-50 px-6 font-black uppercase tracking-widest text-emerald-700 shadow-lg shadow-emerald-100 hover:bg-emerald-100 sm:w-auto sm:ml-auto"
+                >
+                  {isBooking ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                  )}
+                  {isBooking ? 'Processing...' : 'Restore Appointment'}
+                </Button>
+              </>
             )}
 
-            {(isCancelled && user?.role === 'patient') ? (
-              <Button
-                onClick={handleClose}
-                className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-8 font-black uppercase tracking-widest text-gray-600 shadow-sm hover:bg-gray-50 sm:ml-auto sm:w-auto"
-              >
-                Close
-              </Button>
-            ) : (
-              <Button
-                onClick={() => {
-                  if (modalStep === "payment") {
-                    if (isBooking) return;
-                    handleConfirmPayment();
-                    return;
-                  }
-                  handleConfirmBooking();
-                }}
-                disabled={modalStep === "details" ? isBooking || !appointmentType || !selectedPatient : isBooking}
-                title={modalStep === "details" ? bookingConflictTitle : undefined}
-                className={`h-12 w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
-                  modalStep === "payment"
-                    ? "bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 sm:min-w-[220px]"
-                    : "bg-blue-600 shadow-blue-200 hover:bg-blue-700 sm:min-w-[16rem]"
-                }`}
-              >
-                {isBooking ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+            {!canRestoreDeletedAppointment && (
+              <>
+                {(isCancelled && user?.role === 'patient') ? (
+                  <Button
+                    onClick={handleClose}
+                    className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-8 font-black uppercase tracking-widest text-gray-600 shadow-sm hover:bg-gray-50 sm:ml-auto sm:w-auto"
+                  >
+                    Close
+                  </Button>
                 ) : (
-                  <span className="inline-flex items-center justify-center gap-2">
-                    {modalStep === "payment" ? "Confirm Booking" : "Next: Payment"}
-                    {modalStep !== "payment" && <ChevronLeft className="h-4 w-4 rotate-180" />}
-                  </span>
+                  <Button
+                    onClick={() => {
+                      if (modalStep === "payment") {
+                        if (isBooking) return;
+                        handleConfirmPayment();
+                        return;
+                      }
+                      handleConfirmBooking();
+                    }}
+                    disabled={modalStep === "details" ? isBooking || !appointmentType || !selectedPatient : isBooking}
+                    title={modalStep === "details" ? bookingConflictTitle : undefined}
+                    className={`h-12 w-full rounded-2xl px-8 font-black text-white shadow-lg transition-all sm:ml-auto sm:w-auto ${
+                      modalStep === "payment"
+                        ? "bg-emerald-600 uppercase tracking-widest shadow-emerald-200 hover:bg-emerald-700 sm:min-w-[220px]"
+                        : "bg-blue-600 shadow-blue-200 hover:bg-blue-700 sm:min-w-[16rem]"
+                    }`}
+                  >
+                    {isBooking ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        {modalStep === "payment" ? "Confirm Booking" : "Next: Payment"}
+                        {modalStep !== "payment" && <ChevronLeft className="h-4 w-4 rotate-180" />}
+                      </span>
+                    )}
+                  </Button>
                 )}
-              </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>
