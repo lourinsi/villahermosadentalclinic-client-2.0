@@ -2910,6 +2910,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const paymentSummary = React.useMemo(() => {
     return mockAppointmentHistoryLocal.reduce(
       (summary, apt: Appointment) => {
+        if (isSoftDeletedAppointment(apt)) return summary;
+
         const billed = Number(apt.price || 0);
         const paid = Number(apt.totalPaid || 0);
 
