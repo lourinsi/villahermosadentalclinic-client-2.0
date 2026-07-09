@@ -42,6 +42,7 @@ import {
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
+import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +60,8 @@ interface AllAppointmentsViewProps {
   onPay?: (appointment: Appointment) => void;
   onDelete?: (id: string) => void;
   onOpenAppointment?: (appointment: Appointment) => void;
+  onUpdateStatus?: (appointment: Appointment, status: string) => void | Promise<void>;
+  includeDeletedStatus?: boolean;
   isCart?: boolean;
 }
 
@@ -77,6 +80,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   onPay, 
   onDelete,
   onOpenAppointment,
+  onUpdateStatus,
+  includeDeletedStatus = false,
   isCart 
 }) => {
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
@@ -173,6 +178,21 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   const getPaymentBadgeClass = (status: string = "") => {
     return getPaymentStatusBadgeClassName(status, PAYMENT_STATUSES);
   };
+
+  const renderAppointmentStatus = (appointment: Appointment, status: string, className: string) =>
+    onUpdateStatus ? (
+      <AppointmentStatusSelect
+        value={status}
+        statuses={APPOINTMENT_STATUSES}
+        includeDeleted={includeDeletedStatus}
+        onChange={(nextStatus) => onUpdateStatus(appointment, nextStatus)}
+        badgeClassName={className}
+      />
+    ) : (
+      <Badge variant="outline" className={`${className} ${getStatusBadgeClass(status)}`}>
+        {displayStatus(status)}
+      </Badge>
+    );
   const activeDropdownItemClass = (isActive: boolean) =>
     isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
 
@@ -321,16 +341,12 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : (
-                        <Badge variant="outline" className={`shrink-0 px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointmentStatus)}`}>
-                          {displayStatus(appointmentStatus)}
-                        </Badge>
+                        renderAppointmentStatus(appointment, appointmentStatus, "shrink-0 px-2 py-0.5 text-[10px] font-black uppercase")
                       )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getStatusBadgeClass(appointmentStatus)}`}>
-                        {displayStatus(appointmentStatus)}
-                      </Badge>
+                      {renderAppointmentStatus(appointment, appointmentStatus, "px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight")}
                       <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight ${getPaymentBadgeClass(appointment.paymentStatus)}`}>
                         {displayPaymentStatus(appointment.paymentStatus)}
                       </Badge>
@@ -417,9 +433,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                   <TableCell>{getAppointmentTypeName(appointment.type, appointment.customType)}</TableCell>
                   <TableCell className="text-gray-600">Dr. {appointment.doctor}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter ${getStatusBadgeClass(appointmentStatus)}`}>
-                      {displayStatus(appointmentStatus)}
-                    </Badge>
+                    {renderAppointmentStatus(appointment, appointmentStatus, "px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter")}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter ${getPaymentBadgeClass(appointment.paymentStatus)}`}>
@@ -499,9 +513,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                       {getAppointmentTypeName(appointment.type, appointment.customType)}
                     </h3>
                   </div>
-                  <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(appointmentStatus)}`}>
-                    {displayStatus(appointmentStatus)}
-                  </Badge>
+                  {renderAppointmentStatus(appointment, appointmentStatus, "px-2 py-0.5 text-[10px] font-black uppercase")}
                 </div>
 
                 <div className="grid grid-cols-2 gap-y-3 text-sm">

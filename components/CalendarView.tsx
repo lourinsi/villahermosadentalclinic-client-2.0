@@ -53,6 +53,7 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from "sonner";
 import { isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import {
@@ -196,6 +197,7 @@ export function CalendarView({
     openCreateModal, 
     appointments, 
     deleteAppointment, 
+    updateAppointment,
     refreshAppointments, 
     openEditModal,
     isEditModalOpen,
@@ -321,6 +323,28 @@ export function CalendarView({
     },
     [onOpenAppointment, handleViewAppointment]
   );
+
+  const handleUpdateAppointmentStatus = useCallback(async (appointment: Appointment, status: string) => {
+    const appointmentId = String(appointment.id || "");
+    const normalizedStatus = normalizeAppointmentStatus(status);
+    if (!appointmentId || !normalizedStatus) return;
+
+    try {
+      const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
+      if (isSoftDeletedAppointment(appointment) || normalizedStatus === "deleted") {
+        (statusPatch as any).deleted = false;
+        if (normalizedStatus === "deleted") (statusPatch as any).deletedAt = appointment.deletedAt || new Date().toISOString();
+      }
+      const updated = await updateAppointment(appointmentId, statusPatch);
+      window.dispatchEvent(new CustomEvent("appointments:updated", { detail: { appointment: updated, appointmentId } }));
+      window.dispatchEvent(new Event("refreshNotifications"));
+      toast.success("Status updated");
+    } catch (error) {
+      console.error("[CalendarView] Failed to update status:", error);
+      toast.error("Failed to update status");
+    }
+  }, [updateAppointment]);
+
   const handleOpenSnapshotAppointment = useCallback((appointmentId: string, appointmentSnapshot?: any) => {
     const appointment =
       displayedAppointments.find((item) => String(item.id) === String(appointmentId)) ||
@@ -1511,7 +1535,13 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     )}
                     {viewMode === "all" && (
                       <div className="p-4">
-                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} onOpenAppointment={handleOpenAppointment} />
+                        <AllAppointmentsView
+                          appointments={filteredAppointments}
+                          isLoading={isLoadingView}
+                          onOpenAppointment={handleOpenAppointment}
+                          onUpdateStatus={portal === "admin" ? handleUpdateAppointmentStatus : undefined}
+                          includeDeletedStatus={canSeeDeletedAppointments}
+                        />
                       </div>
                     )}
                   </>
