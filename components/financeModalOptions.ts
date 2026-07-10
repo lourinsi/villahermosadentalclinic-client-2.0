@@ -143,7 +143,7 @@ export const createEmptyExpense = (): ExpenseForm => ({
   vendor: "",
   date: todayDate(),
   paymentMethod: "",
-  status: "pending",
+  status: "paid",
   inventoryItemId: "",
   inventoryQuantity: 0,
 });

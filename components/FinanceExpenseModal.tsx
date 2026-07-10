@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { History, X } from "lucide-react";
+import { History, WalletCards, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -60,8 +60,16 @@ const formatExpenseCurrency = (amount?: number) => expenseCurrencyFormatter.form
 const singularizeUnit = (unit?: string) => {
   const value = String(unit || "unit").trim();
   if (!value) return "unit";
+  const normalizedValue = value.toLowerCase();
+  const knownUnits: Record<string, string> = {
+    boxes: "box",
+    pcs: "pc",
+    packs: "pack",
+    units: "unit",
+  };
+  if (knownUnits[normalizedValue]) return knownUnits[normalizedValue];
   if (value.toLowerCase().endsWith("ies")) return `${value.slice(0, -3)}y`;
-  if (value.toLowerCase().endsWith("s") && value.length > 3) return value.slice(0, -1);
+  if (normalizedValue.endsWith("s") && value.length > 3) return value.slice(0, -1);
   return value;
 };
 
@@ -86,6 +94,7 @@ export function FinanceExpenseModal({
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
   const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
+  const isCreateMode = mode === "create";
   const renderFieldError = (field: keyof ExpenseForm) =>
     fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
   const selectedInventoryItem = inventoryItems.find((item) => item.id === form.inventoryItemId);
@@ -116,6 +125,20 @@ export function FinanceExpenseModal({
       setIsHistoryDialogOpen(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !isCreateMode) return;
+
+    const createModeDefaults: Partial<ExpenseForm> = {};
+    if (form.status !== "paid") createModeDefaults.status = "paid";
+    if (form.vendor) createModeDefaults.vendor = "";
+    if (form.inventoryItemId) createModeDefaults.inventoryItemId = "";
+    if (Number(form.inventoryQuantity) !== 0) createModeDefaults.inventoryQuantity = 0;
+
+    if (Object.keys(createModeDefaults).length > 0) {
+      onFormChange({ ...form, ...createModeDefaults });
+    }
+  }, [form, isCreateMode, onFormChange, open]);
 
   const allVendorOptions = useMemo(() => {
     const vendors = new Map<string, string>();
@@ -187,260 +210,336 @@ export function FinanceExpenseModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
-          <div className="border-b bg-gray-50 px-6 py-5">
-            <div className="flex items-start justify-between gap-4">
-              <DialogHeader>
-                <DialogTitle>{mode === "edit" ? "Edit Expense" : "Add Manual Expense"}</DialogTitle>
-                <DialogDescription>
-                  Record the bill here. Link stock only when this expense should also increase Inventory.
-                </DialogDescription>
-              </DialogHeader>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => setIsHistoryDialogOpen(true)}
-                title="View expense history"
-              >
-                <History className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-        <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="expense-category">Category</Label>
-            <Select value={form.category} onValueChange={(value) => updateForm({ category: value })}>
-              <SelectTrigger id="expense-category" className={fieldErrors.category ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.category)}>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {renderFieldError("category")}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="expense-date">Date</Label>
-            <Input
-              id="expense-date"
-              type="date"
-              value={form.date}
-              className={fieldErrors.date ? errorClassName : undefined}
-              aria-invalid={Boolean(fieldErrors.date)}
-              onChange={(event) => updateForm({ date: event.target.value })}
-            />
-            {renderFieldError("date")}
-          </div>
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="expense-description">Description</Label>
-            <Input
-              id="expense-description"
-              placeholder="e.g., Crown prep lab fee"
-              value={form.description}
-              className={fieldErrors.description ? errorClassName : undefined}
-              aria-invalid={Boolean(fieldErrors.description)}
-              onChange={(event) => updateForm({ description: event.target.value })}
-            />
-            {renderFieldError("description")}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="expense-amount">Amount ({"\u20b1"})</Label>
-            <Input
-              id="expense-amount"
-              type="number"
-              min="0"
-              value={form.amount}
-              className={fieldErrors.amount ? errorClassName : undefined}
-              aria-invalid={Boolean(fieldErrors.amount)}
-              onChange={(event) => updateForm({ amount: Number(event.target.value) })}
-            />
-            {renderFieldError("amount")}
-            {mode === "create" && selectedInventoryItem ? (
-              <p className="text-xs text-muted-foreground">
-                This is the total receipt amount for all units, not the per-unit price.
-              </p>
-            ) : null}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="expense-vendor">Vendor/Supplier</Label>
-            <Select
-              value={isCreatingVendor ? CREATE_NEW_VENDOR_VALUE : form.vendor.trim() || NO_VENDOR_VALUE}
-              onValueChange={handleVendorChange}
-            >
-              <SelectTrigger id="expense-vendor">
-                <SelectValue placeholder="Select vendor/supplier" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_VENDOR_VALUE}>No vendor/supplier</SelectItem>
-                {visibleVendorOptions.length > 0 ? <SelectSeparator /> : null}
-                {visibleVendorOptions.map((vendor) => (
-                  <SelectItem key={vendor} value={vendor}>
-                    {vendor}
-                  </SelectItem>
-                ))}
-                <SelectSeparator />
-                <SelectItem value={CREATE_NEW_VENDOR_VALUE}>Create new vendor/supplier</SelectItem>
-              </SelectContent>
-            </Select>
-            {isCreatingVendor ? (
-              <div className="flex gap-2">
-                <Input
-                  id="expense-vendor-new"
-                  autoFocus
-                  placeholder="Vendor or supplier name"
-                  value={form.vendor}
-                  onChange={(event) => updateForm({ vendor: event.target.value })}
-                />
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[92vh] sm:w-full sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-2xl sm:border sm:border-slate-200"
+        >
+          <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 text-left shadow-sm sm:px-6 sm:py-5">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-violet-100">
+                  <WalletCards className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <DialogTitle className="text-xl font-black tracking-tight text-slate-950">
+                    {isCreateMode ? "Add Manual Expense" : "Edit Expense"}
+                  </DialogTitle>
+                  <DialogDescription className="mt-1 text-sm font-medium leading-5 text-slate-500">
+                    {isCreateMode
+                      ? "Record a clinic expense paid manually."
+                      : "Update expense details, stock links, vendors, and payment status."}
+                  </DialogDescription>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {!isCreateMode ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    onClick={() => setIsHistoryDialogOpen(true)}
+                    aria-label="View expense history"
+                    title="View expense history"
+                  >
+                    <History className="h-4 w-4" />
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 flex-shrink-0"
-                  title="Cancel new vendor"
-                  onClick={() => {
-                    setIsCreatingVendor(false);
-                    updateForm({ vendor: "" });
-                  }}
+                  className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  onClick={() => onOpenChange(false)}
+                  aria-label="Close expense modal"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
-            ) : null}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="expense-payment-method">{mode === "edit" ? "Payment Method" : "Planned Payment Method"}</Label>
-            <Select value={form.paymentMethod} onValueChange={(value) => updateForm({ paymentMethod: value })}>
-              <SelectTrigger id="expense-payment-method">
-                <SelectValue placeholder="Select method" />
-              </SelectTrigger>
-              <SelectContent>
-                {PAYMENT_METHOD_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="expense-status">Payment Status</Label>
-            {!canManageStatus ? (
-              <div
-                id="expense-status"
-                className={cn(
-                  "flex h-10 items-center rounded-md border bg-yellow-50 px-3 text-sm font-medium text-yellow-800",
-                  fieldErrors.status && "border-red-500 bg-red-50 text-red-700"
-                )}
-                aria-invalid={Boolean(fieldErrors.status)}
-              >
-                {form.status ? form.status.charAt(0).toUpperCase() + form.status.slice(1) : "Pending"}
-              </div>
-            ) : (
-              <Select value={form.status} onValueChange={(value) => updateForm({ status: value })}>
-                <SelectTrigger id="expense-status" className={fieldErrors.status ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.status)}>
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {EXPENSE_STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {renderFieldError("status")}
-          </div>
-          <div className="space-y-4 rounded-md border bg-gray-50 p-4 sm:col-span-2">
-            <div>
-              <div className="font-medium text-gray-900">Link to Inventory</div>
-              <p className="text-sm text-muted-foreground">
-                {mode === "edit"
-                  ? "Saved links preload here. Changing the stock item or quantity adjusts Inventory by the difference."
-                  : "Optional. Choose a stock item only when saving this expense should add quantity to Inventory now."}
-              </p>
             </div>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-5 sm:px-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="expense-stock-item">Stock Item</Label>
-                <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
-                  <SelectTrigger id="expense-stock-item" className={fieldErrors.inventoryItemId ? errorClassName : undefined} aria-invalid={Boolean(fieldErrors.inventoryItemId)}>
-                    <SelectValue placeholder="No stock item" />
+                <Label htmlFor="expense-category" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Category
+                </Label>
+                <Select value={form.category} onValueChange={(value) => updateForm({ category: value })}>
+                  <SelectTrigger
+                    id="expense-category"
+                    className={cn("h-11 border-slate-200 bg-white", fieldErrors.category && errorClassName)}
+                    aria-invalid={Boolean(fieldErrors.category)}
+                  >
+                    <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No stock item</SelectItem>
-                    {inventoryItems.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.item}
+                    {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {renderFieldError("category")}
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="expense-stock-quantity">{mode === "edit" ? "Linked Quantity" : "Quantity to Add Now"}</Label>
+                <Label htmlFor="expense-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Date
+                </Label>
                 <Input
-                  id="expense-stock-quantity"
+                  id="expense-date"
+                  type="date"
+                  value={form.date}
+                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.date && errorClassName)}
+                  aria-invalid={Boolean(fieldErrors.date)}
+                  onChange={(event) => updateForm({ date: event.target.value })}
+                />
+                {renderFieldError("date")}
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="expense-description" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Description
+                </Label>
+                <Input
+                  id="expense-description"
+                  placeholder="e.g., Crown prep lab fee"
+                  value={form.description}
+                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.description && errorClassName)}
+                  aria-invalid={Boolean(fieldErrors.description)}
+                  onChange={(event) => updateForm({ description: event.target.value })}
+                />
+                {renderFieldError("description")}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="expense-amount" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Amount ({"\u20b1"})
+                </Label>
+                <Input
+                  id="expense-amount"
                   type="number"
                   min="0"
-                  disabled={!selectedInventoryItem}
-                  value={form.inventoryQuantity}
-                  className={fieldErrors.inventoryQuantity ? errorClassName : undefined}
-                  aria-invalid={Boolean(fieldErrors.inventoryQuantity)}
-                  onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
+                  value={form.amount}
+                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.amount && errorClassName)}
+                  aria-invalid={Boolean(fieldErrors.amount)}
+                  onChange={(event) => updateForm({ amount: Number(event.target.value) })}
                 />
-                {renderFieldError("inventoryQuantity")}
+                {renderFieldError("amount")}
               </div>
-            </div>
-            {selectedInventoryItem ? (
-              <div className="space-y-3 rounded-md bg-white p-3 text-sm">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <div className="text-muted-foreground">Current stock</div>
-                    <div className="font-medium">
-                      {selectedInventoryItem.quantity} {selectedInventoryItem.unit}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">After save</div>
-                    <div className="font-medium">
-                      {Number(selectedInventoryItem.quantity) + stockQuantityChange} {selectedInventoryItem.unit}
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-md border border-violet-100 bg-violet-50 px-3 py-2">
-                  <div className="font-medium text-gray-900">Purchase math</div>
-                  <p className="mt-1 text-muted-foreground">
-                    {formatExpenseCurrency(enteredAmount)} total for {linkedQuantity || 0} {selectedInventoryItem.unit || "units"}
-                    {linkedQuantity > 0
-                      ? ` means ${formatExpenseCurrency(impliedUnitCost)} per ${linkedUnitLabel}.`
-                      : "."}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Inventory only adds the quantity. Expenses records the actual total you paid.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
 
-        <DialogFooter className="border-t px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={onSave} disabled={isSaving}>
-            {isSaving ? "Saving..." : mode === "edit" ? "Save Changes" : "Add Manual Expense"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+              <div className="space-y-2">
+                <Label htmlFor="expense-payment-method" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Payment Method
+                </Label>
+                <Select value={form.paymentMethod} onValueChange={(value) => updateForm({ paymentMethod: value })}>
+                  <SelectTrigger
+                    id="expense-payment-method"
+                    className={cn("h-11 border-slate-200 bg-white", fieldErrors.paymentMethod && errorClassName)}
+                    aria-invalid={Boolean(fieldErrors.paymentMethod)}
+                  >
+                    <SelectValue placeholder="Select method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHOD_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {renderFieldError("paymentMethod")}
+              </div>
+
+              {!isCreateMode ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="expense-vendor" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Vendor/Supplier
+                    </Label>
+                    <Select
+                      value={isCreatingVendor ? CREATE_NEW_VENDOR_VALUE : form.vendor.trim() || NO_VENDOR_VALUE}
+                      onValueChange={handleVendorChange}
+                    >
+                      <SelectTrigger id="expense-vendor" className="h-11 border-slate-200 bg-white">
+                        <SelectValue placeholder="Select vendor/supplier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_VENDOR_VALUE}>No vendor/supplier</SelectItem>
+                        {visibleVendorOptions.length > 0 ? <SelectSeparator /> : null}
+                        {visibleVendorOptions.map((vendor) => (
+                          <SelectItem key={vendor} value={vendor}>
+                            {vendor}
+                          </SelectItem>
+                        ))}
+                        <SelectSeparator />
+                        <SelectItem value={CREATE_NEW_VENDOR_VALUE}>Create new vendor/supplier</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {isCreatingVendor ? (
+                      <div className="flex gap-2">
+                        <Input
+                          id="expense-vendor-new"
+                          autoFocus
+                          placeholder="Vendor or supplier name"
+                          value={form.vendor}
+                          className="h-11 border-slate-200 bg-white"
+                          onChange={(event) => updateForm({ vendor: event.target.value })}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-11 w-11 flex-shrink-0 rounded-full text-slate-500 hover:bg-slate-100"
+                          title="Cancel new vendor"
+                          aria-label="Cancel new vendor"
+                          onClick={() => {
+                            setIsCreatingVendor(false);
+                            updateForm({ vendor: "" });
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="expense-status" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Payment Status
+                    </Label>
+                    {!canManageStatus ? (
+                      <div
+                        id="expense-status"
+                        className={cn(
+                          "flex h-11 items-center rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-800",
+                          fieldErrors.status && "border-red-500 bg-red-50 text-red-700"
+                        )}
+                        aria-invalid={Boolean(fieldErrors.status)}
+                      >
+                        {form.status ? form.status.charAt(0).toUpperCase() + form.status.slice(1) : "Pending"}
+                      </div>
+                    ) : (
+                      <Select value={form.status} onValueChange={(value) => updateForm({ status: value })}>
+                        <SelectTrigger
+                          id="expense-status"
+                          className={cn("h-11 border-slate-200 bg-white", fieldErrors.status && errorClassName)}
+                          aria-invalid={Boolean(fieldErrors.status)}
+                        >
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EXPENSE_STATUS_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {renderFieldError("status")}
+                  </div>
+
+                  <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+                    <div>
+                      <div className="font-semibold text-slate-950">Link to Inventory</div>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Saved links preload here. Changing the stock item or quantity adjusts Inventory by the difference.
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="expense-stock-item" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Stock Item
+                        </Label>
+                        <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
+                          <SelectTrigger
+                            id="expense-stock-item"
+                            className={cn("h-11 border-slate-200 bg-white", fieldErrors.inventoryItemId && errorClassName)}
+                            aria-invalid={Boolean(fieldErrors.inventoryItemId)}
+                          >
+                            <SelectValue placeholder="No stock item" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No stock item</SelectItem>
+                            {inventoryItems.map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.item}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="expense-stock-quantity" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Linked Quantity
+                        </Label>
+                        <Input
+                          id="expense-stock-quantity"
+                          type="number"
+                          min="0"
+                          disabled={!selectedInventoryItem}
+                          value={form.inventoryQuantity}
+                          className={cn("h-11 border-slate-200 bg-white", fieldErrors.inventoryQuantity && errorClassName)}
+                          aria-invalid={Boolean(fieldErrors.inventoryQuantity)}
+                          onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
+                        />
+                        {renderFieldError("inventoryQuantity")}
+                      </div>
+                    </div>
+                    {selectedInventoryItem ? (
+                      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <div className="text-slate-500">Current stock</div>
+                            <div className="font-semibold text-slate-950">
+                              {selectedInventoryItem.quantity} {selectedInventoryItem.unit}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-slate-500">After save</div>
+                            <div className="font-semibold text-slate-950">
+                              {Number(selectedInventoryItem.quantity) + stockQuantityChange} {selectedInventoryItem.unit}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
+                          <div className="font-semibold text-slate-950">Purchase math</div>
+                          <p className="mt-1 text-slate-600">
+                            {formatExpenseCurrency(enteredAmount)} total for {linkedQuantity || 0}{" "}
+                            {selectedInventoryItem.unit || "units"}
+                            {linkedQuantity > 0
+                              ? ` means ${formatExpenseCurrency(impliedUnitCost)} per ${linkedUnitLabel}.`
+                              : "."}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Inventory only adds the quantity. Expenses records the actual total you paid.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <DialogFooter className="shrink-0 !grid grid-cols-2 gap-3 border-t border-slate-100 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.06)] sm:!flex sm:justify-end sm:px-6 sm:pb-4 sm:shadow-none">
+            <Button variant="outline" className="h-11 w-full rounded-xl font-semibold sm:w-auto" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="h-11 w-full rounded-xl bg-violet-600 font-bold text-white shadow-sm shadow-violet-100 hover:bg-violet-700 sm:w-auto"
+              onClick={onSave}
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving..." : isCreateMode ? "Add Expense" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
       <FinanceHistoryDialog
         open={isHistoryDialogOpen}

@@ -29,6 +29,7 @@ import {
   Camera,
   Upload,
   Trash2,
+  PenLine,
   User as UserIcon,
   Clock,
   CheckCircle,
@@ -74,6 +75,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import DeletePaymentDialog from "./DeletePaymentDialog";
+import SignatureInputModal from "./SignatureInputModal";
 import { CurrencyText } from "./CurrencyAmount";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -299,6 +301,7 @@ type ConsentFormState = {
   dentistSignatureName: string;
   signedDate: string;
   patientSignatureImage: string;
+  dentistSignatureImage: string;
   signedAt: string;
 };
 
@@ -331,6 +334,7 @@ const createConsentFormState = (data?: Record<string, any>): ConsentFormState =>
     dentistSignatureName: String(source.dentistSignatureName ?? source.consentDentistSignatureName ?? ""),
     signedDate: String(source.signedDate ?? source.consentSignedDate ?? todayDateInputValue()),
     patientSignatureImage: String(source.patientSignatureImage ?? source.consentPatientSignatureImage ?? ""),
+    dentistSignatureImage: String(source.dentistSignatureImage ?? source.consentDentistSignatureImage ?? ""),
     signedAt: String(source.signedAt ?? source.consentSignedAt ?? ""),
   };
 };
@@ -343,6 +347,7 @@ const serializeConsentForm = (consentForm: ConsentFormState) => ({
   consentGuardianSignatureName: consentForm.guardianName.trim(),
   consentDentistSignatureName: consentForm.dentistSignatureName.trim(),
   consentPatientSignatureImage: consentForm.patientSignatureImage,
+  consentDentistSignatureImage: consentForm.dentistSignatureImage,
   consentSignedDate: consentForm.signedDate,
   consentSignedAt: consentForm.signedAt,
 });
@@ -355,6 +360,7 @@ const consentFormComparable = (consentForm: ConsentFormState) => ({
   dentistSignatureName: consentForm.dentistSignatureName.trim(),
   signedDate: consentForm.signedDate,
   patientSignatureImage: consentForm.patientSignatureImage,
+  dentistSignatureImage: consentForm.dentistSignatureImage,
 });
 
 const resolveImageSource = (source?: string) => {
@@ -1129,13 +1135,36 @@ const parsePaymentTimestamp = (value?: string | Date) => {
 const getPaymentSortDateValue = (txn: RecentTransaction) =>
   String((txn as any).paymentDate || txn.date || "");
 
-const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
+const comparePaymentTransactionsChronologically = (
+  a: RecentTransaction,
+  b: RecentTransaction,
+  direction: "asc" | "desc" = "desc"
+) => {
   const paymentDateDiff = parsePaymentTimestamp(getPaymentSortDateValue(b)) - parsePaymentTimestamp(getPaymentSortDateValue(a));
 
-  if (paymentDateDiff !== 0) return paymentDateDiff;
+  if (paymentDateDiff !== 0) {
+    return direction === "asc" ? -paymentDateDiff : paymentDateDiff;
+  }
 
-  return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
+  const keyDiff = getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
+  return direction === "asc" ? -keyDiff : keyDiff;
 };
+
+const comparePaymentTransactionsByDate = (
+  a: RecentTransaction,
+  b: RecentTransaction,
+  direction: "asc" | "desc" = "desc"
+) => {
+  const aDeleted = isSoftDeletedPaymentTransaction(a);
+  const bDeleted = isSoftDeletedPaymentTransaction(b);
+
+  if (aDeleted !== bDeleted) return aDeleted ? 1 : -1;
+
+  return comparePaymentTransactionsChronologically(a, b, direction);
+};
+
+const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) =>
+  comparePaymentTransactionsByDate(a, b, "desc");
 
 const normalizeComparableText = (value: unknown) =>
   String(value ?? "").toLowerCase().trim().replace(/\s+/g, " ");
@@ -1410,7 +1439,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const canSeeDeletedAppointments = effectiveRole === "admin";
-  const canSeeDeletedPayments = effectiveRole !== "receptionist";
   const shouldLoadTreatmentOptions = activeTab === "history" || activeTab === "payments";
   const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(shouldLoadTreatmentOptions);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
@@ -1481,9 +1509,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
   const [consentForm, setConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
   const [savedConsentForm, setSavedConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
-  const [consentCanvasRef, setConsentCanvasRef] = useState<HTMLCanvasElement | null>(null);
-  const [hasConsentSignatureInk, setHasConsentSignatureInk] = useState(false);
-  const [isConsentSignatureDirty, setIsConsentSignatureDirty] = useState(false);
+  const [consentSignatureModalTarget, setConsentSignatureModalTarget] = useState<"patient" | "dentist" | null>(null);
   const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
   const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
@@ -1552,8 +1578,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(nextConsentForm);
       setSavedConsentForm(nextConsentForm);
-      setHasConsentSignatureInk(Boolean(nextConsentForm.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(String(patient.id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
@@ -1569,23 +1593,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       loadQuestionnaireTab();
     }
   }, [activeTab, hasRestoredQuestionnaireDraft, loadQuestionnaireTab, patient.id, questionnaireLoadedPatientId, questionnaireQuestions.length]);
-
-  useEffect(() => {
-    if (!consentCanvasRef) return;
-
-    const context = consentCanvasRef.getContext("2d");
-    if (!context) return;
-
-    context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-    if (!consentForm.patientSignatureImage) return;
-
-    const image = new Image();
-    image.onload = () => {
-      context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-      context.drawImage(image, 0, 0, consentCanvasRef.width, consentCanvasRef.height);
-    };
-    image.src = consentForm.patientSignatureImage;
-  }, [consentCanvasRef, consentForm.patientSignatureImage]);
 
   const questionnaireHasChanges = React.useMemo(
     () =>
@@ -1606,7 +1613,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     [consentForm.acknowledgements]
   );
 
-  const hasConsentSignature = hasConsentSignatureInk || Boolean(consentForm.patientSignatureImage);
+  const hasConsentSignature = Boolean(consentForm.patientSignatureImage);
   const isConsentFormComplete =
     allConsentAcknowledgementsAccepted &&
     Boolean(consentForm.patientSignatureName.trim()) &&
@@ -1653,29 +1660,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         [id]: checked,
       },
     }));
-    setIsModified(true);
-  };
-
-  const getConsentCanvasSignatureImage = () => {
-    if (!consentCanvasRef) return consentForm.patientSignatureImage;
-
-    const context = consentCanvasRef.getContext("2d");
-    if (!context) return consentForm.patientSignatureImage;
-
-    const imageData = context.getImageData(0, 0, consentCanvasRef.width, consentCanvasRef.height).data;
-    const hasInk = imageData.some((value, index) => index % 4 === 3 && value > 0);
-    return hasInk ? consentCanvasRef.toDataURL("image/png") : "";
-  };
-
-  const persistConsentSignatureFromCanvas = () => {
-    const signatureImage = getConsentCanvasSignatureImage();
-    setConsentForm((current) => ({
-      ...current,
-      accepted: false,
-      patientSignatureImage: signatureImage,
-    }));
-    setHasConsentSignatureInk(Boolean(signatureImage));
-    setIsConsentSignatureDirty(true);
     setIsModified(true);
   };
 
@@ -1730,7 +1714,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setIsSavingConsent(true);
     try {
-      const signatureImage = getConsentCanvasSignatureImage();
+      const signatureImage = consentForm.patientSignatureImage;
       const isComplete =
         allConsentAcknowledgementsAccepted &&
         Boolean(consentForm.patientSignatureName.trim()) &&
@@ -1782,8 +1766,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(savedConsent);
       setSavedConsentForm(savedConsent);
-      setHasConsentSignatureInk(Boolean(savedConsent.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setHasRestoredQuestionnaireDraft(false);
       toast.success("Consent form saved");
       return true;
@@ -2081,12 +2063,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
-    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage">, string> = {
+    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage" | "dentistSignatureImage">, string> = {
       patientSignatureName: "Consent Form - Patient / Parent / Guardian Signature Name",
       guardianName: "Consent Form - Parent / Guardian Name",
       dentistSignatureName: "Consent Form - Dentist Signature",
       signedDate: "Consent Form - Date",
       patientSignatureImage: "Consent Form - Drawn Signature",
+      dentistSignatureImage: "Consent Form - Dentist Drawn Signature",
     };
 
     Object.entries(consentFieldLabels).forEach(([field, label]) => {
@@ -2095,8 +2078,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const newValue = toComparableValue(consentForm[consentField]);
       if (oldValue !== newValue) {
         changes[label] = {
-          old: field === "patientSignatureImage" ? Boolean(savedConsentForm.patientSignatureImage) : savedConsentForm[consentField],
-          new: field === "patientSignatureImage" ? Boolean(consentForm.patientSignatureImage) : consentForm[consentField],
+          old: field === "patientSignatureImage" || field === "dentistSignatureImage" ? Boolean(savedConsentForm[consentField]) : savedConsentForm[consentField],
+          new: field === "patientSignatureImage" || field === "dentistSignatureImage" ? Boolean(consentForm[consentField]) : consentForm[consentField],
         };
       }
     });
@@ -2849,39 +2832,40 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
   const [paymentSearchFilter, setPaymentSearchFilter] = useState('');
   const [paymentDateSortDirection, setPaymentDateSortDirection] = useState<"asc" | "desc">("desc");
+  const [showDeletedPayments, setShowDeletedPayments] = useState(false);
 
   const uniquePaymentDoctors = React.useMemo(() => {
     const doctors = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.doctor)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(doctors)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   const uniquePaymentMethods = React.useMemo(() => {
     const methods = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.method)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(methods)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   const uniquePaymentProcedures = React.useMemo(() => {
     const procedures = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.appointmentType)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(procedures)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   useEffect(() => {
     if (paymentDoctorFilter !== 'all' && !uniquePaymentDoctors.includes(paymentDoctorFilter)) setPaymentDoctorFilter('all');
@@ -2895,15 +2879,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     if (paymentProcedureFilter !== 'all' && !uniquePaymentProcedures.includes(paymentProcedureFilter)) setPaymentProcedureFilter('all');
   }, [paymentProcedureFilter, uniquePaymentProcedures]);
 
+  const paymentMethodLabel = paymentMethodFilter === "all" ? "All Methods" : String(paymentMethodFilter);
+  const paymentDoctorLabel = doctorFilter
+    ? String(doctorFilter)
+    : paymentDoctorFilter === "all"
+      ? "All Doctors"
+      : String(paymentDoctorFilter);
+  const paymentProcedureLabel = paymentProcedureFilter === "all" ? "All Procedures" : String(paymentProcedureFilter);
+  const paymentSortLabel = paymentDateSortDirection === "desc" ? "Newest Paid" : "Oldest Paid";
+  const paymentDeletedLabel = showDeletedPayments ? "Showing deleted" : "Deleted hidden";
+
   const filteredTransactions = React.useMemo(() => {
     const search = paymentSearchFilter.trim().toLowerCase();
-    const getVisiblePaymentDateTimestamp = (transaction: RecentTransaction) =>
-      parsePaymentTimestamp(getPaymentSortDateValue(transaction));
 
     return allTransactions
       .filter(t => {
         if (isPaymentLogLikeRow(t)) return false;
-        if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
+        if (!showDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
         if (doctorFilter && t.doctor !== doctorFilter) return false;
         if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
         if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
@@ -2928,15 +2920,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         return true;
       })
       .sort((a, b) => {
-        const paymentDateDiff = getVisiblePaymentDateTimestamp(a) - getVisiblePaymentDateTimestamp(b);
-        if (paymentDateDiff !== 0) {
-          return paymentDateSortDirection === "asc" ? paymentDateDiff : -paymentDateDiff;
-        }
-
-        const keyDiff = getPaymentTransactionKey(a).localeCompare(getPaymentTransactionKey(b));
-        return paymentDateSortDirection === "asc" ? keyDiff : -keyDiff;
+        return comparePaymentTransactionsChronologically(a, b, paymentDateSortDirection);
       });
-  }, [allTransactions, canSeeDeletedPayments, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter]);
+  }, [allTransactions, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter, showDeletedPayments]);
 
   const paymentSummary = React.useMemo(() => {
     return mockAppointmentHistoryLocal.reduce(
@@ -2960,13 +2946,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     Boolean(paymentSearchFilter.trim()) ||
     paymentMethodFilter !== "all" ||
     paymentDoctorFilter !== "all" ||
-    paymentProcedureFilter !== "all";
+    paymentProcedureFilter !== "all" ||
+    showDeletedPayments;
 
   const clearPaymentFilters = () => {
     setPaymentSearchFilter("");
     setPaymentMethodFilter("all");
     setPaymentDoctorFilter("all");
     setPaymentProcedureFilter("all");
+    setShowDeletedPayments(false);
   };
 
   const getPaymentMethodIcon = (method: string) => {
@@ -3115,8 +3103,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const blankConsentForm = createConsentFormState();
     setConsentForm(blankConsentForm);
     setSavedConsentForm(blankConsentForm);
-    setHasConsentSignatureInk(false);
-    setIsConsentSignatureDirty(false);
   }, [loadedPatient.id, patient]);
 
   useEffect(() => {
@@ -3142,8 +3128,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const restoredSavedConsentForm = createConsentFormState(draft.savedConsentForm || draft.patientQuestionnaireData || {});
       setConsentForm(restoredConsentForm);
       setSavedConsentForm(restoredSavedConsentForm);
-      setHasConsentSignatureInk(Boolean(restoredConsentForm.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(currentPatientId);
       setActiveTab(draft.activeTab || "info");
       setHasRestoredQuestionnaireDraft((draft.questionnaireQuestions || []).length > 0);
@@ -3394,8 +3378,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           if (!patient?.id) return [];
 
           try {
-            const includeDeletedQuery = canSeeDeletedPayments ? "?includeDeleted=true" : "";
-            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}${includeDeletedQuery}`), {
+            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}?includeDeleted=true`), {
               headers,
               credentials: 'include',
               signal: controller.signal,
@@ -3425,7 +3408,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
 
       return () => controller.abort();
-    }, [buildPatientTransactions, canSeeDeletedPayments, patientAppointments, patient?.id, shouldLoadFinancialLog]);
+    }, [buildPatientTransactions, patientAppointments, patient?.id, shouldLoadFinancialLog]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -3540,11 +3523,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const handleRestorePayment = async (paymentId: string, appointmentId?: string) => {
-    if (effectiveRole !== "admin") {
-      toast.error("Only admins can restore deleted payments");
-      return;
-    }
-
     if (!paymentId) {
       toast.error("Could not find the payment to restore");
       return;
@@ -3687,8 +3665,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setQuestionnaireAnswers(savedQuestionnaireAnswers);
     setPhysicianInformation(savedPhysicianInformation);
     setConsentForm(savedConsentForm);
-    setHasConsentSignatureInk(Boolean(savedConsentForm.patientSignatureImage));
-    setIsConsentSignatureDirty(false);
     setIsModified(false);
   };
 
@@ -4437,74 +4413,80 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="patient-consent-dentist-signature">Dentist / Signature</Label>
-                      <Input
-                        id="patient-consent-dentist-signature"
-                        value={consentForm.dentistSignatureName}
-                        onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
-                        disabled={isSavingConsent}
-                        placeholder="Dentist name or signature"
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          id="patient-consent-dentist-signature"
+                          value={consentForm.dentistSignatureName}
+                          onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
+                          disabled={isSavingConsent}
+                          placeholder="Dentist name"
+                          className="min-w-0 flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setConsentSignatureModalTarget("dentist")}
+                          disabled={isSavingConsent}
+                          className="h-10 shrink-0 rounded-lg px-3 font-bold"
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          Upload
+                        </Button>
+                      </div>
+                      {consentForm.dentistSignatureImage ? (
+                        <button
+                          type="button"
+                          onClick={() => setConsentSignatureModalTarget("dentist")}
+                          disabled={isSavingConsent}
+                          className="flex h-16 w-full items-center justify-center rounded-lg border border-slate-200 bg-white p-2 transition-colors hover:border-violet-200 hover:bg-violet-50/40 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-full max-w-full object-contain" />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
                   <div className="space-y-2">
                     <Label className="text-sm font-semibold">Patient / Parent / Guardian Drawn Signature *</Label>
                     <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-4">
-                      <canvas
-                        ref={setConsentCanvasRef}
-                        className="h-32 w-full cursor-crosshair rounded border border-slate-200 bg-white"
-                        style={{ touchAction: "none" }}
-                        onPointerDown={(event) => {
-                          const canvas = event.currentTarget as HTMLCanvasElement;
-                          const context = canvas.getContext("2d");
-                          if (context) {
-                            canvas.setPointerCapture(event.pointerId);
-                            const rect = canvas.getBoundingClientRect();
-                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-                            context.lineCap = "round";
-                            context.lineJoin = "round";
-                            context.lineWidth = 2;
-                            context.beginPath();
-                            context.moveTo(x, y);
-                          }
-                        }}
-                        onPointerMove={(event) => {
-                          if (event.buttons !== 1) return;
-                          const canvas = event.currentTarget as HTMLCanvasElement;
-                          const context = canvas.getContext("2d");
-                          if (context) {
-                            const rect = canvas.getBoundingClientRect();
-                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-                            context.lineTo(x, y);
-                            context.stroke();
-                            setHasConsentSignatureInk(true);
-                            setIsConsentSignatureDirty(true);
-                            setIsModified(true);
-                          }
-                        }}
-                        onPointerUp={persistConsentSignatureFromCanvas}
-                        onPointerCancel={persistConsentSignatureFromCanvas}
-                      />
-                      <Button
+                      <button
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full"
-                        onClick={() => {
-                          if (consentCanvasRef) {
-                            const context = consentCanvasRef.getContext("2d");
-                            context?.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-                          }
-                          updateConsentField("patientSignatureImage", "");
-                          setHasConsentSignatureInk(false);
-                          setIsConsentSignatureDirty(true);
-                        }}
+                        onClick={() => setConsentSignatureModalTarget("patient")}
                         disabled={isSavingConsent}
+                        className="flex h-40 w-full items-center justify-center rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/30 disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        Clear Signature
-                      </Button>
+                        {consentForm.patientSignatureImage ? (
+                          <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-full max-w-full object-contain" />
+                        ) : (
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                            <PenLine className="h-4 w-4" />
+                            Add signature
+                          </span>
+                        )}
+                      </button>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full rounded-lg font-bold"
+                          onClick={() => setConsentSignatureModalTarget("patient")}
+                          disabled={isSavingConsent}
+                        >
+                          <PenLine className="mr-2 h-4 w-4" />
+                          {consentForm.patientSignatureImage ? "Edit Signature" : "Open Signature Pad"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full rounded-lg font-bold"
+                          onClick={() => updateConsentField("patientSignatureImage", "")}
+                          disabled={isSavingConsent || !consentForm.patientSignatureImage}
+                        >
+                          Clear Signature
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
@@ -4728,9 +4710,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
                     const visitTransactions = (appointment.transactions || []).filter((txn) =>
                       Number(txn.amount || 0) > 0 &&
-                      !isPaymentLogLikeRow(txn) &&
-                      (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(txn))
-                    );
+                      !isPaymentLogLikeRow(txn)
+                    ).sort((a, b) => comparePaymentTransactionsByDate(a, b, "desc"));
 
                     return (
                       <div key={appointmentId} className="grid gap-3 xl:grid-cols-[7.5rem_minmax(0,1fr)]">
@@ -5047,7 +5028,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                                 <span className="sr-only">Delete payment</span>
                                               </Button>
                                             </>
-                                          ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                          ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                             <Button
                                               type="button"
                                               variant="outline"
@@ -5111,7 +5092,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
-                <div className={`grid gap-3 ${doctorFilter ? "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]" : "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]"}`}>
+                <div className="grid grid-cols-[minmax(0,1fr)_3rem] gap-3 md:grid-cols-[minmax(220px,1fr)_3rem_180px_180px_180px_auto_auto] xl:grid-cols-[minmax(280px,1fr)_3rem_190px_190px_190px_auto_auto]">
                   <div className="relative min-w-0">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <Input
@@ -5121,17 +5102,115 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       className="h-12 rounded-lg border-slate-200 bg-white pl-11 text-sm font-medium shadow-none placeholder:text-slate-400"
                     />
                   </div>
-                  <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
-                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
-                      <SelectValue placeholder="All Methods" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniquePaymentMethods.map(method => (
-                        <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-12 w-12 rounded-lg border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                        title="Payment history filters"
+                        aria-label="Payment history filters"
+                      >
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-[70vh] w-72 overflow-y-auto">
+                      <DropdownMenuLabel>Payment filters</DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        Filters: {paymentMethodLabel} / {paymentDoctorLabel} / {paymentProcedureLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        {paymentSortLabel} / {paymentDeletedLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Methods</DropdownMenuLabel>
+                      {uniquePaymentMethods.map((method) => (
+                        <DropdownMenuItem
+                          key={String(method)}
+                          className={activeHistoryFilterItemClass(paymentMethodFilter === method)}
+                          onSelect={() => setPaymentMethodFilter(String(method))}
+                        >
+                          {method === "all" ? "All Methods" : String(method)}
+                        </DropdownMenuItem>
                       ))}
-                    </SelectContent>
-                  </Select>
-                  {!doctorFilter && (
+                      {!doctorFilter ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-slate-500">Doctors</DropdownMenuLabel>
+                          {uniquePaymentDoctors.map((doctor) => (
+                            <DropdownMenuItem
+                              key={String(doctor)}
+                              className={activeHistoryFilterItemClass(paymentDoctorFilter === doctor)}
+                              onSelect={() => setPaymentDoctorFilter(String(doctor))}
+                            >
+                              {String(doctor) === "all" ? "All Doctors" : String(doctor)}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      ) : null}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Procedures</DropdownMenuLabel>
+                      {uniquePaymentProcedures.map((procedure) => (
+                        <DropdownMenuItem
+                          key={String(procedure)}
+                          className={activeHistoryFilterItemClass(paymentProcedureFilter === procedure)}
+                          onSelect={() => setPaymentProcedureFilter(String(procedure))}
+                        >
+                          {String(procedure) === "all" ? "All Procedures" : String(procedure)}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Sort</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(paymentDateSortDirection === "desc")}
+                        onSelect={() => setPaymentDateSortDirection("desc")}
+                      >
+                        Newest Paid
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(paymentDateSortDirection === "asc")}
+                        onSelect={() => setPaymentDateSortDirection("asc")}
+                      >
+                        Oldest Paid
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Deleted payments</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(!showDeletedPayments)}
+                        onSelect={() => setShowDeletedPayments(false)}
+                      >
+                        Hide deleted payments
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(showDeletedPayments)}
+                        onSelect={() => setShowDeletedPayments(true)}
+                      >
+                        Show deleted payments
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={clearPaymentFilters}>
+                        Reset filters
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className="hidden md:block">
+                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                      <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                        <SelectValue placeholder="All Methods" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniquePaymentMethods.map(method => (
+                          <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {!doctorFilter ? (
+                    <div className="hidden md:block">
                     <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
                       <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
                         <SelectValue placeholder="All Doctors" />
@@ -5142,21 +5221,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         ))}
                       </SelectContent>
                     </Select>
+                    </div>
+                  ) : (
+                    <div className="hidden md:block" />
                   )}
-                  <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
-                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
-                      <SelectValue placeholder="All Procedures" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniquePaymentProcedures.map(proc => (
-                        <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                  <div className="hidden md:block">
+                    <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
+                      <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                        <SelectValue placeholder="All Procedures" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniquePaymentProcedures.map(proc => (
+                          <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                    className="hidden h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 md:inline-flex"
                     onClick={() => setPaymentDateSortDirection((direction) => direction === "desc" ? "asc" : "desc")}
                     title="Sort by payment date"
                   >
@@ -5170,7 +5256,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50"
+                    className="hidden h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50 md:inline-flex"
                     onClick={clearPaymentFilters}
                     disabled={!hasPaymentFilters}
                   >
@@ -5345,7 +5431,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         <span className="sr-only">Delete Payment</span>
                                       </Button>
                                     </>
-                                  ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                  ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
@@ -5588,7 +5674,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           if (!open && !pdConfirmLoading) setPdPaymentToDelete(null);
         }}
         loading={pdConfirmLoading}
-        description="This will delete the payment and update the appointment balance. This action cannot be undone."
+        description="This will mark the payment as deleted and update the appointment balance. It can be restored later from deleted payment views."
         details={pdPaymentToDelete ? {
           amountLabel: formatPatientHistoryCurrency(pdPaymentToDelete.transaction.amount),
           patientName: pdPaymentToDelete.transaction.patientName,
@@ -5601,6 +5687,32 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           reference: pdPaymentToDelete.transaction.transactionId || pdPaymentToDelete.transaction.id,
         } : null}
         onConfirm={confirmDeletePaymentTransaction}
+      />
+      <SignatureInputModal
+        open={Boolean(consentSignatureModalTarget)}
+        onOpenChange={(open) => {
+          if (!open) setConsentSignatureModalTarget(null);
+        }}
+        value={
+          consentSignatureModalTarget === "dentist"
+            ? consentForm.dentistSignatureImage
+            : consentForm.patientSignatureImage
+        }
+        title={consentSignatureModalTarget === "dentist" ? "Dentist Signature" : "Patient Signature"}
+        description={
+          consentSignatureModalTarget === "dentist"
+            ? "Add the dentist signature for this consent form."
+            : "Add the patient, parent, or guardian signature for this consent form."
+        }
+        signatureLabel={consentSignatureModalTarget === "dentist" ? "Dentist Signature" : "Patient / Parent / Guardian Signature"}
+        disabled={isSavingConsent}
+        onSave={(signatureImage) => {
+          if (consentSignatureModalTarget === "dentist") {
+            updateConsentField("dentistSignatureImage", signatureImage);
+          } else {
+            updateConsentField("patientSignatureImage", signatureImage);
+          }
+        }}
       />
 
       {/* Appointment Snapshot Dialog */}

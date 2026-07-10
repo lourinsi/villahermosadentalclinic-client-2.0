@@ -674,14 +674,6 @@ export function normalizeBookingPaymentDate(dateInput?: Date | string | null) {
   return formatBookingDateKey(dateInput);
 }
 
-export function isFutureBookingPaymentDate(dateInput?: Date | string | null, now: Date = new Date()) {
-  const paymentDate = parseLocalDateOnly(dateInput);
-  if (!paymentDate) return false;
-
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return paymentDate.getTime() > today.getTime();
-}
-
 export function formatBookingPaymentDateLabel(dateInput?: Date | string | null) {
   const paymentDate = parseLocalDateOnly(dateInput);
   if (!paymentDate) return "";

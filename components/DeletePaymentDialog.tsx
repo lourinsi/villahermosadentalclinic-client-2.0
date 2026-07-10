@@ -35,7 +35,7 @@ export default function DeletePaymentDialog({
   onConfirm,
   loading = false,
   details,
-  description = "This will soft-delete the payment and update the appointment balance.",
+  description = "This will mark the payment as deleted, remove it from balances and default finance views, and keep it available for restoration later.",
 }: DeletePaymentDialogProps) {
   const detailRows = [
     details?.patientName ? { label: "Patient", value: details.patientName } : null,
@@ -126,7 +126,7 @@ export default function DeletePaymentDialog({
             className="h-10 rounded-full text-sm font-black sm:h-11"
           >
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-            Delete
+            Delete Payment
           </Button>
         </DialogFooter>
       </DialogContent>

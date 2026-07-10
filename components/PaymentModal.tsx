@@ -63,7 +63,6 @@ type BookingPaymentPageProps = {
   onPayFull?: () => void;
   payFullDisabled?: boolean;
   paymentDateInputRef?: RefObject<HTMLInputElement | null>;
-  maxPaymentDate?: string;
   onOpenPaymentDatePicker?: () => void;
   paymentDateDisabled?: boolean;
   paymentDateHelp?: string;
@@ -106,7 +105,6 @@ export function BookingPaymentPage({
   onPayFull,
   payFullDisabled,
   paymentDateInputRef,
-  maxPaymentDate,
   onOpenPaymentDatePicker,
   paymentDateDisabled = false,
   paymentDateHelp,
@@ -274,7 +272,6 @@ export function BookingPaymentPage({
                   id="sharedPaymentDate"
                   type="date"
                   value={paymentDate}
-                  max={maxPaymentDate}
                   disabled={paymentDateDisabled}
                   onChange={(event) => onPaymentDateChange(event.target.value)}
                   onMouseDown={(event) => {

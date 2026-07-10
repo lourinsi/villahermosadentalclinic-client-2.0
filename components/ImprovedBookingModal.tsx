@@ -52,7 +52,6 @@ import useSharedBookingLogic, {
   getBookingEditTime,
   getDefaultBookingPaymentDate,
   normalizeBookingPaymentDate,
-  isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
   isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
@@ -2210,11 +2209,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return false;
     }
 
-    if (isFutureBookingPaymentDate(normalizedDate)) {
-      toast.error("Payment date cannot be in the future.");
-      return false;
-    }
-
     if (normalizedDate !== paymentDate) setPaymentDate(normalizedDate);
     return true;
   };
@@ -3865,7 +3859,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     onPayFull={() => setAmountToPay(String(remainingBalance))}
                     payFullDisabled={remainingBalance <= 0}
                     paymentDateInputRef={paymentDateInputRef}
-                    maxPaymentDate={getDefaultBookingPaymentDate()}
                     onOpenPaymentDatePicker={openPaymentDatePicker}
                     paymentDateHelp={formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
                     methodOptions={[
@@ -3978,7 +3971,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               id="improvedBookingPaymentDate"
                               type="date"
                               value={paymentDate}
-                              max={getDefaultBookingPaymentDate()}
                               onChange={(e: any) => setPaymentDate(e.target.value)}
                               onClick={openPaymentDatePicker}
                               disabled={isPaymentDateDisabled}
