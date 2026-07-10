@@ -19,6 +19,7 @@ import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppoi
 import { apiUrl } from "@/lib/api";
 import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import type { BookingInitialStep } from "./sharedBookingLogic";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -38,6 +39,7 @@ export function Dashboard({ portal }: { portal?: string }) {
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingInitialStep, setBookingInitialStep] = useState<BookingInitialStep | undefined>();
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const {
     isAppointmentHistoryOpen,
@@ -225,11 +227,12 @@ export function Dashboard({ portal }: { portal?: string }) {
     value: Math.round(((appointmentTypeCounts[name] as number) / totalAppointments) * 100),
     color: colorPalette[idx % colorPalette.length]
   }));
-  const handleOpenSnapshotAppointment = (appointmentId: string) => {
+  const handleOpenSnapshotAppointment = (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
     const appointment = appointments.find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
     if (appointment) {
+      setBookingInitialStep(options?.initialStep);
       setSelectedAppointment(appointment);
       setBookingModalOpen(true);
     }
@@ -623,10 +626,15 @@ export function Dashboard({ portal }: { portal?: string }) {
       {bookingModalOpen && (
         <BookingModalWrapper
           open={bookingModalOpen}
-          onOpenChange={setBookingModalOpen}
+          onOpenChange={(open) => {
+            setBookingModalOpen(open);
+            if (!open) setBookingInitialStep(undefined);
+          }}
           appointmentToEdit={selectedAppointment}
+          initialStep={bookingInitialStep}
           onBooked={() => {
             setSelectedAppointment(null);
+            setBookingInitialStep(undefined);
             setBookingModalOpen(false);
           }}
         />

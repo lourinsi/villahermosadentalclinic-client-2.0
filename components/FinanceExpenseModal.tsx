@@ -41,6 +41,7 @@ type FinanceExpenseModalProps = {
   isHistoryLoading?: boolean;
   originalInventoryItemId?: string;
   originalInventoryQuantity?: number;
+  onCreateInventoryItem?: () => void;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ExpenseForm) => void;
   onSave: () => void;
@@ -48,6 +49,7 @@ type FinanceExpenseModalProps = {
 
 const NO_VENDOR_VALUE = "__no_vendor__";
 const CREATE_NEW_VENDOR_VALUE = "__create_new_vendor__";
+const CREATE_NEW_INVENTORY_VALUE = "__create_new_inventory__";
 
 const expenseCurrencyFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -86,6 +88,7 @@ export function FinanceExpenseModal({
   isHistoryLoading = false,
   originalInventoryItemId = "",
   originalInventoryQuantity = 0,
+  onCreateInventoryItem,
   onOpenChange,
   onFormChange,
   onSave,
@@ -179,6 +182,11 @@ export function FinanceExpenseModal({
   };
 
   const selectInventoryItem = (value: string) => {
+    if (value === CREATE_NEW_INVENTORY_VALUE) {
+      onCreateInventoryItem?.();
+      return;
+    }
+
     if (value === "none") {
       updateForm({ inventoryItemId: "", inventoryQuantity: 0 });
       return;
@@ -470,6 +478,8 @@ export function FinanceExpenseModal({
                                 {item.item}
                               </SelectItem>
                             ))}
+                            <SelectSeparator />
+                            <SelectItem value={CREATE_NEW_INVENTORY_VALUE}>Create new inventory item</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

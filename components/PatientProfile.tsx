@@ -2386,7 +2386,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
-  const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any) => {
+  const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any, options?: OpenBookingModalOptions) => {
     const appointment =
       patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointmentId)) ||
       mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(appointmentId)) ||
@@ -2398,7 +2398,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    onOpenBookingModal?.(appointment as Appointment);
+    onOpenBookingModal?.(appointment as Appointment, options);
   };
 
   const openRescheduleModal = (appointment: Appointment | HistoryAppointment) => {
@@ -4384,7 +4384,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                    <div className="flex min-h-full flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                       <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(210px,1fr)]">
                         <div className="space-y-2">
                           <Label htmlFor="patient-consent-signature-name" className="text-sm font-black text-slate-950">
@@ -4422,16 +4422,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           className="h-11 rounded-lg border-slate-200 bg-white font-medium"
                         />
                       </div> */}
-                      <div className="mt-4 space-y-2">
+                      <div className="mt-4 flex flex-1 flex-col">
                         <Label className="text-sm font-black text-slate-950">Patient / Parent / Guardian Drawn Signature *</Label>
                         <button
                           type="button"
                           onClick={() => setConsentSignatureModalTarget("patient")}
                           disabled={isSavingConsent}
-                          className="flex min-h-[136px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="mt-2 flex min-h-[184px] w-full flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[216px]"
                         >
                           {consentForm.patientSignatureImage ? (
-                            <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-[116px] max-w-full object-contain" />
+                            <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-[152px] max-w-full object-contain sm:max-h-[184px]" />
                           ) : (
                             <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
                               <PenLine className="h-4 w-4" />
@@ -4439,7 +4439,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             </span>
                           )}
                         </button>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <div className="grid gap-2 pt-3 sm:grid-cols-2">
                           <Button
                             type="button"
                             variant="outline"
@@ -4487,10 +4487,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         type="button"
                         onClick={() => setConsentSignatureModalTarget("dentist")}
                         disabled={isSavingConsent}
-                        className="mt-4 flex min-h-[88px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-3 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[96px]"
+                        className="mt-4 flex min-h-[184px] w-full flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[216px]"
                       >
                         {consentForm.dentistSignatureImage ? (
-                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-[72px] max-w-full object-contain" />
+                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-[152px] max-w-full object-contain sm:max-h-[184px]" />
                         ) : (
                           <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
                             <PenLine className="h-4 w-4" />
@@ -4498,7 +4498,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           </span>
                         )}
                       </button>
-                      <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2">
+                      <div className="grid gap-2 pt-3 sm:grid-cols-2">
                         <Button
                           type="button"
                           variant="outline"

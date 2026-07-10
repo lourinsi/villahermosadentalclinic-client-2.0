@@ -81,7 +81,7 @@ import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
-import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
+import type { BookingCreationMode, BookingInitialStep, BookingMode } from "./sharedBookingLogic";
 
 const sanitizeToothNumberEntry = (value: string) => String(value || "").replace(/\D/g, "");
 
@@ -129,9 +129,13 @@ interface BookingModalProps {
   title?: string; // optional override for dialog title
   bookingMode?: BookingMode;
   appointmentCreationMode?: BookingCreationMode;
+  initialStep?: BookingInitialStep;
 }
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
+const getProBookingInitialStep = (initialStep?: BookingInitialStep): "details" | "payment" =>
+  initialStep === "payment" ? "payment" : "details";
+
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard", initialStep }: BookingModalProps) {
   const { user } = useAuth();
   const { effectiveRole } = useAdminViewMode();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
@@ -1258,7 +1262,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Set the modal step based on isPaymentFlow flag or if we are editing
       // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
       // or if we are viewing/editing an existing appointment
-      setModalStep(isPaymentFlow || appointmentToEdit ? 'payment' : 'details');
+      setModalStep(isPaymentFlow ? 'payment' : initialStep ? getProBookingInitialStep(initialStep) : 'payment');
       setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
@@ -1282,9 +1286,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset the flag when opening for new appointment
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      setModalStep('details');
+      setModalStep(initialStep ? getProBookingInitialStep(initialStep) : 'details');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, isPastAppointmentMode]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, isPastAppointmentMode, initialStep, isPaymentFlow]);
 
   const bookingMemoryKey = useMemo(
     () =>

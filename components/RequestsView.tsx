@@ -8,6 +8,7 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
@@ -81,6 +82,7 @@ import {
   normalizePaymentStatus,
 } from "@/lib/status-colors";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
+import type { BookingInitialStep } from "./sharedBookingLogic";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -136,7 +138,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   } = useAppointmentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
+  const { openPaymentFor } = usePaymentModal();
   const canManagePaymentStatuses = effectiveRole === "admin";
+  const hideAuditColumns = effectiveRole === "receptionist";
   const [requests, setRequests] = useState<Appointment[]>([]);
   const [isRequestsLoading, setIsRequestsLoading] = useState(true);
   const [requestCurrentPage, setRequestCurrentPage] = useState(1);
@@ -163,7 +167,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     handleViewAppointment,
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot([...appointments, ...requests, ...history]);
-  const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment, options?: { initialStep?: BookingInitialStep }) => {
     const appointment = [...appointments, ...requests, ...history].find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
@@ -173,12 +177,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       : appointment;
 
     if (appointmentToOpen) {
-      openEditModal(appointmentToOpen);
+      openEditModal(appointmentToOpen, false, false, options?.initialStep);
       return;
     }
 
     try {
-      await openEditModalById(appointmentId);
+      await openEditModalById(appointmentId, false, false, options?.initialStep);
     } catch {
       toast.error("Appointment not found or could not be loaded");
     }
@@ -780,7 +784,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const handleOpenPayment = async (appointment: Appointment) => {
     try {
-      openEditModal(appointment, false, true);
+      openPaymentFor(
+        appointment,
+        String((appointment as any).patientId || (appointment as any).patient?.id || "") || null,
+        getCurrentPatientName(appointment)
+      );
     } catch (error) {
       console.error("Error opening payment modal:", error);
       toast.error("Unable to open payment editor. Please try again.");
@@ -938,7 +946,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requestDoctorOptions = useMemo(() => {
     return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
   }, [appointments, requests, history]);
-  const pendingRequestColumnCount = 9;
+  const pendingRequestColumnCount = hideAuditColumns ? 7 : 9;
   const historyColumnCount = pendingRequestColumnCount;
   const activeDropdownItemClass = (isActive: boolean) =>
     isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
@@ -1331,22 +1339,24 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <span className="text-sm font-medium text-gray-500">Payment Status</span>
                         </div>
 
-                        <div className="grid grid-cols-2 border-b border-gray-100 py-4">
-                          <div className="flex gap-3 border-r border-gray-100 pr-3">
-                            <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
-                            <div>
-                              <p className="text-sm font-semibold text-gray-500">Booked</p>
-                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.createdAt)} {formatAuditTime(request.createdAt)}</p>
+                        {!hideAuditColumns ? (
+                          <div className="grid grid-cols-2 border-b border-gray-100 py-4">
+                            <div className="flex gap-3 border-r border-gray-100 pr-3">
+                              <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                              <div>
+                                <p className="text-sm font-semibold text-gray-500">Booked</p>
+                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.createdAt)} {formatAuditTime(request.createdAt)}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-3 pl-4">
+                              <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+                              <div>
+                                <p className="text-sm font-semibold text-gray-500">Last Updated</p>
+                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.updatedAt || request.createdAt)} {formatAuditTime(request.updatedAt || request.createdAt)}</p>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex gap-3 pl-4">
-                            <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
-                            <div>
-                              <p className="text-sm font-semibold text-gray-500">Last Updated</p>
-                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(request.updatedAt || request.createdAt)} {formatAuditTime(request.updatedAt || request.createdAt)}</p>
-                            </div>
-                          </div>
-                        </div>
+                        ) : null}
 
                         <div className="mt-4 grid grid-cols-3 divide-x divide-gray-100 rounded-3xl border border-gray-100 bg-white py-3 text-center shadow-sm">
                           <button
@@ -1389,7 +1399,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               </div>
 
               <div className="hidden overflow-x-auto md:block">
-                <Table className="min-w-[1320px] table-fixed">
+                <Table className={`${hideAuditColumns ? "min-w-[1000px]" : "min-w-[1320px]"} table-fixed`}>
                   <TableHeader>
                     <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
                       <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
@@ -1422,16 +1432,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Payment {getSortIcon("payment", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("booked")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Booked {getSortIcon("booked", true)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("updated")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Last Updated {getSortIcon("updated", true)}
-                        </div>
-                      </TableHead>
+                      {!hideAuditColumns ? (
+                        <>
+                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("booked")}>
+                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                              Booked {getSortIcon("booked", true)}
+                            </div>
+                          </TableHead>
+                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("updated")}>
+                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                              Last Updated {getSortIcon("updated", true)}
+                            </div>
+                          </TableHead>
+                        </>
+                      ) : null}
                       <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1528,24 +1542,28 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               getPaymentStatusBadge(request.paymentStatus)
                             )}
                           </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
-                              <div>
-                                <p className="font-bold text-gray-900">{formatAuditDate(request.createdAt)}</p>
-                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.createdAt)}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <Clock className="h-5 w-5 shrink-0 text-blue-600" />
-                              <div>
-                                <p className="font-bold text-gray-900">{formatAuditDate(request.updatedAt || request.createdAt)}</p>
-                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.updatedAt || request.createdAt)}</p>
-                              </div>
-                            </div>
-                          </TableCell>
+                          {!hideAuditColumns ? (
+                            <>
+                              <TableCell className="whitespace-normal">
+                                <div className="flex items-center gap-3">
+                                  <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                                  <div>
+                                    <p className="font-bold text-gray-900">{formatAuditDate(request.createdAt)}</p>
+                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.createdAt)}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <div className="flex items-center gap-3">
+                                  <Clock className="h-5 w-5 shrink-0 text-blue-600" />
+                                  <div>
+                                    <p className="font-bold text-gray-900">{formatAuditDate(request.updatedAt || request.createdAt)}</p>
+                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.updatedAt || request.createdAt)}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </>
+                          ) : null}
                           <TableCell className="text-center">
                             <div className="flex items-center justify-center gap-2">
                               <Button
@@ -1922,22 +1940,24 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <span className="text-sm font-medium text-gray-500">Payment Status</span>
                         </div>
 
-                        <div className="grid grid-cols-2 border-b border-gray-100 py-4">
-                          <div className="flex gap-3 border-r border-gray-100 pr-3">
-                            <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
-                            <div>
-                              <p className="text-sm font-semibold text-gray-500">Booked</p>
-                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.createdAt)} {formatAuditTime(item.createdAt)}</p>
+                        {!hideAuditColumns ? (
+                          <div className="grid grid-cols-2 border-b border-gray-100 py-4">
+                            <div className="flex gap-3 border-r border-gray-100 pr-3">
+                              <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                              <div>
+                                <p className="text-sm font-semibold text-gray-500">Booked</p>
+                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.createdAt)} {formatAuditTime(item.createdAt)}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-3 pl-4">
+                              <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+                              <div>
+                                <p className="text-sm font-semibold text-gray-500">Last Updated</p>
+                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.updatedAt || item.createdAt)} {formatAuditTime(item.updatedAt || item.createdAt)}</p>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex gap-3 pl-4">
-                            <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
-                            <div>
-                              <p className="text-sm font-semibold text-gray-500">Last Updated</p>
-                              <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.updatedAt || item.createdAt)} {formatAuditTime(item.updatedAt || item.createdAt)}</p>
-                            </div>
-                          </div>
-                        </div>
+                        ) : null}
 
                         <div className={`mt-4 grid ${canPromptPayment(item) ? "grid-cols-2" : "grid-cols-1"} divide-x divide-gray-100 rounded-3xl border border-gray-100 bg-white py-3 text-center shadow-sm`}>
                           {canPromptPayment(item) ? (
@@ -1970,7 +1990,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               </div>
 
               <div className="hidden overflow-x-auto md:block">
-                <Table className="min-w-[1320px] table-fixed">
+                <Table className={`${hideAuditColumns ? "min-w-[1000px]" : "min-w-[1320px]"} table-fixed`}>
                   <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
                       <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
@@ -2003,16 +2023,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Payment {getSortIcon("payment", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Booked {getSortIcon("booked", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("updated")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Last Updated {getSortIcon("updated", false)}
-                        </div>
-                      </TableHead>
+                      {!hideAuditColumns ? (
+                        <>
+                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
+                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                              Booked {getSortIcon("booked", false)}
+                            </div>
+                          </TableHead>
+                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("updated")}>
+                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                              Last Updated {getSortIcon("updated", false)}
+                            </div>
+                          </TableHead>
+                        </>
+                      ) : null}
                       <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2109,24 +2133,28 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               getPaymentStatusBadge(item.paymentStatus)
                             )}
                           </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
-                              <div>
-                                <p className="font-bold text-gray-900">{formatAuditDate(item.createdAt)}</p>
-                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.createdAt)}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <Clock className="h-5 w-5 shrink-0 text-blue-600" />
-                              <div>
-                                <p className="font-bold text-gray-900">{formatAuditDate(item.updatedAt || item.createdAt)}</p>
-                                <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.updatedAt || item.createdAt)}</p>
-                              </div>
-                            </div>
-                          </TableCell>
+                          {!hideAuditColumns ? (
+                            <>
+                              <TableCell className="whitespace-normal">
+                                <div className="flex items-center gap-3">
+                                  <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                                  <div>
+                                    <p className="font-bold text-gray-900">{formatAuditDate(item.createdAt)}</p>
+                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.createdAt)}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <div className="flex items-center gap-3">
+                                  <Clock className="h-5 w-5 shrink-0 text-blue-600" />
+                                  <div>
+                                    <p className="font-bold text-gray-900">{formatAuditDate(item.updatedAt || item.createdAt)}</p>
+                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.updatedAt || item.createdAt)}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </>
+                          ) : null}
                           <TableCell className="text-center">
                             <div className="flex items-center justify-center gap-2">
                               <Button

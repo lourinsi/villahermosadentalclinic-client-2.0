@@ -17,6 +17,7 @@ import BookingAppointmentHistory, { getMergedBookingLogs } from "./BookingAppoin
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import AppointmentPatientChoiceDialog from "./AppointmentPatientChoiceDialog";
 import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
@@ -45,6 +46,7 @@ import {
   normalizeBookingHistoryStatus,
   parseLocalDateOnly,
   findNextAvailableRepeatSlot,
+  type BookingInitialStep,
 } from "./sharedBookingLogic";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
@@ -59,13 +61,17 @@ import { TimePickerModal } from "./TimePickerModal";
 import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 import { CurrencyText } from "./CurrencyAmount";
 
+type OpenAppointmentOptions = {
+  initialStep?: BookingInitialStep;
+};
+
 interface AppointmentHistoryViewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appointmentSnapshot: any;
   logDate: string;
   onViewCurrent?: (appointmentId: string) => void;
-  onOpenAppointment?: (appointmentId: string, appointmentSnapshot?: any) => void;
+  onOpenAppointment?: (appointmentId: string, appointmentSnapshot?: any, options?: OpenAppointmentOptions) => void | Promise<void>;
   isAppointmentOpen?: boolean;
   isHistorical?: boolean;
   actionsDisabled?: boolean;
@@ -499,6 +505,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
   const [isAssignDoctorOpen, setIsAssignDoctorOpen] = useState(false);
+  const [isPatientChoiceOpen, setIsPatientChoiceOpen] = useState(false);
   const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
   const [isOpeningPaymentEdit, setIsOpeningPaymentEdit] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
@@ -582,6 +589,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setCustomRepeatDate("");
       setIsCustomRepeatDatePickerOpen(false);
       setIsChangeTreatmentOpen(false);
+      setIsPatientChoiceOpen(false);
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
       setSelectedTreatmentPrice("");
@@ -1467,6 +1475,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const doctorRouteName = displayedDoctorName || "";
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
+  const canSelectAppointmentPatient = Boolean(
+    canUseSnapshotActions &&
+    !showsLogSnapshotState &&
+    ["admin", "doctor", "receptionist"].includes(String(effectiveRole || ""))
+  );
+  const canOpenPatientChoice = Boolean(canSelectAppointmentPatient || canGoToPatient);
   const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
@@ -2109,6 +2123,32 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     router.push(`${managementBasePath}/patients/${encodeURIComponent(patientRouteName)}`);
   };
 
+  const openPatientChoiceDialog = () => {
+    if (!canOpenPatientChoice) return;
+    setIsPatientChoiceOpen(true);
+  };
+
+  const openPatientSelector = async () => {
+    if (!canSelectAppointmentPatient || !appointmentId) {
+      toast.error("This appointment cannot change patients");
+      return;
+    }
+
+    setIsPatientChoiceOpen(false);
+
+    try {
+      if (onOpenAppointment) {
+        await onOpenAppointment(String(appointmentId), displayedSnapshot, { initialStep: "patient" });
+      } else {
+        await openEditModalById(String(appointmentId), false, false, "patient");
+      }
+      onOpenChange(false);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to open patient selector:", error);
+      toast.error("Failed to open patient selector");
+    }
+  };
+
   const goToDoctor = () => {
     if (!canGoToDoctor) {
       toast.error("No doctor profile available");
@@ -2521,10 +2561,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                     <div className="mt-4 grid overflow-hidden rounded-2xl border border-slate-100 bg-white sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={canGoToPatient ? goToPatient : undefined}
-                        tabIndex={canGoToPatient ? 0 : -1}
-                        aria-disabled={!canGoToPatient}
-                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:px-5 sm:py-4 ${canGoToPatient ? "hover:bg-slate-50" : "cursor-default"}`}
+                        onClick={canOpenPatientChoice ? openPatientChoiceDialog : undefined}
+                        tabIndex={canOpenPatientChoice ? 0 : -1}
+                        aria-disabled={!canOpenPatientChoice}
+                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:px-5 sm:py-4 ${canOpenPatientChoice ? "hover:bg-slate-50" : "cursor-default"}`}
                       >
                         <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-12 w-12 shrink-0 rounded-full border border-violet-100 shadow-sm sm:h-14 sm:w-14" sizeClass="h-12 w-12 rounded-full sm:h-14 sm:w-14" />
                         <div className="min-w-0 flex-1">
@@ -2534,7 +2574,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                             <CurrentChangeIndicator change={patientCurrentChange} />
                           </div>
                         </div>
-                        <ChevronRight className={`h-5 w-5 shrink-0 sm:h-6 sm:w-6 ${canGoToPatient ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                        <ChevronRight className={`h-5 w-5 shrink-0 sm:h-6 sm:w-6 ${canOpenPatientChoice ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
                       </button>
 
                       <button
@@ -2892,6 +2932,18 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AppointmentPatientChoiceDialog
+        open={isPatientChoiceOpen}
+        onOpenChange={setIsPatientChoiceOpen}
+        patientName={patientName}
+        patientImage={resolvedPatientImage}
+        patientDob={snapshotPatientDob}
+        canSelectPatient={canSelectAppointmentPatient}
+        canOpenProfile={canGoToPatient}
+        onSelectPatient={openPatientSelector}
+        onOpenProfile={goToPatient}
+      />
 
       <Dialog
         open={isRepeatScheduleOpen}

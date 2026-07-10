@@ -40,6 +40,7 @@ import {
   normalizeStaffValue,
   prettifyStaffValue,
 } from "./staffModalOptions";
+import type { BookingInitialStep } from "./sharedBookingLogic";
 import {
   Users,
   UserPlus,
@@ -640,20 +641,20 @@ export function StaffView() {
     handleViewAppointment(appointment);
   };
 
-  const handleEditAppointment = async (appointmentId: string) => {
+  const handleEditAppointment = async (appointmentId: string, options?: { initialStep?: BookingInitialStep }) => {
     try {
-      await openEditModalById(appointmentId);
+      await openEditModalById(appointmentId, false, false, options?.initialStep);
     } catch (error) {
       console.error("Error opening appointment for edit:", error);
       toast.error("Appointment not found or could not be loaded");
     }
   };
 
-  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
     // Close the history view and open the edit modal for the appointment
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    await handleEditAppointment(appointmentId);
+    await handleEditAppointment(appointmentId, options);
   };
 
   const handleDeleteFinancialRecord = async () => {

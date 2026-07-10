@@ -20,6 +20,7 @@ export function GlobalBookingModalWrapper() {
     newAppointmentPatientId,
     newAppointmentDoctorName,
     newAppointmentCreationMode,
+    selectedAppointmentInitialStep,
   } = useAppointmentModal();
 
   // Open modal for either patient-specific booking flow or the generic create flow
@@ -42,6 +43,7 @@ export function GlobalBookingModalWrapper() {
       defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
       doctorName={newAppointmentDoctorName}
       appointmentCreationMode={isCreateModalOpen ? newAppointmentCreationMode : undefined}
+      initialStep={selectedAppointmentInitialStep}
     />
   );
 }

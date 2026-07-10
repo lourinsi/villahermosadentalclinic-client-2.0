@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import type { BookingInitialStep } from "./sharedBookingLogic";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
@@ -47,7 +48,8 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentPatientId,
-    newAppointmentCreationMode
+    newAppointmentCreationMode,
+    selectedAppointmentInitialStep
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -64,20 +66,20 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
 
-  const handleReschedule = async (appointmentId: string) => {
+  const handleReschedule = async (appointmentId: string, options?: { initialStep?: BookingInitialStep }) => {
     console.log(`[PatientLayout] Attempting to reschedule/view appointment: ${appointmentId}`);
     try {
-      await openEditModalById(appointmentId, true);
+      await openEditModalById(appointmentId, true, false, options?.initialStep);
     } catch (error) {
       console.error(`[PatientLayout] Error in handleReschedule:`, error);
       toast.error("Appointment not found or could not be loaded");
     }
   };
 
-  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    await handleReschedule(appointmentId);
+    await handleReschedule(appointmentId, options);
   };
 
   const isSnapshotAppointmentOpen = Boolean(
@@ -233,6 +235,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             defaultTime={newAppointmentTime}
             defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
             appointmentCreationMode={newAppointmentCreationMode}
+            initialStep={selectedAppointmentInitialStep}
           />
         )}
       </div>
