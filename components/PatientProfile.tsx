@@ -3901,7 +3901,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2.5">
+                      {/* <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ledger Balance ({"\u20b1"})</Label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₱</span>
@@ -3912,7 +3912,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             className="h-12 pl-10 bg-slate-50/30 border-slate-200 font-black text-slate-900 rounded-xl focus:ring-violet-200"
                           />
                         </div>
-                      </div>
+                      </div> */}
                       <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Insurance Carrier</Label>
                         <div className="relative">
