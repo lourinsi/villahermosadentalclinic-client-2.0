@@ -7,6 +7,7 @@ import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ConfirmDialog from "./ConfirmDialog";
 import DeletePaymentDialog from "./DeletePaymentDialog";
+import { CurrencyText } from "./CurrencyAmount";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
@@ -2593,7 +2594,9 @@ export function FinanceView() {
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
                       <div className="text-right">
-                        <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatCurrency(Math.abs(payment.amount))}</div>
+                        <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>
+                          <CurrencyText value={formatCurrency(Math.abs(payment.amount))} />
+                        </div>
                         <PaymentTransactionStatusBadge
                           display={paymentStatusDisplay}
                           className="mt-1 px-2.5 py-0.5 text-xs"
@@ -2718,8 +2721,10 @@ export function FinanceView() {
           </CardHeader>
           <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricRevenue)}</span>
-              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">{metricPeriodRange.label}</span>
+              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
+                <CurrencyText value={formatCurrency(metricRevenue)} />
+              </span>
+              <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">{metricPeriodRange.label}</span>
             </div>
           </CardContent>
         </Card>
@@ -2733,8 +2738,10 @@ export function FinanceView() {
           </CardHeader>
           <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricExpenses)}</span>
-              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">{metricPeriodRange.label}</span>
+              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
+                <CurrencyText value={formatCurrency(metricExpenses)} />
+              </span>
+              <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">{metricPeriodRange.label}</span>
             </div>
           </CardContent>
         </Card>
@@ -2748,8 +2755,10 @@ export function FinanceView() {
           </CardHeader>
           <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricProfit)}</span>
-              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">{metricPeriodRange.label}</span>
+              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
+                <CurrencyText value={formatCurrency(metricProfit)} />
+              </span>
+              <span className="min-w-0 flex-1 truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">{metricPeriodRange.label}</span>
             </div>
           </CardContent>
         </Card>
@@ -2763,10 +2772,10 @@ export function FinanceView() {
           </CardHeader>
           <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
+              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
                 {metricMargin.toFixed(1)}%
               </span>
-              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-600">{metricPeriodRange.label}</span>
+              <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-600">{metricPeriodRange.label}</span>
             </div>
           </CardContent>
         </Card>
@@ -3446,11 +3455,13 @@ export function FinanceView() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
                       <Wallet className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Total Income</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xl font-black text-emerald-600">{formatCurrency(transactionSummary.income)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Income</span>
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-emerald-600">
+                          <CurrencyText value={formatCurrency(transactionSummary.income)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Income</span>
                       </div>
                     </div>
                   </div>
@@ -3461,11 +3472,13 @@ export function FinanceView() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
                       <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Total Expenses</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xl font-black text-red-600">{formatCurrency(transactionSummary.expenses)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Expenses</span>
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-red-600">
+                          <CurrencyText value={formatCurrency(transactionSummary.expenses)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Expenses</span>
                       </div>
                     </div>
                   </div>
@@ -3476,11 +3489,13 @@ export function FinanceView() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
                       <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Net Total</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className={`min-w-0 flex-1 truncate text-xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>{formatCurrency(transactionSummary.net)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Net</span>
+                        <span className={`max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>
+                          <CurrencyText value={formatCurrency(transactionSummary.net)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Net</span>
                       </div>
                     </div>
                   </div>
@@ -3676,7 +3691,7 @@ export function FinanceView() {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className={`text-2xl font-black ${isDeletedPayment ? "text-gray-600" : transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
-                                    {amountPrefix}{formatCurrency(Math.abs(transaction.amount))}
+                                    <CurrencyText value={`${amountPrefix}${formatCurrency(Math.abs(transaction.amount))}`} />
                                   </div>
                                   <div className="mt-2">
                                     <PaymentTransactionStatusBadge

@@ -103,7 +103,7 @@ const formatDoctorName = (doctor?: string) => {
 };
 
 const formatMoney = (amount?: number) =>
-  `PHP ${(Number(amount) || 0).toLocaleString()}`;
+  `\u20b1${(Number(amount) || 0).toLocaleString()}`;
 
 const statusClass = (status?: string) => {
   const colors = getDefaultAppointmentStatusColors(status);

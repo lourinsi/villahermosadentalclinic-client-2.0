@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Clock, Eye, History, X } from "lucide-react";
+import { CurrencyText } from "./CurrencyAmount";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingPaymentAdjustmentAmountLabel,
@@ -241,7 +242,7 @@ const getHistoryBadges = (log: BookingHistoryLog): HistoryBadge[] => {
   const amount = getHistoryPaymentAmount(log);
   if (amount > 0) {
     badges.push({
-      label: `PHP ${amount.toLocaleString()}`,
+      label: `\u20b1${amount.toLocaleString()}`,
       tone: "amount",
     });
   }
@@ -554,7 +555,7 @@ export default function BookingAppointmentHistory({
                               key={`${badge.tone}-${badge.label}`}
                               className={`max-w-[8rem] truncate rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-tight sm:px-2.5 sm:py-1 ${getHistoryBadgeClass(badge.tone)}`}
                             >
-                              {badge.label}
+                              <CurrencyText value={badge.label} />
                             </span>
                           ))}
                         </div>

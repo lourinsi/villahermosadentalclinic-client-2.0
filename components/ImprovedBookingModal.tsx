@@ -3577,7 +3577,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                   <span className="text-gray-300">-</span>
                                   <span className="inline-flex items-center gap-1.5">
                                     <Tag className="h-4 w-4 text-blue-600" />
-                                    PHP {selectedTreatmentBasePrice.toLocaleString()}
+                                    <span className="text-[0.72em]">{"\u20b1"}</span>{selectedTreatmentBasePrice.toLocaleString()}
                                   </span>
                                 </div>
                               </div>
@@ -3602,7 +3602,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     <span className="block text-xs font-semibold text-gray-500">
                                       {t.name === "Other"
                                         ? "Custom treatment"
-                                        : `${optionDuration} mins${optionPrice ? ` - PHP ${optionPrice.toLocaleString()}` : ""}`}
+                                        : `${optionDuration} mins${optionPrice ? ` - \u20b1${optionPrice.toLocaleString()}` : ""}`}
                                     </span>
                                   </span>
                                 </div>
@@ -3808,7 +3808,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-semibold text-gray-500">Discount</p>
                             <div className="mt-0.5 flex items-center gap-2">
-                              <span className="text-lg font-black text-gray-900">PHP</span>
+                              <span className="text-sm font-black text-gray-900">{"\u20b1"}</span>
                               <Input
                                 type="number"
                                 value={discount}

@@ -57,6 +57,7 @@ import { SelectScheduleModal } from "./SelectScheduleModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
+import { CurrencyText } from "./CurrencyAmount";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -1113,14 +1114,22 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const mainPaymentDividerClass = mainPaymentTone === "deleted"
     ? "border-red-100"
     : "border-emerald-100";
+  const formatCurrencyLabel = (value: number) => `\u20b1${Number(value).toLocaleString()}`;
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
       ? latestPaymentAmount
       : 0;
-  const snapshotPaymentAmountLabel = isPaymentAdjustmentSnapshot
-    ? formatBookingPaymentAdjustmentAmountLabel(displayedSnapshot)
+  const snapshotPaymentAmountLabel = isPaymentAdjustmentSnapshot && paymentAdjustment.newAmount !== null
+    ? formatCurrencyLabel(paymentAdjustment.newAmount)
     : `\u20b1${snapshotPaymentAmount.toLocaleString()}`;
+  const snapshotPaymentAmountTitle = isPaymentAdjustmentSnapshot
+    ? formatBookingPaymentAdjustmentAmountLabel(displayedSnapshot)
+    : snapshotPaymentAmountLabel;
+  const snapshotPreviousPaymentAmountLabel =
+    isPaymentAdjustmentSnapshot && paymentAdjustment.previousAmount !== null
+      ? `from ${formatCurrencyLabel(paymentAdjustment.previousAmount)}`
+      : "";
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
   const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
@@ -1128,11 +1137,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     : (snapshotPaymentAmount ?? 0);
 
   const displayedBalanceLabel = displayedBalanceNumeric !== null
-    ? `₱${Number(displayedBalanceNumeric).toLocaleString()}`
-    : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : '₱0');
+    ? `\u20b1${Number(displayedBalanceNumeric).toLocaleString()}`
+    : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : "\u20b10");
 
   const latestStateForComparison = latestComparisonSnapshot ? getComparableSnapshotState(latestComparisonSnapshot) : null;
-  const formatCurrencyLabel = (value: number) => `\u20b1${Number(value).toLocaleString()}`;
   const normalizeNumberComparison = (value: unknown) => {
     const numeric = parseCurrencyNumber(value);
     return numeric === null ? normalizeComparableText(value) : String(numeric);
@@ -2494,7 +2502,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2 text-right">
-                      <p className="text-2xl font-black tracking-tight text-violet-700 sm:text-4xl">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
+                      <p className="text-2xl font-black tracking-tight text-violet-700 sm:text-4xl">
+                        <CurrencyText value={displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel} />
+                      </p>
                       <CurrentChangeIndicator change={balanceCurrentChange} />
                     </div>
                   </div>
@@ -2654,11 +2664,17 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                     <div className="mt-2">
                       {displayedDiscountAmount > 0 ? (
                         <>
-                          <div className="text-sm font-bold text-slate-300 line-through sm:text-lg">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
-                          <div className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
+                          <div className="text-sm font-bold text-slate-300 line-through sm:text-lg">
+                            <CurrencyText value={formatCurrencyLabel(Number(displayedBasePrice) || 0)} />
+                          </div>
+                          <div className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                            <CurrencyText value={formatCurrencyLabel(Number(displayedEffectivePrice) || 0)} />
+                          </div>
                         </>
                       ) : (
-                        <span className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
+                        <span className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                          <CurrencyText value={formatCurrencyLabel(Number(displayedEffectivePrice) || 0)} />
+                        </span>
                       )}
                     </div>
                   </div>
@@ -2689,14 +2705,21 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                           <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-black shadow-sm ring-1 ring-emerald-100 sm:h-14 sm:w-20">
                             <span className={`max-w-full truncate px-1 ${mainPaymentTextClass}`}>{snapshotPaymentMethodLabel}</span>
                           </div>
-                          <div className="grid min-w-0 grid-cols-2 gap-3">
+                          <div className="grid min-w-0 grid-cols-[minmax(4.5rem,max-content)_minmax(7.5rem,1fr)] gap-x-6 gap-y-2 max-[420px]:grid-cols-1 sm:gap-x-8">
                             <div className="min-w-0">
                               <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Amount</p>
-                              <p className={`mt-1 truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
+                              <p className={`mt-1 truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`} title={snapshotPaymentAmountTitle}>
+                                <CurrencyText value={snapshotPaymentAmountLabel} />
+                              </p>
+                              {snapshotPreviousPaymentAmountLabel ? (
+                                <p className={`mt-0.5 truncate text-[10px] font-black leading-tight sm:text-xs ${mainPaymentMutedTextClass}`} title={snapshotPreviousPaymentAmountLabel}>
+                                  <CurrencyText value={snapshotPreviousPaymentAmountLabel} />
+                                </p>
+                              ) : null}
                             </div>
                             <div className="min-w-0">
                               <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Date</p>
-                              <p className={`mt-1 truncate text-sm font-black sm:text-base ${mainPaymentTextClass}`}>
+                              <p className={`mt-1 truncate text-sm font-black sm:text-base ${mainPaymentTextClass}`} title={snapshotPaymentDateLabel || "No date"}>
                                 {snapshotPaymentDateLabel || "No date"}
                               </p>
                             </div>
@@ -2750,11 +2773,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
                                   return (
                                     <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
-                                      <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>
-                                      <div className="flex min-w-0 items-center gap-2 text-right">
+                                      <p className="min-w-0 max-w-[70%] shrink-0 truncate text-sm font-black text-emerald-700" title={payment.amountLabel}>
+                                        <CurrencyText value={payment.amountLabel} />
+                                      </p>
+                                      <div className="flex min-w-0 flex-1 items-center justify-end gap-2 text-right">
                                         <div className="min-w-0">
                                           <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
-                                          <p className="mt-0.5 text-xs font-bold text-emerald-700/60">{payment.dateLabel}</p>
+                                          <p className="mt-0.5 truncate text-xs font-bold text-emerald-700/60" title={payment.dateLabel}>{payment.dateLabel}</p>
                                         </div>
                                         <DropdownMenu>
                                           <DropdownMenuTrigger asChild>

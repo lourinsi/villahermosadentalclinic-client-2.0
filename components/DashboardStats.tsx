@@ -1,8 +1,9 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardTitle } from "./ui/card";
 import { Users, Calendar, DollarSign, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
+import { CurrencyText } from "./CurrencyAmount";
 
 interface DashboardStatsProps {
   portal: "admin" | "doctor" | "patient";
@@ -127,7 +128,7 @@ export function DashboardStats({
         },
         {
           title: "AMOUNT PAID",
-          value: `₱${totalSpent.toLocaleString()}`,
+          value: `\u20b1${totalSpent.toLocaleString()}`,
           change: "Total spent",
           icon: DollarSign,
           color: "text-purple-600",
@@ -135,7 +136,7 @@ export function DashboardStats({
         },
         {
           title: "PENDING BALANCE",
-          value: `₱${pendingBalance.toLocaleString()}`,
+          value: `\u20b1${pendingBalance.toLocaleString()}`,
           change: "Outstanding",
           icon: AlertCircle,
           color: "text-amber-600",
@@ -150,32 +151,30 @@ export function DashboardStats({
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 xl:gap-6">
       {stats.map((stat, index) => (
-        <Card key={index} className="relative overflow-hidden border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:shadow-md">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
-            <CardTitle className="min-w-0 truncate text-[10px] font-black uppercase tracking-wider text-gray-400">
-              {stat.title}
-            </CardTitle>
-            <div className={`shrink-0 rounded-xl p-2 ${stat.bgColor} ${stat.color} transition-colors duration-300`}>
-              <stat.icon className="h-4 w-4" />
+        <Card key={index} className="relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-5 xl:p-6">
+          <div className="flex min-w-0 items-center gap-4 xl:gap-5">
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full sm:h-16 sm:w-16 ${stat.bgColor} ${stat.color} transition-colors duration-300`}>
+              <stat.icon className="h-7 w-7 sm:h-8 sm:w-8" />
             </div>
-          </CardHeader>
-          <CardContent className="pt-1">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-gray-900">{stat.value}</span>
-              <span className={`min-w-0 max-w-[8rem] truncate rounded-lg px-2 py-0.5 text-[10px] font-bold ${
-                stat.title.toUpperCase() === "APPOINTMENT REQUESTS" || stat.title.toUpperCase() === "PENDING BALANCE" 
-                  ? "bg-amber-50 text-amber-600" 
-                  : "bg-emerald-50 text-emerald-600"
-              }`}>
-                {stat.change}
-              </span>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="min-w-0 truncate text-sm font-black uppercase tracking-wider text-slate-400 sm:text-base xl:text-lg">
+                {stat.title}
+              </CardTitle>
+              <div className="mt-3 flex min-w-0 items-center gap-3">
+                <span className="max-w-[calc(100%-2.25rem)] shrink-0 truncate text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">
+                  <CurrencyText value={stat.value} />
+                </span>
+                <span className={`min-w-0 max-w-[10rem] truncate rounded-full px-3 py-1 text-sm font-black ${
+                  stat.title.toUpperCase() === "APPOINTMENT REQUESTS" || stat.title.toUpperCase() === "PENDING BALANCE"
+                    ? "bg-amber-50 text-amber-600"
+                    : "bg-emerald-50 text-emerald-600"
+                }`}>
+                  {stat.change}
+                </span>
+              </div>
             </div>
-            <div className="mt-1">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">
-                {portal === "admin" ? "current view" : "vs last month"}
-              </span>
-            </div>
-          </CardContent>
+          </div>
+          <div className="mt-6 border-t border-slate-100" />
         </Card>
       ))}
     </div>

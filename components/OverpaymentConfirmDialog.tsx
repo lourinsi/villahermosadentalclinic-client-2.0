@@ -18,7 +18,7 @@ interface OverpaymentConfirmDialogProps {
   loadingAction?: "keep" | "adjust" | null;
 }
 
-const money = (value: number) => `PHP ${Math.max(0, Number(value) || 0).toLocaleString()}`;
+const money = (value: number) => `\u20b1${Math.max(0, Number(value) || 0).toLocaleString()}`;
 
 export default function OverpaymentConfirmDialog({
   open,

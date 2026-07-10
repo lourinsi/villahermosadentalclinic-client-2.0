@@ -251,7 +251,7 @@ export function FinanceExpenseModal({
             {renderFieldError("description")}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="expense-amount">Amount (PHP)</Label>
+            <Label htmlFor="expense-amount">Amount ({"\u20b1"})</Label>
             <Input
               id="expense-amount"
               type="number"

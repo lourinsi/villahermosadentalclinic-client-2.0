@@ -22,6 +22,7 @@ import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appoi
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import { CurrencyText } from "./CurrencyAmount";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -457,8 +458,10 @@ export function Dashboard({ portal }: DashboardProps) {
                 </div>
               </div>
               <div className="mt-2 flex min-w-0 items-baseline gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-xl font-black tracking-tight text-gray-950 sm:text-2xl">{stat.value}</span>
-                <span className={`min-w-0 max-w-[7rem] truncate rounded-full px-2 py-0.5 text-[10px] font-black leading-4 sm:text-[11px] ${stat.pillClass}`}>
+                <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black tracking-tight text-gray-950 sm:text-2xl">
+                  <CurrencyText value={stat.value} />
+                </span>
+                <span className={`min-w-0 max-w-[6.75rem] truncate rounded-full px-2 py-0.5 text-center text-[10px] font-black leading-4 sm:max-w-[8rem] sm:text-[11px] ${stat.pillClass}`}>
                   {stat.helper}
                 </span>
               </div>

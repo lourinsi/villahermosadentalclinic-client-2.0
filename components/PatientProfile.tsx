@@ -58,19 +58,23 @@ import {
   ArrowLeft,
   Stethoscope,
   RotateCcw,
-  X
+  X,
+  MoreHorizontal
 } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import DeletePaymentDialog from "./DeletePaymentDialog";
+import { CurrencyText } from "./CurrencyAmount";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -891,7 +895,7 @@ export function PatientProfile({
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
                     <span className={`block truncate text-lg font-black leading-tight md:text-xl ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
-                      PHP {Number(displayedBalance || 0).toLocaleString()}
+                      <CurrencyText value={`\u20b1${Number(displayedBalance || 0).toLocaleString()}`} />
                     </span>
                   </div>
                 </div>
@@ -1077,7 +1081,7 @@ const formatPatientLogDate = (value?: string | Date | null, fallback = "N/A") =>
 
 const formatPatientHistoryCurrency = (value?: number | string | null) => {
   const amount = Number(value || 0);
-  return `₱${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "0"}`;
+  return `\u20b1${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "0"}`;
 };
 
 const getPatientHistoryDateParts = (value?: string | Date | null) => {
@@ -2801,6 +2805,22 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const procedures = new Set(mappedHistory.map(apt => apt.type).filter(Boolean));
       return ['all', ...Array.from(procedures) as string[]];
   }, [mappedHistory]);
+  const activeHistoryFilterItemClass = (isActive: boolean) =>
+    isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white" : "";
+  const historyProcedureLabel = historyProcedureFilter === "all" ? "All Services" : String(historyProcedureFilter);
+  const historyDoctorLabel = doctorFilter
+    ? String(doctorFilter)
+    : historyDoctorFilter === "all"
+      ? "All Providers"
+      : String(historyDoctorFilter);
+  const historyPaymentLabel = historyPaymentStatusFilter === "all"
+    ? "All Payments"
+    : PAYMENT_STATUSES.find((status) => status.value === historyPaymentStatusFilter)?.label || "Payment";
+  const resetHistoryFilters = () => {
+    setHistoryProcedureFilter("all");
+    if (!doctorFilter) setHistoryDoctorFilter("all");
+    setHistoryPaymentStatusFilter("all");
+  };
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
@@ -3906,7 +3926,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         </Select>
                       </div>
                       <div className="space-y-2.5">
-                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ledger Balance (PHP)</Label>
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ledger Balance ({"\u20b1"})</Label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₱</span>
                           <Input
@@ -4545,7 +4565,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
+                <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
                   <div className="relative">
                     <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <Input
@@ -4556,18 +4576,82 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     />
                   </div>
 
-                  <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <SelectValue placeholder="All Services" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniqueProcedures.map(proc => (
-                        <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Services' : proc}</SelectItem>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl border-slate-200 bg-white shadow-sm md:hidden" aria-label="Visit history filters">
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-[70vh] w-72 overflow-y-auto">
+                      <DropdownMenuLabel>Visit filters</DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        Filters: {historyProcedureLabel} / {historyDoctorLabel} / {historyPaymentLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Services</DropdownMenuLabel>
+                      {uniqueProcedures.map((proc) => (
+                        <DropdownMenuItem
+                          key={proc}
+                          className={activeHistoryFilterItemClass(historyProcedureFilter === proc)}
+                          onSelect={() => setHistoryProcedureFilter(proc)}
+                        >
+                          {proc === "all" ? "All Services" : proc}
+                        </DropdownMenuItem>
                       ))}
-                    </SelectContent>
-                  </Select>
+                      {!doctorFilter ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-slate-500">Providers</DropdownMenuLabel>
+                          {uniqueDoctors.map((doctor) => (
+                            <DropdownMenuItem
+                              key={doctor}
+                              className={activeHistoryFilterItemClass(historyDoctorFilter === doctor)}
+                              onSelect={() => setHistoryDoctorFilter(doctor)}
+                            >
+                              {doctor === "all" ? "All Providers" : doctor}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      ) : null}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Payments</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(historyPaymentStatusFilter === "all")}
+                        onSelect={() => setHistoryPaymentStatusFilter("all")}
+                      >
+                        All Payments
+                      </DropdownMenuItem>
+                      {PAYMENT_STATUSES.map((status) => (
+                        <DropdownMenuItem
+                          key={status.value}
+                          className={activeHistoryFilterItemClass(historyPaymentStatusFilter === status.value)}
+                          onSelect={() => setHistoryPaymentStatusFilter(status.value)}
+                        >
+                          {status.label}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={resetHistoryFilters}>
+                        Reset filters
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className="hidden md:block">
+                    <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                        <SelectValue placeholder="All Services" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniqueProcedures.map(proc => (
+                          <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Services' : proc}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   {!doctorFilter ? (
+                    <div className="hidden md:block">
                     <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
                       <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                         <SelectValue placeholder="All Providers" />
@@ -4578,21 +4662,24 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         ))}
                       </SelectContent>
                     </Select>
+                    </div>
                   ) : (
                     <div className="hidden md:block" />
                   )}
 
-                  <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <SelectValue placeholder="All Payments" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Payments</SelectItem>
-                      {PAYMENT_STATUSES.map(status => (
-                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="hidden md:block">
+                    <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                        <SelectValue placeholder="All Payments" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Payments</SelectItem>
+                        {PAYMENT_STATUSES.map(status => (
+                          <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -4723,21 +4810,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div className="grid gap-2 border-slate-200 text-sm sm:grid-cols-3 xl:grid-cols-1 xl:border-l xl:pl-5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Total</span>
-                                <span className="font-black text-slate-900">{formatPatientHistoryCurrency(appointment.price)}</span>
+                                <span className="font-black text-slate-900"><CurrencyText value={formatPatientHistoryCurrency(appointment.price)} /></span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Paid</span>
-                                <span className={isPaid ? "font-black text-emerald-600" : "font-black text-slate-900"}>{formatPatientHistoryCurrency(appointment.totalPaid)}</span>
+                                <span className={isPaid ? "font-black text-emerald-600" : "font-black text-slate-900"}><CurrencyText value={formatPatientHistoryCurrency(appointment.totalPaid)} /></span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Balance</span>
                                 {isVoidedAppointment && originalDisplayedBalance > 0 ? (
                                   <span className="font-black">
-                                    <span className="text-red-500 line-through decoration-red-400 decoration-2">{formatPatientHistoryCurrency(originalDisplayedBalance)}</span>
-                                    <span className="ml-2 text-emerald-600">PHP 0</span>
+                                    <span className="text-red-500 line-through decoration-red-400 decoration-2"><CurrencyText value={formatPatientHistoryCurrency(originalDisplayedBalance)} /></span>
+                                    <span className="ml-2 text-emerald-600"><CurrencyText value={formatPatientHistoryCurrency(0)} /></span>
                                   </span>
                                 ) : (
-                                  <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}>{formatPatientHistoryCurrency(displayedBalance)}</span>
+                                  <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}><CurrencyText value={formatPatientHistoryCurrency(displayedBalance)} /></span>
                                 )}
                               </div>
                             </div>
@@ -4892,7 +4979,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                             <div className="flex flex-wrap items-center gap-2">
                                               <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
                                               <span className="font-semibold text-slate-400">-</span>
-                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
+                                                <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                              </span>
                                               {paymentDisplay.label ? (
                                                 <PaymentTransactionStatusBadge
                                                   display={paymentDisplay}
@@ -4909,7 +4998,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
+                                            <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                          </span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
@@ -5097,11 +5188,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
                       <CreditCard className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Total Paid</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xl font-black text-emerald-600">{formatPatientHistoryCurrency(paymentSummary.totalPaid)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Paid</span>
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-emerald-600">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.totalPaid)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Paid</span>
                       </div>
                     </div>
                   </div>
@@ -5112,11 +5205,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
                       <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Outstanding</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xl font-black text-red-600">{formatPatientHistoryCurrency(paymentSummary.outstanding)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Due</span>
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-red-600">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.outstanding)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Due</span>
                       </div>
                     </div>
                   </div>
@@ -5127,11 +5222,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
                       <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-black text-slate-500">Total Billed</p>
                       <div className="mt-1 flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xl font-black text-slate-950">{formatPatientHistoryCurrency(paymentSummary.totalBilled)}</span>
-                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Billed</span>
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-slate-950">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.totalBilled)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Billed</span>
                       </div>
                     </div>
                   </div>
@@ -5206,7 +5303,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className="text-2xl font-black text-emerald-600">
-                                    <span className={isInactivePayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                    <span className={isInactivePayment ? "text-gray-600" : ""}>
+                                      <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                    </span>
                                   </div>
                                   <div className="mt-2">
                                     <PaymentTransactionStatusBadge display={paymentDisplay} />

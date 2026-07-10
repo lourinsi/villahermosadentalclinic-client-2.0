@@ -409,7 +409,7 @@ const toBookingHistoryNumber = (value: unknown): number | null => {
 
 export function formatBookingHistoryMoney(value: unknown) {
   const numeric = Math.abs(toBookingHistoryNumber(value) ?? 0);
-  return `PHP ${numeric.toLocaleString()}`;
+  return `\u20b1${numeric.toLocaleString()}`;
 }
 
 export function getBookingPaymentAdjustment(log: any) {

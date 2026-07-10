@@ -273,7 +273,7 @@ export default function ImprovedAddStaffModal(props: AddStaffModalProps) {
                   </div>
                   {showCompensationFields ? (
                     <div className="space-y-2">
-                      <Label htmlFor="simple-staff-salary">Base Monthly Salary (PHP)</Label>
+                      <Label htmlFor="simple-staff-salary">Base Monthly Salary ({"\u20b1"})</Label>
                       <Input
                         id="simple-staff-salary"
                         type="number"

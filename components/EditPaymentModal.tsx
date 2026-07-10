@@ -75,14 +75,14 @@ const getPaymentMethodValue = (payment?: any) =>
 
 const getPaymentOptionLabel = (payment?: any) => {
   const id = getPaymentRecordId(payment) || "Payment";
-  const amount = payment?.amount != null ? ` - PHP ${Number(payment.amount || 0).toLocaleString()}` : "";
+  const amount = payment?.amount != null ? ` - \u20b1${Number(payment.amount || 0).toLocaleString()}` : "";
   const method = getPaymentMethodValue(payment);
 
   return `${id}${amount} (${method})`;
 };
 
 const formatPaymentAmount = (value: number) =>
-  `PHP ${Math.max(0, Number(value) || 0).toLocaleString(undefined, {
+  `\u20b1${Math.max(0, Number(value) || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
