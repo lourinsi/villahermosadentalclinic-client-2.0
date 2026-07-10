@@ -520,6 +520,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isScheduleTimePickerOpen, setIsScheduleTimePickerOpen] = useState(false);
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [selectedScheduleTime, setSelectedScheduleTime] = useState("");
+  const [selectedScheduleDuration, setSelectedScheduleDuration] = useState("30");
+  const [selectedScheduleStatus, setSelectedScheduleStatus] = useState("scheduled");
   const [isRepeatScheduleOpen, setIsRepeatScheduleOpen] = useState(false);
   const [isSavingRepeatSchedule, setIsSavingRepeatSchedule] = useState(false);
   const [repeatOption, setRepeatOption] = useState("next-week");
@@ -1421,7 +1423,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
-  const selectedScheduleDuration = String(normalizeBookingDuration(displayedSnapshot?.duration || 30));
   const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
   const repeatTargetDate = getRepeatTargetDate(displayedSnapshot?.date, repeatOption, customRepeatDate);
   const repeatTargetLabel = repeatTargetDate ? formatWordyDate(repeatTargetDate) : "";
@@ -1727,6 +1728,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
     setSelectedScheduleDate(resolveScheduleDateValue(displayedSnapshot?.date));
     setSelectedScheduleTime(String(displayedSnapshot?.time || ""));
+    setSelectedScheduleDuration(String(normalizeBookingDuration(displayedSnapshot?.duration || 30)));
+    setSelectedScheduleStatus(String(normalizeAppointmentStatus(displayedSnapshot?.status || "scheduled")));
     setIsChangeScheduleOpen(true);
   };
 
@@ -1736,6 +1739,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const handleScheduleTimeSelect = (time: string) => {
     setSelectedScheduleTime(time);
+  };
+
+  const handleScheduleDurationChange = (duration: string) => {
+    setSelectedScheduleDuration(duration);
+  };
+
+  const handleScheduleStatusChange = (status: string) => {
+    setSelectedScheduleStatus(status);
   };
 
   const handleSaveScheduleChange = async () => {
@@ -1762,6 +1773,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       const updated = await updateAppointment(String(appointmentId), {
         date: nextDate,
         time: nextTime,
+        duration: Number(selectedScheduleDuration) || 30,
+        status: normalizeAppointmentStatus(selectedScheduleStatus) as Appointment["status"],
       } as Partial<Appointment>);
 
       setDisplayedSnapshot((current: any) => ({
@@ -1769,6 +1782,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         ...updated,
         date: updated?.date ?? nextDate,
         time: updated?.time ?? nextTime,
+        duration: updated?.duration ?? (Number(selectedScheduleDuration) || 30),
+        status: updated?.status ?? selectedScheduleStatus,
       }));
       setLatestComparisonSnapshot(null);
       try {
@@ -2941,6 +2956,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         doctorLabel={displayedDoctorName || "No doctor assigned"}
         selectedDate={selectedScheduleDisplayDate}
         selectedTime={selectedScheduleTime}
+        selectedDuration={selectedScheduleDuration}
+        onDurationChange={handleScheduleDurationChange}
+        status={selectedScheduleStatus}
+        statusOptions={APPOINTMENT_STATUSES}
+        onStatusChange={handleScheduleStatusChange}
         onDateClick={() => setIsScheduleDatePickerOpen(true)}
         onTimeClick={() => setIsScheduleTimePickerOpen(true)}
         onSave={handleSaveScheduleChange}

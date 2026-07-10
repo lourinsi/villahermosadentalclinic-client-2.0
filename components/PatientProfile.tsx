@@ -1449,6 +1449,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [isRescheduleDatePickerOpen, setIsRescheduleDatePickerOpen] = useState(false);
   const [isRescheduleTimePickerOpen, setIsRescheduleTimePickerOpen] = useState(false);
+  const [rescheduleDuration, setRescheduleDuration] = useState("30");
+  const [rescheduleStatus, setRescheduleStatus] = useState("scheduled");
   const [isRescheduleSaving, setIsRescheduleSaving] = useState(false);
   const [updateTreatmentAppointment, setUpdateTreatmentAppointment] = useState<Appointment | HistoryAppointment | null>(null);
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
@@ -2427,6 +2429,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setRescheduleAppointment(sourceAppointment);
     setRescheduleDate(Number.isNaN(appointmentDate.getTime()) ? new Date() : appointmentDate);
     setRescheduleTime(String((sourceAppointment as any).time || "").trim());
+    setRescheduleDuration(String(normalizeBookingDuration((sourceAppointment as any).duration || 30)));
+    setRescheduleStatus(String(normalizeAppointmentStatus((sourceAppointment as any).status || "scheduled")));
     setIsRescheduleDatePickerOpen(false);
     setIsRescheduleTimePickerOpen(false);
   };
@@ -2437,6 +2441,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setRescheduleAppointment(null);
     setRescheduleDate(null);
     setRescheduleTime("");
+    setRescheduleDuration("30");
+    setRescheduleStatus("scheduled");
     setIsRescheduleDatePickerOpen(false);
     setIsRescheduleTimePickerOpen(false);
   };
@@ -2462,6 +2468,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const updated = await updateAppointment(appointmentId, {
         date,
         time: selectedTime,
+        duration: Number(rescheduleDuration) || 30,
+        status: normalizeAppointmentStatus(rescheduleStatus) as Appointment["status"],
       } as Partial<Appointment>);
 
       const patchAppointment = (apt: Appointment) =>
@@ -2471,6 +2479,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               ...updated,
               date: updated.date || date,
               time: updated.time || selectedTime,
+              duration: updated.duration ?? (Number(rescheduleDuration) || 30),
+              status: updated.status || rescheduleStatus,
             } as Appointment)
           : apt;
 
@@ -3655,7 +3665,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ? getHistoryAppointmentType(rescheduleAppointment as Appointment)
       : String((rescheduleAppointment as any).type || "Appointment")
     : "";
-  const rescheduleDuration = String((rescheduleAppointment as any)?.duration || "");
   const rescheduleAppointmentId = rescheduleAppointment?.id ? String(rescheduleAppointment.id) : "";
   const activeTreatmentOptions = treatmentOptions.filter((option): option is ServiceCatalogItem => option.isActive !== false);
   const updateTreatmentCurrentLabel = updateTreatmentAppointment
@@ -5263,6 +5272,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         doctorLabel={rescheduleDoctorName || "Unassigned"}
         selectedDate={rescheduleDate}
         selectedTime={rescheduleTime}
+        selectedDuration={rescheduleDuration}
+        onDurationChange={setRescheduleDuration}
+        status={rescheduleStatus}
+        statusOptions={APPOINTMENT_STATUSES}
+        onStatusChange={setRescheduleStatus}
         onDateClick={() => setIsRescheduleDatePickerOpen(true)}
         onTimeClick={() => setIsRescheduleTimePickerOpen(true)}
         onSave={handleSaveReschedule}

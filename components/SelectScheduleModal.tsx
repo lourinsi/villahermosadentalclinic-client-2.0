@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Calendar, Clock, Loader2, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
+
+type StatusOption = {
+  value: string;
+  label?: string;
+};
 
 type SelectScheduleModalProps = {
   children?: ReactNode;
@@ -24,6 +31,11 @@ type SelectScheduleModalProps = {
   doctorLabel?: string;
   selectedDate?: Date | string | null;
   selectedTime?: string | null;
+  selectedDuration?: number | string | null;
+  onDurationChange?: (duration: string) => void;
+  status?: string | null;
+  statusOptions?: StatusOption[];
+  onStatusChange?: (status: string) => void;
   onDateClick?: () => void;
   onTimeClick?: () => void;
   onSave?: () => void | Promise<void>;
@@ -39,6 +51,31 @@ const hasUsableDate = (date?: Date | string | null) => {
   return !Number.isNaN(parsed.getTime());
 };
 
+const parseDuration = (value?: number | string | null) => {
+  const duration = Number(value);
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+};
+
+const parseTimeValue = (time?: string | null) => {
+  if (!time) return null;
+  const [hours, minutes] = String(time).split(":").map(Number);
+  if (![hours, minutes].every((n) => Number.isFinite(n))) return null;
+  return { hours, minutes };
+};
+
+const formatEndTime = (time?: string | null, duration?: number | string | null) => {
+  const parsed = parseTimeValue(time);
+  const durationMinutes = parseDuration(duration);
+  if (!parsed || durationMinutes <= 0) return "";
+
+  const date = new Date();
+  date.setHours(parsed.hours, parsed.minutes, 0, 0);
+  date.setMinutes(date.getMinutes() + durationMinutes);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return formatTimeTo12h(`${hours}:${minutes}`);
+};
+
 export function SelectScheduleModal({
   children,
   open,
@@ -49,6 +86,11 @@ export function SelectScheduleModal({
   doctorLabel,
   selectedDate,
   selectedTime,
+  selectedDuration,
+  onDurationChange,
+  status,
+  statusOptions,
+  onStatusChange,
   onDateClick,
   onTimeClick,
   onSave,
@@ -71,6 +113,15 @@ export function SelectScheduleModal({
     ? formatWordyDate(selectedDate as Date | string, { fallback: "Select date" })
     : "Select date";
   const selectedTimeLabel = hasTime ? formatTimeTo12h(String(selectedTime)) : "Select time";
+  const durationValue = selectedDuration ? String(selectedDuration) : "";
+  const durationOptions = [30, 60, 90, 120];
+  const endTimeLabel = formatEndTime(selectedTime, durationValue);
+  const timeRangeLabel = hasTime && endTimeLabel
+    ? `${formatTimeTo12h(String(selectedTime))} - ${endTimeLabel}`
+    : "Choose a time and duration";
+  const showDurationInput = typeof onDurationChange === "function" || selectedDuration != null;
+  const showStatusSelect = Array.isArray(statusOptions) && statusOptions.length > 0 && typeof onStatusChange === "function";
+  const showExtraFields = showDurationInput || showStatusSelect;
   const resolvedCanSave = canSave && hasDate && hasTime && !isSaving;
 
   return (
@@ -139,6 +190,70 @@ export function SelectScheduleModal({
               <span className="mt-1 block text-base font-black text-slate-950">{selectedTimeLabel}</span>
             </button>
           </div>
+          {showExtraFields ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {showDurationInput ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <Label htmlFor="select-schedule-duration" className="text-xs font-black uppercase tracking-widest text-slate-500">
+                      Duration
+                    </Label>
+                    <Select
+                      value={durationValue}
+                      onValueChange={(value) => onDurationChange?.(value)}
+                      disabled={!hasDate || typeof onDurationChange !== "function"}
+                    >
+                      <SelectTrigger
+                        id="select-schedule-duration"
+                        className="mt-2.5 h-12 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-black text-slate-900 shadow-sm focus:ring-2 focus:ring-blue-500"
+                      >
+                        <SelectValue placeholder="Select duration" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border border-slate-200 shadow-2xl">
+                        {durationOptions.map((minutes) => (
+                          <SelectItem key={minutes} value={String(minutes)}>
+                            {minutes} minutes
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+
+                {showStatusSelect ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <Label htmlFor="select-schedule-status" className="text-xs font-black uppercase tracking-widest text-slate-500">
+                      Status
+                    </Label>
+                    <Select
+                      value={status || "scheduled"}
+                      onValueChange={(value) => onStatusChange?.(value)}
+                      disabled={!showStatusSelect}
+                    >
+                      <SelectTrigger
+                        id="select-schedule-status"
+                        className="mt-2.5 h-12 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-black text-slate-900 shadow-sm focus:ring-2 focus:ring-blue-500"
+                      >
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border border-slate-200 shadow-2xl">
+                        {(statusOptions || []).map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label || option.value}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <p className="font-black text-slate-900">Scheduled Window</p>
+                <p className="mt-1 text-sm text-slate-600">{timeRangeLabel}</p>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter className="border-t border-slate-100 px-5 py-4 sm:px-6">
