@@ -254,6 +254,14 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
   const getNavTourId = (label: string) =>
     `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const sidebarWidthClass = isSidebarCollapsed ? "md:!w-20" : "md:!w-20 xl:!w-64";
+  const sidebarLabelClass = isSidebarCollapsed ? "md:sr-only" : "md:sr-only xl:not-sr-only";
+  const sidebarItemLayoutClass = isSidebarCollapsed
+    ? "md:mx-auto md:h-12 md:w-12 md:justify-center md:px-0"
+    : "md:mx-auto md:h-12 md:w-12 md:justify-center md:px-0 xl:mx-2 xl:h-auto xl:w-auto xl:justify-start xl:px-4";
+  const sidebarFooterLayoutClass = isSidebarCollapsed
+    ? "md:!flex md:flex-col md:items-center md:gap-3 md:space-y-0"
+    : "md:!flex md:flex-col md:items-center md:gap-3 md:space-y-0 xl:!block xl:space-y-3";
 
   React.useEffect(() => {
     if (mustChangePassword) {
@@ -396,7 +404,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
                 <X className="h-5 w-5" />
               </Button>
             </div>
-            <nav className="min-h-0 flex-1 overflow-y-auto p-4">
+            <nav className="sleek-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
               <ul className="space-y-2">
                 {visibleNavItems.map((item) => {
                   const Icon = item.icon;
@@ -445,10 +453,10 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
 
       <aside
         data-tour-id="admin-sidebar"
-        className={`${theme.sidebar} hidden transition-[width] duration-300 md:flex ${isSidebarCollapsed ? "md:!w-20" : ""}`}
+        className={`${theme.sidebar} hidden transition-[width] duration-300 md:flex ${sidebarWidthClass}`}
       >
-        <div className={`${theme.title} flex items-center justify-between gap-2 ${isSidebarCollapsed ? "md:px-3" : ""}`}>
-          <span className={`truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{portalTitle}</span>
+        <div className={`${theme.title} flex items-center justify-between gap-2 md:!px-3 ${!isSidebarCollapsed ? "xl:!p-4" : ""}`}>
+          <span className={`truncate ${sidebarLabelClass}`}>{portalTitle}</span>
           <Button
             type="button"
             variant="ghost"
@@ -463,8 +471,8 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
             {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </Button>
         </div>
-        <nav className={`flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4 ${isSidebarCollapsed ? "md:px-2" : ""}`}>
-          <ul className={`flex gap-1 px-2 md:block md:px-0 ${isSidebarCollapsed ? "md:space-y-2" : "md:space-y-1"}`}>
+        <nav className={`sleek-scrollbar flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:px-2 md:py-4 ${!isSidebarCollapsed ? "xl:px-0" : ""}`}>
+          <ul className={`flex gap-1 px-2 md:block md:px-0 ${isSidebarCollapsed ? "md:space-y-2" : "md:space-y-2 xl:space-y-1"}`}>
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const itemHref = `${managementBasePath}${item.path}`;
@@ -476,35 +484,33 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
                     prefetch={false}
                     data-tour-id={getNavTourId(item.label)}
                     title={isSidebarCollapsed ? item.label : undefined}
-                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-2 md:gap-3 md:px-4 md:py-3 md:text-base ${
-                      isSidebarCollapsed ? "md:mx-auto md:h-12 md:w-12 md:justify-center md:px-0" : ""
-                    } ${
+                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:gap-3 md:py-3 md:text-base ${sidebarItemLayoutClass} ${
                       isActive
                         ? theme.navActive
                         : theme.navInactive
                     }`}
                   >
                     <Icon className="h-5 w-5 shrink-0" />
-                    <span className={`whitespace-nowrap ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{item.label}</span>
+                    <span className={`whitespace-nowrap ${sidebarLabelClass}`}>{item.label}</span>
                   </Link>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div className={`${theme.footer} ${isSidebarCollapsed ? "md:flex md:flex-col md:items-center md:gap-3 md:space-y-0" : ""}`}>
-          <div className={`${theme.userBox} relative ${isSidebarCollapsed ? "md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0" : ""}`}>
+        <div className={`${theme.footer} ${sidebarFooterLayoutClass}`}>
+          <div className={`${theme.userBox} relative md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0 ${!isSidebarCollapsed ? "xl:h-auto xl:w-auto xl:justify-start xl:space-x-2 xl:px-3" : ""}`}>
             <User className={theme.userIcon} />
-            <span className={`text-sm font-medium truncate ${isSidebarCollapsed ? "md:sr-only" : ""}`}>{user?.username || portalTitle}</span>
+            <span className={`truncate text-sm font-medium ${sidebarLabelClass}`}>{user?.username || portalTitle}</span>
             {mustChangePassword && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    className={`ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-300 text-amber-950 shadow-sm ring-1 ring-amber-100 ${isSidebarCollapsed ? "md:absolute md:-right-1 md:-top-1 md:ml-0 md:h-4 md:w-4" : ""}`}
+                    className={`ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-300 text-amber-950 shadow-sm ring-1 ring-amber-100 md:absolute md:-right-1 md:-top-1 md:ml-0 md:h-4 md:w-4 ${!isSidebarCollapsed ? "xl:static xl:ml-auto xl:h-5 xl:w-5" : ""}`}
                     tabIndex={0}
                     aria-label="Change your default password"
                   >
-                    <AlertTriangle className={`${isSidebarCollapsed ? "md:h-3 md:w-3" : "h-3.5 w-3.5"}`} />
+                    <AlertTriangle className={`md:h-3 md:w-3 ${!isSidebarCollapsed ? "xl:h-3.5 xl:w-3.5" : ""}`} />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side={isSidebarCollapsed ? "right" : "top"}>
@@ -516,11 +522,11 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           <Button
             onClick={handleLogout}
             variant="outline"
-            className={`${theme.logoutButton} ${isSidebarCollapsed ? "md:!w-10 md:justify-center md:px-0" : ""}`}
+            className={`${theme.logoutButton} md:!w-10 md:justify-center md:px-0 ${!isSidebarCollapsed ? "xl:!w-full xl:justify-start xl:px-4" : ""}`}
             title={isSidebarCollapsed ? "Logout" : undefined}
           >
-            <LogOut className={`w-4 h-4 ${isSidebarCollapsed ? "md:mr-0" : "mr-2"}`} />
-            <span className={isSidebarCollapsed ? "md:sr-only" : ""}>Logout</span>
+            <LogOut className={`h-4 w-4 md:mr-0 ${!isSidebarCollapsed ? "xl:mr-2" : ""}`} />
+            <span className={sidebarLabelClass}>Logout</span>
           </Button>
         </div>
       </aside>

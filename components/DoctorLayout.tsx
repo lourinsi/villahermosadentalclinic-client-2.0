@@ -159,12 +159,13 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="flex min-h-dvh flex-col bg-gray-100 md:h-screen md:flex-row">
-      <aside className="flex w-full flex-shrink-0 flex-col bg-violet-800 text-white md:h-full md:w-64">
-        <div className="border-b border-violet-700 px-4 py-3 text-lg font-bold md:p-4 md:text-2xl">
-          <span className="text-violet-200">Doctor</span> Portal
+      <aside className="flex w-full flex-shrink-0 flex-col bg-violet-800 text-white md:h-full md:w-20 xl:w-64">
+        <div className="border-b border-violet-700 px-4 py-3 text-lg font-bold md:px-3 md:py-4 md:text-2xl xl:p-4">
+          <span className="text-violet-200 md:sr-only xl:not-sr-only">Doctor</span>
+          <span className="md:sr-only xl:not-sr-only"> Portal</span>
         </div>
-        <nav className="flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:py-4">
-          <ul className="flex gap-1 px-2 md:block md:space-y-1 md:px-0">
+        <nav className="sleek-scrollbar flex-none overflow-x-auto py-2 md:flex-1 md:overflow-y-auto md:px-2 md:py-4 xl:px-0">
+          <ul className="flex gap-1 px-2 md:block md:space-y-2 md:px-0 xl:space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
@@ -173,24 +174,24 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
                   <Link
                     href={item.href}
                     prefetch={false}
-                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-2 md:gap-3 md:px-4 md:py-3 md:text-base ${
+                    className={`mx-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors md:mx-auto md:h-12 md:w-12 md:justify-center md:gap-3 md:px-0 md:py-3 md:text-base xl:mx-2 xl:h-auto xl:w-auto xl:justify-start xl:px-4 ${
                       isActive
                         ? "bg-violet-900 text-white"
                         : "text-violet-200 hover:bg-violet-700 hover:text-white"
                     }`}
                   >
                     <Icon className="h-5 w-5 shrink-0" />
-                    <span className="whitespace-nowrap">{item.label}</span>
+                    <span className="whitespace-nowrap md:sr-only xl:not-sr-only">{item.label}</span>
                   </Link>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div className="flex items-center gap-2 border-t border-violet-700 p-2 md:block md:space-y-3 md:p-4">
-          <div className="hidden min-w-0 items-center space-x-2 rounded-lg bg-violet-700 px-3 py-2 sm:flex">
+        <div className="flex items-center gap-2 border-t border-violet-700 p-2 md:!flex md:flex-col md:items-center md:gap-3 md:space-y-0 md:p-4 xl:!block xl:space-y-3">
+          <div className="hidden min-w-0 items-center space-x-2 rounded-lg bg-violet-700 px-3 py-2 sm:flex md:flex md:h-10 md:w-10 md:justify-center md:space-x-0 md:px-0 xl:h-auto xl:w-auto xl:justify-start xl:space-x-2 xl:px-3">
             <User className="w-4 h-4 text-violet-300" />
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1 md:sr-only xl:not-sr-only">
               <span className="text-sm font-medium block truncate">{user?.username || "Doctor"}</span>
               <span className="text-xs text-violet-300">Doctor</span>
             </div>
@@ -198,10 +199,10 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="w-auto shrink-0 justify-start bg-white text-violet-800 hover:bg-violet-100 md:w-full"
+            className="w-auto shrink-0 justify-start bg-white text-violet-800 hover:bg-violet-100 md:!w-10 md:justify-center md:px-0 xl:!w-full xl:justify-start xl:px-4"
           >
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
+            <LogOut className="h-4 w-4 md:mr-0 xl:mr-2" />
+            <span className="md:sr-only xl:not-sr-only">Logout</span>
           </Button>
         </div>
       </aside>

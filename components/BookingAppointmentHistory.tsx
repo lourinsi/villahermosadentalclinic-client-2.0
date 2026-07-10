@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Clock, Eye, History } from "lucide-react";
+import { Clock, Eye, History, X } from "lucide-react";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingPaymentAdjustmentAmountLabel,
@@ -181,6 +181,30 @@ const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
   };
 };
 
+const getPaymentAdjustmentDate = (log: BookingHistoryLog) => {
+  const source =
+    log?.paymentAdjustment ||
+    log?.paymentAdjustmentDetails ||
+    log?.newState?.paymentAdjustment ||
+    log?.newState?._paymentAdjustment ||
+    log?.appointmentSnapshot?.paymentAdjustment ||
+    log?.transaction?.paymentAdjustment ||
+    {};
+
+  return normalizeBookingPaymentDate(
+    source.newPaymentDate ||
+    source.updatedPaymentDate ||
+    source.paymentDate ||
+    log.paymentDate ||
+    log.newState?.paymentDate ||
+    log.newState?.paymentDetails?.date ||
+    log.newState?.transaction?.date ||
+    log.previousState?.paymentDate ||
+    log.date ||
+    log.changedAt
+  );
+};
+
 const getHistoryBadges = (log: BookingHistoryLog): HistoryBadge[] => {
   const badges: HistoryBadge[] = [];
   const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
@@ -346,11 +370,13 @@ const getHistoryDetail = (log: BookingHistoryLog, userRole?: string) => {
 const getHistoryPaymentDateLabel = (log: BookingHistoryLog) => {
   if (!getBookingPaymentAdjustment(log).isAdjustment && getHistoryPaymentAmount(log) <= 0) return "";
 
-  const paymentDate = normalizeBookingPaymentDate(
-    log.paymentDate ||
-    log.newState?.paymentDate ||
-    log.previousState?.paymentDate
-  );
+  const paymentDate = getBookingPaymentAdjustment(log).isAdjustment
+    ? getPaymentAdjustmentDate(log)
+    : normalizeBookingPaymentDate(
+      log.paymentDate ||
+      log.newState?.paymentDate ||
+      log.previousState?.paymentDate
+    );
 
   return formatBookingPaymentDateLabel(paymentDate);
 };
@@ -397,7 +423,11 @@ export default function BookingAppointmentHistory({
             ...appointmentToEdit,
             ...log.newState,
             amount: log.amount,
+            paymentDate: log.paymentDate || log.newState?.paymentDate || log.previousState?.paymentDate || log.date,
             paymentStatus: log.paymentStatus || log.newState?.paymentStatus,
+            paymentAdjustment: log.paymentAdjustment || log.paymentAdjustmentDetails || log.newState?.paymentAdjustment || log.newState?._paymentAdjustment,
+            previousPaymentAmount: log.previousPaymentAmount,
+            newPaymentAmount: log.newPaymentAmount,
             previousState: log.previousState,
             newState: log.newState,
             changeType: log.changeType,
@@ -412,7 +442,11 @@ export default function BookingAppointmentHistory({
             ...appointmentToEdit,
             ...log.previousState,
             amount: log.amount,
+            paymentDate: log.paymentDate || log.newState?.paymentDate || log.previousState?.paymentDate || log.date,
             paymentStatus: log.paymentStatus || log.newState?.paymentStatus || log.previousState?.paymentStatus,
+            paymentAdjustment: log.paymentAdjustment || log.paymentAdjustmentDetails || log.newState?.paymentAdjustment || log.newState?._paymentAdjustment,
+            previousPaymentAmount: log.previousPaymentAmount,
+            newPaymentAmount: log.newPaymentAmount,
             previousState: log.previousState,
             newState: log.newState,
             changeType: log.changeType,
@@ -467,24 +501,38 @@ export default function BookingAppointmentHistory({
       {showTrigger ? trigger : null}
 
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-        <DialogContent className="max-w-xl overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl">
-          <DialogHeader className="border-b bg-gray-50 p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
-                <History className="h-6 w-6" />
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[82dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.25rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[88dvh] sm:w-[min(38rem,calc(100vw-2rem))] sm:max-w-xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem] sm:border"
+        >
+          <DialogHeader className="shrink-0 border-b bg-gray-50 px-4 pb-3 pt-2.5 sm:p-6">
+            <div className="mx-auto mb-2.5 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-100 sm:h-12 sm:w-12 sm:rounded-2xl">
+                  <History className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <DialogTitle className="text-lg font-black text-gray-900">Appointment History</DialogTitle>
+                  <DialogDescription className="line-clamp-1 text-xs font-semibold text-gray-500 sm:text-sm">
+                    Recent appointment and payment changes
+                  </DialogDescription>
+                </div>
               </div>
-              <div>
-                <DialogTitle className="text-lg font-black text-gray-900">Appointment History</DialogTitle>
-                <DialogDescription className="text-sm font-semibold text-gray-500">
-                  Recent appointment and payment changes
-                </DialogDescription>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsHistoryDialogOpen(false)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Close appointment history"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
           </DialogHeader>
 
-          <div className="max-h-[60vh] space-y-3 overflow-y-auto bg-white p-6 pr-4 custom-scrollbar">
+          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-white p-3 sleek-scrollbar sm:space-y-3 sm:p-6 sm:pr-4">
             {mergedHistoryLogs.length === 0 ? (
-              <div className="rounded-2xl border-2 border-dashed border-gray-100 bg-gray-50 p-8 text-center">
+              <div className="rounded-2xl border-2 border-dashed border-gray-100 bg-gray-50 p-6 text-center sm:p-8">
                 <p className="text-sm font-black text-gray-900">No history yet</p>
                 <p className="mt-1 text-xs font-semibold text-gray-400">Changes will appear here after this appointment is updated.</p>
               </div>
@@ -496,15 +544,15 @@ export default function BookingAppointmentHistory({
                 const paymentDateLabel = getHistoryPaymentDateLabel(log);
 
                 return (
-                  <div key={log.id || `${log.logType}-${log.changedAt}-${index}`} className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                    <div className="flex items-start justify-between gap-4">
+                  <div key={log.id || `${log.logType}-${log.changedAt}-${index}`} className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3 sm:p-4">
+                    <div className="flex items-start justify-between gap-3 sm:gap-4">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-black text-gray-900">{getHistoryTitle(log)}</p>
+                          <p className="min-w-0 truncate text-sm font-black text-gray-900">{getHistoryTitle(log)}</p>
                           {badges.map((badge) => (
                             <span
                               key={`${badge.tone}-${badge.label}`}
-                              className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getHistoryBadgeClass(badge.tone)}`}
+                              className={`max-w-[8rem] truncate rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-tight sm:px-2.5 sm:py-1 ${getHistoryBadgeClass(badge.tone)}`}
                             >
                               {badge.label}
                             </span>
@@ -530,7 +578,7 @@ export default function BookingAppointmentHistory({
                       <button
                         type="button"
                         onClick={() => openSnapshot(log, index)}
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-400 transition-colors hover:border-blue-100 hover:bg-white hover:text-blue-600"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-400 transition-colors hover:border-blue-100 hover:bg-white hover:text-blue-600 sm:h-9 sm:w-9"
                         title="View snapshot"
                       >
                         <Eye className="h-4 w-4" />

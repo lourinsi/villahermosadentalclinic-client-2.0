@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import BookingAppointmentHistory from "./BookingAppointmentHistory";
+import BookingAppointmentHistory, { getMergedBookingLogs } from "./BookingAppointmentHistory";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
@@ -1000,7 +1000,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const prevScheduleLabel = prevState ? `${formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
   const nextScheduleLabel = nextState ? `${formatWordyDate(nextState.date, { fallback: String(nextState.date || "No date") })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
-  const changedByName = displayedSnapshot.changedByName || appointmentSnapshot?.changedByName;
+  const latestMergedHistoryLog = getMergedBookingLogs(historyLogs, paymentHistoryLogs)[0];
+  const latestMergedHistoryActor =
+    latestMergedHistoryLog?.changedByName ||
+    latestMergedHistoryLog?.changedBy ||
+    "";
+  const changedByName =
+    displayedSnapshot.changedByName ||
+    displayedSnapshot.changedBy ||
+    appointmentSnapshot?.changedByName ||
+    appointmentSnapshot?.changedBy ||
+    latestMergedHistoryActor ||
+    "";
+  const snapshotActorName = changedByName || "Unknown";
   const isPastSnapshot = snapshotState === "historical";
   // Consider the snapshot to be a "log view" only when it's actually historical.
   // Many snapshots reconstructed from logs include `previousState`/`newState` metadata
@@ -1082,15 +1094,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
   const shouldShowLatestPayment = !isPaymentAdjustmentSnapshot && !hasPaidInSnapshot && latestPaymentAmount > 0;
   const shouldShowPaymentLine = isPaymentAdjustmentSnapshot || hasPaidInSnapshot || shouldShowLatestPayment;
-  const snapshotPaymentLabel = isPaymentAdjustmentSnapshot
-    ? paymentAdjustment.delta < 0
-      ? "Payment Reduced"
-      : "Payment Adjusted"
-    : focusedPaymentAction === "deleted"
-      ? "Deleted Payment"
-      : focusedPaymentAction === "restored"
-        ? "Restored Payment"
-        : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
   const paymentSectionTitle = hasAppointmentLifecycleAction
     ? "Appointment Activity"
     : hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
@@ -1138,6 +1141,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     formatWordyDate(String(value || ""), {
       fallback: formatChangeValue(value || "No date"),
     });
+  const paymentAdjustmentDateRaw = isPaymentAdjustmentSnapshot
+    ? (
+      displayedSnapshot?.paymentAdjustment?.newPaymentDate ||
+      displayedSnapshot?.paymentAdjustment?.updatedPaymentDate ||
+      displayedSnapshot?.paymentAdjustment?.paymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.newPaymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.updatedPaymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.paymentDate ||
+      displayedSnapshot?.newState?.paymentDate ||
+      displayedSnapshot?.newState?.paymentDetails?.date ||
+      displayedSnapshot?.newState?.transaction?.date ||
+      displayedSnapshot?.paymentDate ||
+      displayedSnapshot?.paymentDetails?.date ||
+      displayedSnapshot?.transaction?.date ||
+      logDate ||
+      displayedSnapshot?.changedAt ||
+      appointmentSnapshot?.paymentDate ||
+      appointmentSnapshot?.newState?.paymentDate
+    )
+    : "";
   const paidInSnapshotPaymentDateRaw =
     (focusedPaymentSnapshot ? getPaymentLogDateValue(focusedPaymentSnapshot) || getPaymentLogFallbackDateValue(focusedPaymentSnapshot) : "") ||
     displayedSnapshot?.paymentDate ||
@@ -1160,11 +1183,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     appointmentSnapshot?.newState?.paymentDate ||
     latestComparisonSnapshot?.createdAt ||
     appointmentSnapshot?.createdAt;
-  const snapshotPaymentDateRaw = hasPaidInSnapshot
-    ? paidInSnapshotPaymentDateRaw
-    : shouldShowLatestPayment
-      ? latestPaymentDateRaw
-      : "";
+  const snapshotPaymentDateRaw = isPaymentAdjustmentSnapshot
+    ? paymentAdjustmentDateRaw
+    : hasPaidInSnapshot
+      ? paidInSnapshotPaymentDateRaw
+      : shouldShowLatestPayment
+        ? latestPaymentDateRaw
+        : "";
   const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
   const paymentLogRows = paymentLogEntries
     .map((payment) => {
@@ -1203,9 +1228,24 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     : shouldShowLatestPayment
       ? paymentLogRows[0] || null
       : null;
-  const additionalPaymentRows = paymentLogRows.filter((payment) =>
-    mainPaymentRow ? !isSamePaymentEntry(payment.raw, mainPaymentRow.raw) : true
-  );
+  const paymentAdjustmentDateKey = paymentAdjustmentDateRaw ? formatBookingDateKey(paymentAdjustmentDateRaw as any) : "";
+  let removedAdjustmentDuplicatePayment = false;
+  const additionalPaymentRows = paymentLogRows.filter((payment) => {
+    if (mainPaymentRow && isSamePaymentEntry(payment.raw, mainPaymentRow.raw)) return false;
+
+    if (isPaymentAdjustmentSnapshot && !removedAdjustmentDuplicatePayment && paymentAdjustment.newAmount !== null) {
+      const amountMatches = Number(payment.amount) === Number(paymentAdjustment.newAmount);
+      const paymentDateKey = formatBookingDateKey(getPaymentLogDateValue(payment.raw) as any);
+      const dateMatches = !paymentAdjustmentDateKey || !paymentDateKey || paymentDateKey === paymentAdjustmentDateKey;
+
+      if (amountMatches && dateMatches) {
+        removedAdjustmentDuplicatePayment = true;
+        return false;
+      }
+    }
+
+    return true;
+  });
   const snapshotPaymentMethodLabel = normalizeBookingPaymentMethod(
     hasFocusedPaymentSnapshot
       ? getPaymentLogMethodValue(focusedPaymentSnapshot)
@@ -1409,7 +1449,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     : 'This log has later changes. Use "Latest" for current details.';
 
   const patientChanged = isPatientChange(displayedSnapshot);
-  const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
+  const changeTag = patientChanged ? "Patient Changed" : "";
 
   const appointmentId = displayedAppointmentId;
   const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
@@ -1419,7 +1459,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const doctorRouteName = displayedDoctorName || "";
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
-  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
+  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
@@ -2291,29 +2331,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[94dvh] max-h-[94dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-[0_28px_90px_rgba(15,23,42,0.22)] data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[94vh] sm:w-[min(68rem,calc(100vw-2rem))] sm:max-w-[68rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[92dvh] max-h-[92dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.35rem] border border-slate-200 bg-white p-0 shadow-[0_28px_90px_rgba(15,23,42,0.16)] data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[94vh] sm:w-[min(68rem,calc(100vw-2rem))] sm:max-w-[68rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
         >
-          <DialogHeader className="shrink-0 bg-white px-5 pb-4 pt-3 sm:px-8 sm:pb-5 sm:pt-8">
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex min-w-0 flex-1 items-start gap-4">
+          <DialogHeader className="shrink-0 bg-white px-4 pb-4 pt-2 sm:px-10 sm:pb-6 sm:pt-8">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
+              <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
                 {snapshotHistory.length > 0 ? (
-                  <Button size="icon" variant="ghost" className="mt-1 h-11 w-11 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" title="Go back to previous snapshot" onClick={goBackSnapshot}>
+                  <Button size="icon" variant="ghost" className="mt-1 h-10 w-10 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-11 sm:w-11" title="Go back to previous snapshot" onClick={goBackSnapshot}>
                     <ArrowLeft className="h-5 w-5" />
                   </Button>
                 ) : null}
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-violet-600 bg-white text-violet-700">
-                  <Clock className="h-6 w-6" />
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-[3px] border-violet-600 bg-white text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.12)] sm:h-16 sm:w-16">
+                  <Clock className="h-7 w-7 sm:h-8 sm:w-8" />
                 </div>
-                <div className="min-w-0 pt-1">
-                  <DialogTitle className="flex flex-wrap items-center gap-x-5 gap-y-2 text-slate-950">
-                    <span className="text-2xl font-black tracking-tight sm:text-[2rem]">Snapshot</span>
+                <div className="min-w-0 pt-0.5 sm:pt-1">
+                  <DialogTitle className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-slate-950 sm:gap-x-5">
+                    <span className="truncate text-3xl font-black tracking-tight sm:text-[2rem]">Snapshot</span>
                     {showsLogSnapshotState ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className={`inline-flex cursor-help items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                            <StateIcon className="h-4 w-4" />
-                            {stateLabel}
+                          <span className={`inline-flex cursor-help items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-wider sm:gap-2 sm:px-4 sm:py-2 sm:text-xs ${stateBadgeClass}`}>
+                            <StateIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            {stateLabel.toUpperCase()}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-[220px] border-amber-200 bg-amber-50 text-center text-amber-800">
@@ -2321,27 +2361,32 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <span className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                        <StateIcon className="h-4 w-4" />
-                        {stateLabel}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-wider sm:gap-2 sm:px-4 sm:py-2 sm:text-xs ${stateBadgeClass}`}>
+                        <StateIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        {stateLabel.toUpperCase()}
                       </span>
                     )}
                   </DialogTitle>
-                  <DialogDescription className="mt-3 line-clamp-2 text-left text-sm font-semibold leading-6 text-slate-500 sm:text-base">
-                    {timestampPrefix} {snapshotDate}{changeSuffix ? ` - ${changeSuffix}` : ""}
+                  <DialogDescription className="mt-1.5 text-left text-sm font-semibold leading-5 text-slate-500 sm:mt-3 sm:text-base sm:leading-6">
+                    <span className="block truncate">{timestampPrefix} {snapshotDate}</span>
+                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-black uppercase tracking-wide text-slate-400 sm:text-[13px]">
+                        <span className="truncate">by {snapshotActorName}</span>
+                        {changeTag ? <span aria-hidden="true">-</span> : null}
+                        {changeTag ? <span className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700">{changeTag}</span> : null}
+                      </span>
                   </DialogDescription>
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-3 lg:justify-end">
+              <div className="flex shrink-0 items-center gap-2 sm:justify-end sm:gap-3">
                 {canOpenAppointment ? (
-                  <Button className="h-12 rounded-xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-200 transition-all hover:bg-violet-700 active:scale-95 sm:h-14 sm:px-7 sm:text-base" title="Open this appointment" onClick={handleOpenAppointment}>
-                    <CalendarIcon className="mr-2 h-5 w-5" />
+                  <Button className="h-12 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-200 transition-all hover:bg-violet-700 active:scale-95 sm:px-7 sm:text-base" title="Open this appointment" onClick={handleOpenAppointment}>
+                    <CalendarIcon className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                     Open
                   </Button>
                 ) : null}
                 {showsLogSnapshotState ? (
-                  <Button className="h-12 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 shadow-none transition-all hover:bg-amber-100 active:scale-95 sm:h-14" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
+                  <Button className="h-12 rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 shadow-none transition-all hover:bg-amber-100 active:scale-95" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${isFetchingLogs ? "animate-spin" : ""}`} />
                     Latest
                   </Button>
@@ -2372,143 +2417,143 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                     )}
                     triggerVariant="outline"
                     triggerSize="icon"
-                    triggerClassName="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14"
+                    triggerClassName="h-12 w-12 rounded-2xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
                     triggerIcon={<EllipsisVertical className="h-5 w-5" />}
                     ariaLabel="More appointment actions"
                   />
                 ) : null}
-                <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-xl text-slate-600 hover:bg-slate-100 sm:h-14 sm:w-14" aria-label="Close snapshot">
-                  <X className="h-7 w-7" />
+                <Button type="button" variant="outline" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-2xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" aria-label="Close snapshot">
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 pb-5 custom-scrollbar sm:px-8 sm:pb-7">
-            <div className="grid gap-4">
-              <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
-                <div className="flex flex-wrap gap-3">
-                  <div className="min-w-[11.5rem] rounded-full border border-emerald-100 bg-emerald-50/70 px-4 py-3 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
-                        <CalendarIcon className="h-5 w-5" />
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 pb-4 sleek-scrollbar sm:px-10 sm:pb-8">
+            <div className="grid gap-3 sm:gap-4">
+              <div className="grid gap-3 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
+                  <div className="min-w-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 shadow-sm sm:min-w-[11.5rem] sm:rounded-full sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100 sm:h-10 sm:w-10">
+                        <CalendarIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
                           {canChangeStatus ? (
                             <AppointmentStatusSelect
                               value={nextStatus || displayedSnapshot.status}
                               statuses={APPOINTMENT_STATUSES}
                               includeDeleted={effectiveRole === "admin"}
                               onChange={handleStatusChange}
-                              badgeClassName="text-base font-black capitalize"
+                              badgeClassName="max-w-[5.8rem] truncate text-sm font-black capitalize sm:max-w-none sm:text-base"
                             />
                           ) : (
-                            <p className={`truncate text-base font-black ${displayedStatusColors.textColor}`}>
+                            <p className={`truncate text-sm font-black sm:text-base ${displayedStatusColors.textColor}`}>
                               {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
                             </p>
                           )}
                           <CurrentChangeIndicator change={statusCurrentChange} />
                         </div>
                         {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
-                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
+                          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
                         ) : null}
                       </div>
                     </div>
                   </div>
 
-                  <div className="min-w-[10.5rem] rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-600 shadow-sm ring-1 ring-slate-200">
-                        <WalletCards className="h-5 w-5" />
+                  <div className="min-w-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm sm:min-w-[10.5rem] sm:rounded-full sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-600 shadow-sm ring-1 ring-slate-200 sm:h-10 sm:w-10">
+                        <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />
                       </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className={`truncate text-base font-black ${displayedPaymentStatusColors.textColor}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <p className={`truncate text-sm font-black sm:text-base ${displayedPaymentStatusColors.textColor}`}>
                             {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus)}
                           </p>
                           <CurrentChangeIndicator change={paymentStatusCurrentChange} />
                         </div>
                         {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
-                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
+                          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
                         ) : null}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-[1.35rem] border border-violet-100 bg-white p-4 shadow-[0_10px_30px_rgba(79,70,229,0.08)] sm:p-5">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-4">
-                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 ring-1 ring-violet-200">
-                        <Banknote className="h-6 w-6" />
+                <div className="rounded-2xl border border-violet-100 bg-white p-3 shadow-[0_10px_30px_rgba(79,70,229,0.08)] sm:rounded-[1.35rem] sm:p-5">
+                  <div className="flex items-center justify-between gap-3 sm:gap-4">
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 ring-1 ring-violet-200 sm:h-14 sm:w-14">
+                        <Banknote className="h-5 w-5 sm:h-6 sm:w-6" />
                       </span>
                       <div className="min-w-0">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-violet-700">Balance</Label>
-                        <p className="mt-1 text-sm font-bold text-slate-500">To be settled</p>
+                        <Label className="block text-[10px] font-black uppercase tracking-widest text-violet-700 sm:text-xs">Balance</Label>
+                        <p className="mt-0.5 truncate text-xs font-bold text-slate-500 sm:mt-1 sm:text-sm">To be settled</p>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2 text-right">
-                      <p className="text-3xl font-black tracking-tight text-violet-700 sm:text-4xl">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
+                      <p className="text-2xl font-black tracking-tight text-violet-700 sm:text-4xl">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
                       <CurrentChangeIndicator change={balanceCurrentChange} />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-[1.08fr_1fr]">
-                <div className="grid gap-4">
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex items-center gap-3 text-violet-700">
-                      <Users className="h-6 w-6" />
+              <div className="grid gap-4 lg:grid-cols-[1.08fr_1fr] lg:items-start">
+                <div className="order-2 grid gap-4 lg:order-1">
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex items-center gap-2 text-violet-700">
+                      <Users className="h-5 w-5 sm:h-6 sm:w-6" />
                       <Label className="text-sm font-black uppercase tracking-wide">People</Label>
                     </div>
-                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <div className="mt-4 grid overflow-hidden rounded-2xl border border-slate-100 bg-white sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={canGoToPatient ? goToPatient : undefined}
                         tabIndex={canGoToPatient ? 0 : -1}
                         aria-disabled={!canGoToPatient}
-                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 px-4 py-3 text-left transition-colors ${canGoToPatient ? "hover:bg-slate-50" : "cursor-default"}`}
+                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:px-5 sm:py-4 ${canGoToPatient ? "hover:bg-slate-50" : "cursor-default"}`}
                       >
-                        <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm" sizeClass="h-14 w-14 rounded-full" />
+                        <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-12 w-12 shrink-0 rounded-full border border-violet-100 shadow-sm sm:h-14 sm:w-14" sizeClass="h-12 w-12 rounded-full sm:h-14 sm:w-14" />
                         <div className="min-w-0 flex-1">
-                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Patient</Label>
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
-                            <p className="truncate text-lg font-black leading-tight text-slate-950">{patientName}</p>
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 sm:text-xs">Patient</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2 sm:mt-1">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{patientName}</p>
                             <CurrentChangeIndicator change={patientCurrentChange} />
                           </div>
                         </div>
-                        <ChevronRight className={`h-6 w-6 shrink-0 ${canGoToPatient ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                        <ChevronRight className={`h-5 w-5 shrink-0 sm:h-6 sm:w-6 ${canGoToPatient ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
                       </button>
 
                       <button
                         type="button"
-                        onClick={canAssignDoctor ? () => setIsAssignDoctorOpen(true) : canGoToDoctor ? goToDoctor : undefined}
-                        tabIndex={canAssignDoctor || canGoToDoctor ? 0 : -1}
-                        aria-disabled={!canAssignDoctor && !canGoToDoctor}
-                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 border-t border-slate-200 px-4 py-3 text-left transition-colors ${canAssignDoctor || canGoToDoctor ? "hover:bg-slate-50" : "cursor-default"}`}
+                        onClick={canAssignDoctor ? () => setIsAssignDoctorOpen(true) : undefined}
+                        tabIndex={canAssignDoctor ? 0 : -1}
+                        aria-disabled={!canAssignDoctor}
+                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 border-t border-slate-100 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:border-l sm:border-t-0 sm:px-5 sm:py-4 ${canAssignDoctor ? "hover:bg-slate-50" : "cursor-default"}`}
                       >
-                        <Avatar className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm">
+                        <Avatar className="h-12 w-12 shrink-0 rounded-full border border-violet-100 shadow-sm sm:h-14 sm:w-14">
                           <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
-                          <AvatarFallback className="rounded-full bg-violet-50 text-violet-700"><Stethoscope className="h-6 w-6" /></AvatarFallback>
+                          <AvatarFallback className="rounded-full bg-violet-50 text-violet-700"><Stethoscope className="h-5 w-5 sm:h-6 sm:w-6" /></AvatarFallback>
                         </Avatar>
                         <div className="min-w-0 flex-1">
-                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Doctor</Label>
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
-                            <p className={`truncate text-lg font-black leading-tight ${canAssignDoctor ? "text-violet-700" : "text-slate-950"}`}>{canAssignDoctor ? "Assign doctor" : displayedDoctorName || "Unassigned"}</p>
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 sm:text-xs">Doctor</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2 sm:mt-1">
+                            <p className={`truncate text-base font-black leading-tight sm:text-lg ${canAssignDoctor && !displayedDoctorName ? "text-violet-700" : "text-slate-950"}`}>{canAssignDoctor && !displayedDoctorName ? "Assign doctor" : displayedDoctorName || "Unassigned"}</p>
                             <CurrentChangeIndicator change={doctorCurrentChange} />
                           </div>
                         </div>
-                        <ChevronRight className={`h-6 w-6 shrink-0 ${canAssignDoctor || canGoToDoctor ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                        <ChevronRight className={`h-6 w-6 shrink-0 ${canAssignDoctor ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
                       </button>
                     </div>
                   </section>
 
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                      <div className="flex items-center gap-3">
-                        <CalendarIcon className="h-6 w-6" />
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-violet-700">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                         <Label className="text-sm font-black uppercase tracking-wide">Schedule</Label>
                       </div>
                       <Button
@@ -2516,109 +2561,118 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         variant="outline"
                         onClick={openChangeScheduleModal}
                         disabled={!canChangeSchedule}
-                        className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-10 rounded-full border-violet-100 bg-violet-50 px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 sm:px-5 sm:text-sm"
                       >
                         <Pencil className="mr-2 h-4 w-4" />
                         Change
                       </Button>
                     </div>
-                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                      <div className="min-w-0 sm:border-r sm:border-slate-200 sm:pr-6">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Date</Label>
-                        <div className="mt-2 flex items-start gap-2">
-                          <p className="break-words text-lg font-black leading-tight text-slate-950">{formattedDate}</p>
-                          <CurrentChangeIndicator change={dateCurrentChange} />
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="flex min-w-0 items-center gap-3 sm:border-r sm:border-slate-100 sm:pr-6">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <CalendarIcon className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Date</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{formattedDate}</p>
+                            <CurrentChangeIndicator change={dateCurrentChange} />
+                          </div>
                         </div>
                       </div>
-                      <div className="min-w-0">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Time Slot</Label>
-                        <div className="mt-2 flex items-start gap-2">
-                          <p className="break-words text-lg font-black leading-tight text-slate-950">{displayedTimeLabel}</p>
-                          <CurrentChangeIndicator change={timeCurrentChange} />
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <Clock className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Time Slot</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{displayedTimeLabel}</p>
+                            <CurrentChangeIndicator change={timeCurrentChange} />
+                          </div>
                         </div>
                       </div>
                     </div>
                   </section>
 
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                      <div className="flex items-center gap-3">
-                        <Stethoscope className="h-6 w-6" />
-                        <Label className="text-sm font-black uppercase tracking-wide">Service</Label>
-                      </div>
-                      {displayedToothNumbersText ? (
-                        <span className="inline-flex max-w-full shrink-0 items-center rounded-full bg-violet-100 px-4 py-1.5 text-sm font-black text-violet-700">
-                          Tooth # {displayedToothNumbersText}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-                          <Stethoscope className="h-7 w-7" />
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <Stethoscope className="h-6 w-6" />
                         </span>
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className="truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
-                          <CurrentChangeIndicator change={serviceCurrentChange} />
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Service</Label>
+                            <CurrentChangeIndicator change={serviceCurrentChange} />
+                          </div>
+                          <p className="mt-0.5 truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={openChangeTreatmentModal}
-                        disabled={!canChangeTreatment || isLoadingTreatmentOptions}
-                        className="h-11 rounded-full border-violet-100 bg-violet-50 px-6 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
-                        Change
-                      </Button>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+                        {displayedToothNumbersText ? (
+                          <span className="inline-flex max-w-full items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 ring-1 ring-violet-100">
+                            Tooth # {displayedToothNumbersText}
+                          </span>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={openChangeTreatmentModal}
+                          disabled={!canChangeTreatment || isLoadingTreatmentOptions}
+                          className="h-10 rounded-full border-violet-200 bg-white px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-50 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 sm:h-11 sm:px-6 sm:text-sm"
+                        >
+                          {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                          Change
+                        </Button>
+                      </div>
                     </div>
                   </section>
                 </div>
 
-                <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm lg:min-h-[28.25rem]">
+                <section className="order-1 rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5 lg:order-2">
                   <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                    <div className="flex items-center gap-3">
-                      <WalletCards className="h-6 w-6" />
+                    <div className="flex items-center gap-2">
+                      <WalletCards className="h-5 w-5 sm:h-6 sm:w-6" />
                       <Label className="text-sm font-black uppercase tracking-wide">Payment</Label>
                     </div>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={handleRecordPayment}
-                      className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800"
+                      className="h-10 rounded-full border-violet-200 bg-white px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-50 hover:text-violet-800 sm:px-5 sm:text-sm"
                     >
                       <Plus className="mr-2 h-4 w-4" />
                       Record Payment
                     </Button>
                   </div>
-                  <div className="mt-12">
+                  <div className="mt-5">
                     <div className="flex items-center gap-2">
-                      <Label className="block text-sm font-bold uppercase tracking-wide text-slate-500">Price</Label>
+                      <Label className="block text-xs font-bold uppercase tracking-wide text-slate-500 sm:text-sm">Price</Label>
                       <CurrentChangeIndicator change={priceCurrentChange} />
                     </div>
-                    <div className="mt-4">
+                    <div className="mt-2">
                       {displayedDiscountAmount > 0 ? (
                         <>
-                          <div className="text-lg font-bold text-slate-300 line-through">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
-                          <div className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
+                          <div className="text-sm font-bold text-slate-300 line-through sm:text-lg">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
+                          <div className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
                         </>
                       ) : (
-                        <span className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
+                        <span className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
                       )}
                     </div>
                   </div>
 
-                  <div className="mt-10 border-t border-slate-200 pt-8">
-                    <div className="flex items-center gap-3 text-slate-500">
-                      <History className="h-5 w-5" />
-                      <Label className="text-sm font-black uppercase tracking-wide">{paymentSectionTitle}</Label>
+                  <div className="mt-5 border-t border-slate-200 pt-4">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <History className="h-4 w-4 sm:h-5 sm:w-5" />
+                      <Label className="text-xs font-black uppercase tracking-wide sm:text-sm">{paymentSectionTitle}</Label>
                     </div>
                     {hasAppointmentLifecycleAction ? (
-                      <div className={`mt-5 rounded-2xl border p-4 ${appointmentLifecycleClass}`}>
+                      <div className={`mt-3 rounded-2xl border p-3 sm:p-4 ${appointmentLifecycleClass}`}>
                         <div className="flex items-start gap-3">
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm">
-                            <AppointmentLifecycleIcon className="h-5 w-5" />
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm sm:h-10 sm:w-10">
+                            <AppointmentLifecycleIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                           </span>
                           <div className="min-w-0">
                             <p className="text-xs font-black uppercase tracking-widest">{appointmentLifecycleLabel}</p>
@@ -2630,61 +2684,66 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         </div>
                       </div>
                     ) : shouldShowPaymentLine ? (
-                      <div className={`mt-5 rounded-2xl border p-4 ${mainPaymentCardClass}`}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <p className={`text-xs font-black uppercase tracking-widest ${mainPaymentTextClass}`}>{snapshotPaymentLabel}</p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
-                                  title="Payment actions"
-                                >
-                                  <EllipsisVertical className="h-3.5 w-3.5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-36">
-                                <DropdownMenuItem
-                                  onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
-                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                                >
-                                  <Pencil className="mr-2 h-3.5 w-3.5" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
-                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                                  className="text-red-600 focus:text-red-600"
-                                >
-                                  <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                      <div className={`mt-3 overflow-hidden rounded-2xl border p-3 sm:p-4 ${mainPaymentCardClass}`}>
+                        <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                          <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-black shadow-sm ring-1 ring-emerald-100 sm:h-14 sm:w-20">
+                            <span className={`max-w-full truncate px-1 ${mainPaymentTextClass}`}>{snapshotPaymentMethodLabel}</span>
                           </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                          <p className={`text-2xl font-black ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
-                          <p className={`text-sm font-bold ${mainPaymentMutedTextClass}`}>
-                            {snapshotPaymentDateLabel || "No date"}
-                          </p>
+                          <div className="grid min-w-0 grid-cols-2 gap-3">
+                            <div className="min-w-0">
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Amount</p>
+                              <p className={`mt-1 truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Date</p>
+                              <p className={`mt-1 truncate text-sm font-black sm:text-base ${mainPaymentTextClass}`}>
+                                {snapshotPaymentDateLabel || "No date"}
+                              </p>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-10 w-10 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
+                                title="Payment actions"
+                              >
+                                <EllipsisVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-36">
+                              <DropdownMenuItem
+                                onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
+                                disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                              >
+                                <Pencil className="mr-2 h-3.5 w-3.5" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
+                                disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                className="text-red-600 focus:text-red-600"
+                              >
+                                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                         {additionalPaymentRows.length > 0 ? (
-                          <div className="mt-4">
+                          <div className={`mt-3 border-t pt-3 ${mainPaymentDividerClass}`}>
                             <Button
                               type="button"
                               variant="ghost"
                               onClick={() => setShowAdditionalPayments((current) => !current)}
-                              className={`h-9 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
+                              className={`h-8 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
                             >
                               {showAdditionalPayments ? "Show less" : `See more (${additionalPaymentRows.length})`}
                             </Button>
                             {showAdditionalPayments ? (
-                              <div className={`mt-2 space-y-2 border-t pt-3 ${mainPaymentDividerClass}`}>
+                              <div className="mt-2 space-y-2">
                                 {additionalPaymentRows.map((payment) => {
                                   const paymentId = getEditablePaymentEntryId(payment.raw);
                                   const paymentUnavailableMessage = getPaymentEntryEditUnavailableMessage(payment.raw);
@@ -2739,7 +2798,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         ) : null}
                       </div>
                     ) : (
-                      <p className="mt-5 max-w-[18rem] text-base font-semibold italic leading-7 text-slate-500">
+                      <p className="mt-4 max-w-[18rem] text-sm font-semibold italic leading-6 text-slate-500 sm:mt-5 sm:text-base sm:leading-7">
                         No payment recorded for this snapshot.
                       </p>
                     )}
@@ -2747,58 +2806,63 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </section>
               </div>
 
-              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <div className="flex items-center gap-3 text-violet-700">
-                  <FileText className="h-6 w-6" />
+              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
+                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                   <Label className="text-sm font-black uppercase tracking-wide">Treatment Notes</Label>
                   <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
                 </div>
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
                 </div>
               </section>
 
               {displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason ? (
-                <section className="rounded-[1.25rem] border border-red-100 bg-red-50/60 p-4 shadow-sm sm:p-5">
-                  <div className="flex items-center gap-3 text-red-600">
-                    <AlertTriangle className="h-6 w-6" />
-                    <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
-                    <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
+                <section className="rounded-[1.35rem] border border-red-100 bg-red-50/60 p-4 shadow-[0_12px_35px_rgba(248,113,113,0.08)] sm:p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-red-600">
+                        <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
+                        <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
+                        <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-sm font-bold leading-6 text-red-700/80 sm:text-base">{displayedSnapshot.cancellationReason}</p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-red-300" />
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap break-words rounded-xl border border-red-100 bg-white px-4 py-3 text-base font-bold leading-7 text-red-700/80">{displayedSnapshot.cancellationReason}</p>
                 </section>
               ) : null}
 
-              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <div className="flex items-center gap-3 text-violet-700">
-                  <FileText className="h-6 w-6" />
+              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
+                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                   <Label className="text-sm font-black uppercase tracking-wide">Remarks</Label>
                   <CurrentChangeIndicator change={notesCurrentChange} />
                 </div>
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
                 </div>
               </section>
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 !flex-col !items-stretch !justify-center gap-3 border-t border-slate-200 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm sm:px-8">
+          <DialogFooter className="shrink-0 !flex-col !items-stretch !justify-center gap-2 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm sm:gap-3 sm:px-8 sm:pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pt-4">
             {canShowSnapshotActions ? (
-              <div className="-mx-5 -mt-4 mb-1 border-b border-amber-100 bg-amber-50/70 px-5 py-3 sm:-mx-8 sm:px-8">
-                <p className="flex items-start justify-center gap-2 text-center text-sm font-semibold leading-5 text-amber-700"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{actionNoteText}</p>
+              <div className="-mx-4 -mt-3 mb-1 border-b border-amber-100 bg-amber-50/70 px-4 py-2.5 sm:-mx-8 sm:-mt-4 sm:px-8 sm:py-3">
+                <p className="flex items-start justify-center gap-2 text-center text-xs font-semibold leading-5 text-amber-700 sm:text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{actionNoteText}</p>
               </div>
             ) : null}
             {canShowSnapshotActions ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Button className="h-12 w-full rounded-xl bg-emerald-600 text-base font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-5 w-5" />Accept</Button>
-                <Button className="h-12 w-full rounded-xl border-red-200 bg-white text-base font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-5 w-5" />Decline</Button>
+              <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+                <Button className="h-11 w-full rounded-xl bg-emerald-600 text-sm font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95 sm:h-12 sm:text-base" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Accept</Button>
+                <Button className="h-11 w-full rounded-xl border-red-200 bg-white text-sm font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95 sm:h-12 sm:text-base" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Decline</Button>
               </div>
             ) : null}
             {canRestoreNotification ? (
-              <Button className="h-12 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
+              <Button className="h-11 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95 sm:h-12" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
             ) : null}
             <div className="flex justify-center">
-              <Button onClick={() => onOpenChange(false)} variant="outline" className="h-14 min-w-[11rem] rounded-xl border-slate-200 bg-white px-8 text-base font-black text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900">Close</Button>
+              <Button onClick={() => onOpenChange(false)} variant="outline" className="h-12 min-w-[13rem] rounded-[1.35rem] border-violet-100 bg-violet-50/40 px-8 text-base font-black text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.10)] transition-all hover:bg-violet-50 hover:text-violet-800 sm:h-14 sm:min-w-[15rem]">Close</Button>
             </div>
           </DialogFooter>
         </DialogContent>

@@ -290,14 +290,14 @@ export function ServicesView() {
       </div>
 
       <Card className="border-gray-100 shadow-sm">
-        <CardHeader>
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg font-black">
             <Plus className="h-5 w-5 text-blue-600" />
             New Treatment
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(120px,0.35fr)_minmax(160px,0.5fr)_minmax(160px,0.5fr)_auto] md:items-end">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_minmax(110px,0.35fr)_minmax(140px,0.45fr)_minmax(150px,0.45fr)_auto] lg:items-end">
             <div className="space-y-2">
               <Label htmlFor="new-service-name">Treatment Name</Label>
               <Input
@@ -354,7 +354,7 @@ export function ServicesView() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={() => handleCreate()} disabled={isCreating} className="gap-2">
+            <Button onClick={() => handleCreate()} disabled={isCreating} className="gap-2 sm:col-span-2 lg:col-span-1">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
             </Button>

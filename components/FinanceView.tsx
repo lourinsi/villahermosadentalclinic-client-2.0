@@ -6,6 +6,7 @@ import { getPaymentStatusOptionWithColors, normalizePaymentStatus } from "@/lib/
 import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ConfirmDialog from "./ConfirmDialog";
+import DeletePaymentDialog from "./DeletePaymentDialog";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
@@ -2707,58 +2708,66 @@ export function FinanceView() {
       </div>
 
       {/* Key Financial Metrics */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Revenue</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-              <DollarSign className="h-6 w-6" />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4 xl:gap-6">
+        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
+            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Revenue</CardTitle>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11 sm:rounded-2xl">
+              <DollarSign className="h-5 w-5 sm:h-6 sm:w-6" />
             </span>
           </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricRevenue)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Expenses</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500">
-              <TrendingDown className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricExpenses)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Net Profit</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-              <TrendingUp className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricProfit)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">Profit Margin</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
-              <Package className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-              {metricMargin.toFixed(1)}%
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricRevenue)}</span>
+              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">{metricPeriodRange.label}</span>
             </div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
+            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Expenses</CardTitle>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-500 sm:h-11 sm:w-11 sm:rounded-2xl">
+              <TrendingDown className="h-5 w-5 sm:h-6 sm:w-6" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricExpenses)}</span>
+              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">{metricPeriodRange.label}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
+            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Net Profit</CardTitle>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 sm:h-11 sm:w-11 sm:rounded-2xl">
+              <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricProfit)}</span>
+              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">{metricPeriodRange.label}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
+            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">Profit Margin</CardTitle>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600 sm:h-11 sm:w-11 sm:rounded-2xl">
+              <Package className="h-5 w-5 sm:h-6 sm:w-6" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
+                {metricMargin.toFixed(1)}%
+              </span>
+              <span className="min-w-0 max-w-[7rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-600">{metricPeriodRange.label}</span>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -3431,48 +3440,51 @@ export function FinanceView() {
             </CardHeader>
 
             <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                      <Wallet className="h-7 w-7" />
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
+                      <Wallet className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Income</p>
-                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
-                        {formatCurrency(transactionSummary.income)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Total Income</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xl font-black text-emerald-600">{formatCurrency(transactionSummary.income)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Income</span>
+                      </div>
                     </div>
                   </div>
-                  <CheckCircle2 className="h-8 w-8 shrink-0 text-emerald-600" />
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                      <AlertTriangle className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
+                      <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Expenses</p>
-                      <p className="mt-1 truncate text-2xl font-black text-red-600">
-                        {formatCurrency(transactionSummary.expenses)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Total Expenses</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xl font-black text-red-600">{formatCurrency(transactionSummary.expenses)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Expenses</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-                      <FileText className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
+                      <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Net Total</p>
-                      <p className={`mt-1 truncate text-2xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>
-                        {formatCurrency(transactionSummary.net)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Net Total</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className={`min-w-0 flex-1 truncate text-xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>{formatCurrency(transactionSummary.net)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Net</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
               </div>
 
@@ -3786,13 +3798,18 @@ export function FinanceView() {
         loading={isDeletingExpense}
         onConfirm={handleDeleteExpense}
       />
-      <ConfirmDialog
+      <DeletePaymentDialog
         open={Boolean(paymentToDelete)}
         onOpenChange={(open) => !open && setPaymentToDelete(null)}
-        title="Delete Payment"
-        message="This will soft-delete the payment and update the appointment balance."
-        confirmLabel="Delete"
         loading={isDeletingPayment}
+        details={paymentToDelete ? {
+          amountLabel: formatCurrency(Math.abs(Number(paymentToDelete.amount) || 0)),
+          patientName: paymentToDelete.patientName || (paymentToDelete.appointmentSnapshot as any)?.patientName,
+          appointmentLabel: paymentToDelete.appointmentType || (paymentToDelete.appointmentSnapshot as any)?.type,
+          dateLabel: formatTransactionTimestamp(paymentToDelete.paymentDate || paymentToDelete.date),
+          method: paymentToDelete.method,
+          reference: paymentToDelete.transactionId || paymentToDelete.id,
+        } : null}
         onConfirm={handleDeletePaymentTransaction}
       />
       <FinanceInventoryModal

@@ -68,9 +68,9 @@ import {
   DropdownMenuItem
 } from "@/components/ui/dropdown-menu";
 
-import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import DeletePaymentDialog from "./DeletePaymentDialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -2123,12 +2123,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setIsModified(hasTrackedChanges);
   }, [hasTrackedChanges, setIsModified]);
 
-  // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
-  const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
+  // Local payment deletion state for PatientDetails (prefixed to avoid collisions)
   const [pdConfirmLoading, setPdConfirmLoading] = useState(false);
-  const [pdConfirmAction, setPdConfirmAction] = useState<null | (() => Promise<void>)>(null);
-  const [pdConfirmTitle, setPdConfirmTitle] = useState<string>("");
-  const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
+  const [pdPaymentToDelete, setPdPaymentToDelete] = useState<{
+    transaction: RecentTransaction;
+    paymentId: string;
+    appointmentId?: string;
+  } | null>(null);
 
   // New state for filters
   const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
@@ -3463,7 +3464,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const handleDeletePayment = async (paymentId: string, appointmentId?: string) => {
     if (!paymentId || paymentId.startsWith("legacy-")) {
       toast.error("This payment total comes from legacy appointment data and cannot be deleted here.");
-      return;
+      return false;
     }
 
     try {
@@ -3506,12 +3507,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         }));
         window.dispatchEvent(new CustomEvent("payments:updated"));
         refreshPatients();
+        return true;
       } else {
         toast.error(result.message || "Failed to delete payment");
+        return false;
       }
     } catch (err) {
       console.error("Error deleting payment:", err);
       toast.error("Error deleting payment");
+      return false;
     }
   };
 
@@ -3585,12 +3589,25 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    setPdConfirmTitle("Delete Payment");
-    setPdConfirmMessage("Are you sure you want to delete this payment? This will update the appointment balance. This action cannot be undone.  ");
-    setPdConfirmAction(() => async () => {
-      await handleDeletePayment(paymentId, txn.appointmentId || getTransactionAppointmentId(txn));
+    setPdPaymentToDelete({
+      transaction: txn,
+      paymentId,
+      appointmentId: txn.appointmentId || getTransactionAppointmentId(txn),
     });
-    setPdIsConfirmOpen(true);
+  };
+
+  const confirmDeletePaymentTransaction = async () => {
+    if (!pdPaymentToDelete) return;
+
+    try {
+      setPdConfirmLoading(true);
+      const deleted = await handleDeletePayment(pdPaymentToDelete.paymentId, pdPaymentToDelete.appointmentId);
+      if (deleted) {
+        setPdPaymentToDelete(null);
+      }
+    } finally {
+      setPdConfirmLoading(false);
+    }
   };
 
   const handleDeleteLegacyPayment = async (appointmentId: string) => {
@@ -5074,48 +5091,51 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </CardHeader>
 
             <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                      <CreditCard className="h-7 w-7" />
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
+                      <CreditCard className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Paid</p>
-                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
-                        {formatPatientHistoryCurrency(paymentSummary.totalPaid)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Total Paid</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xl font-black text-emerald-600">{formatPatientHistoryCurrency(paymentSummary.totalPaid)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Paid</span>
+                      </div>
                     </div>
                   </div>
-                  <CheckCircle className="h-8 w-8 shrink-0 text-emerald-600" />
+                  <CheckCircle className="h-5 w-5 shrink-0 text-emerald-600" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                      <AlertTriangle className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
+                      <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Outstanding</p>
-                      <p className="mt-1 truncate text-2xl font-black text-red-600">
-                        {formatPatientHistoryCurrency(paymentSummary.outstanding)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Outstanding</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xl font-black text-red-600">{formatPatientHistoryCurrency(paymentSummary.outstanding)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Due</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-                      <FileText className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
+                      <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Billed</p>
-                      <p className="mt-1 truncate text-2xl font-black text-slate-950">
-                        {formatPatientHistoryCurrency(paymentSummary.totalBilled)}
-                      </p>
+                      <p className="truncate text-xs font-black text-slate-500">Total Billed</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xl font-black text-slate-950">{formatPatientHistoryCurrency(paymentSummary.totalBilled)}</span>
+                        <span className="min-w-0 max-w-[5rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Billed</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
               </div>
 
@@ -5463,29 +5483,25 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         onSecondary={handleDiscardRecoveredDraft}
         loading={isRecoverySaving}
       />
-      {/* Record Payment Dialog is now a separate component */}
-      <ConfirmDialog
-        open={pdIsConfirmOpen}
-        onOpenChange={(open: boolean) => {
-          if (!open) setPdConfirmAction(null);
-          setPdIsConfirmOpen(open);
+      <DeletePaymentDialog
+        open={Boolean(pdPaymentToDelete)}
+        onOpenChange={(open) => {
+          if (!open && !pdConfirmLoading) setPdPaymentToDelete(null);
         }}
-        title={pdConfirmTitle || "Confirm"}
-        message={pdConfirmMessage || "Are you sure?"}
         loading={pdConfirmLoading}
-        onConfirm={async () => {
-          if (pdConfirmAction) {
-            try {
-              setPdConfirmLoading(true);
-              await pdConfirmAction();
-            } finally {
-              setPdConfirmLoading(false);
-              setPdConfirmAction(null);
-            }
-          }
-        }}
-        confirmLabel="Yes"
-        cancelLabel="No"
+        description="This will delete the payment and update the appointment balance. This action cannot be undone."
+        details={pdPaymentToDelete ? {
+          amountLabel: formatPatientHistoryCurrency(pdPaymentToDelete.transaction.amount),
+          patientName: pdPaymentToDelete.transaction.patientName,
+          appointmentLabel: pdPaymentToDelete.transaction.appointmentType,
+          dateLabel: formatPatientLogDate(
+            (pdPaymentToDelete.transaction as any).paymentDate || pdPaymentToDelete.transaction.date,
+            ""
+          ),
+          method: pdPaymentToDelete.transaction.method,
+          reference: pdPaymentToDelete.transaction.transactionId || pdPaymentToDelete.transaction.id,
+        } : null}
+        onConfirm={confirmDeletePaymentTransaction}
       />
 
       {/* Appointment Snapshot Dialog */}
