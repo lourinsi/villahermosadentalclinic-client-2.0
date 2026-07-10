@@ -4332,16 +4332,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
 
         <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-          <Card className={cardClass}>
-            <CardHeader className={cardHeaderClass}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+          <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <CardHeader className="px-5 py-5 sm:px-6 lg:px-7">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                     <ShieldCheck className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <CardTitle className="text-base font-bold text-slate-900">Consent Form</CardTitle>
-                    <p className="mt-1 text-sm font-medium text-slate-500">Receptionist-managed informed consent and signatures</p>
+                    <CardTitle className="text-xl font-black leading-tight text-slate-950 sm:text-2xl">Consent Form</CardTitle>
+                    <p className="mt-1 text-sm font-medium text-slate-600">Receptionist-managed informed consent and signatures</p>
                   </div>
                 </div>
                 {savedConsentForm.accepted && !consentFormHasChanges && (
@@ -4351,154 +4351,190 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-5 p-5 sm:p-6">
+            <CardContent className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6 lg:px-7 lg:pb-7">
               {isLoadingQuestionnaire ? (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
                   Loading consent form...
                 </div>
               ) : (
                 <>
-                  <div className="space-y-3">
-                    {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                  <div className="space-y-2">
+                    {CONSENT_ACKNOWLEDGEMENTS.map((item, index) => (
                       <label
                         key={item.id}
                         htmlFor={`patient-consent-${item.id}`}
-                        className="flex min-h-20 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/30"
+                        className="flex min-h-[74px] cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-violet-200 hover:bg-violet-50/30 sm:gap-4 sm:px-5"
                       >
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-50 text-sm font-black text-violet-600">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 space-y-1 pr-1">
+                          <span className="block text-sm font-black leading-5 text-slate-950">{item.title}</span>
+                          <span className="block text-sm font-medium leading-5 text-slate-600">{item.description}</span>
+                        </span>
                         <Checkbox
                           id={`patient-consent-${item.id}`}
                           checked={consentForm.acknowledgements[item.id]}
                           onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
                           disabled={isSavingConsent}
-                          className="mt-0.5 border-emerald-200 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600"
+                          className="shrink-0 rounded-full border-violet-400 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
                         />
-                        <span className="space-y-1">
-                          <span className="block text-sm font-bold leading-5 text-slate-900">{item.title}</span>
-                          <span className="block text-sm font-medium leading-6 text-slate-600">{item.description}</span>
-                        </span>
                       </label>
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <div className="space-y-2 lg:col-span-2">
-                      <Label htmlFor="patient-consent-signature-name">Patient / Parent / Guardian Signature Name *</Label>
-                      <Input
-                        id="patient-consent-signature-name"
-                        value={consentForm.patientSignatureName}
-                        onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
-                        disabled={isSavingConsent}
-                        placeholder="Type full legal name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="patient-consent-date">Date *</Label>
-                      <Input
-                        id="patient-consent-date"
-                        type="date"
-                        value={consentForm.signedDate}
-                        onChange={(event) => updateConsentField("signedDate", event.target.value)}
-                        disabled={isSavingConsent}
-                      />
-                    </div>
-                    <div className="space-y-2 lg:col-span-2">
-                      <Label htmlFor="patient-consent-guardian-name">Parent / Guardian Name</Label>
-                      <Input
-                        id="patient-consent-guardian-name"
-                        value={consentForm.guardianName}
-                        onChange={(event) => updateConsentField("guardianName", event.target.value)}
-                        disabled={isSavingConsent}
-                        placeholder="Required only when applicable"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="patient-consent-dentist-signature">Dentist / Signature</Label>
-                      <div className="flex gap-2">
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(210px,1fr)]">
+                        <div className="space-y-2">
+                          <Label htmlFor="patient-consent-signature-name" className="text-sm font-black text-slate-950">
+                            Patient / Parent / Guardian Full Name *
+                          </Label>
+                          <Input
+                            id="patient-consent-signature-name"
+                            value={consentForm.patientSignatureName}
+                            onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
+                            disabled={isSavingConsent}
+                            placeholder="Type full legal name"
+                            className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="patient-consent-date" className="text-sm font-black text-slate-950">Date *</Label>
+                          <Input
+                            id="patient-consent-date"
+                            type="date"
+                            value={consentForm.signedDate}
+                            onChange={(event) => updateConsentField("signedDate", event.target.value)}
+                            disabled={isSavingConsent}
+                            className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                          />
+                        </div>
+                      </div>
+                      {/* <div className="mt-3 space-y-2">
+                        <Label htmlFor="patient-consent-guardian-name" className="text-sm font-black text-slate-950">Parent / Guardian Name</Label>
                         <Input
-                          id="patient-consent-dentist-signature"
-                          value={consentForm.dentistSignatureName}
-                          onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
+                          id="patient-consent-guardian-name"
+                          value={consentForm.guardianName}
+                          onChange={(event) => updateConsentField("guardianName", event.target.value)}
                           disabled={isSavingConsent}
-                          placeholder="Dentist name"
-                          className="min-w-0 flex-1"
+                          placeholder="Required only when applicable"
+                          className="h-11 rounded-lg border-slate-200 bg-white font-medium"
                         />
+                      </div> */}
+                      <div className="mt-4 space-y-2">
+                        <Label className="text-sm font-black text-slate-950">Patient / Parent / Guardian Drawn Signature *</Label>
+                        <button
+                          type="button"
+                          onClick={() => setConsentSignatureModalTarget("patient")}
+                          disabled={isSavingConsent}
+                          className="flex min-h-[136px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {consentForm.patientSignatureImage ? (
+                            <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-[116px] max-w-full object-contain" />
+                          ) : (
+                            <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                              <PenLine className="h-4 w-4" />
+                              Add signature
+                            </span>
+                          )}
+                        </button>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 w-full rounded-lg border-slate-200 font-black"
+                            onClick={() => setConsentSignatureModalTarget("patient")}
+                            disabled={isSavingConsent}
+                          >
+                            <PenLine className="mr-2 h-4 w-4" />
+                            {consentForm.patientSignatureImage ? "Edit Signature" : "Open Signature Pad"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 w-full rounded-lg border-slate-200 font-black"
+                            onClick={() => updateConsentField("patientSignatureImage", "")}
+                            disabled={isSavingConsent || !consentForm.patientSignatureImage}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Clear Signature
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex min-h-full flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                          <UserIcon className="h-4 w-4" />
+                        </span>
+                        <Label htmlFor="patient-consent-dentist-signature" className="text-sm font-black text-slate-950">
+                          Dentist / Signature
+                        </Label>
+                      </div>
+                      <Input
+                        id="patient-consent-dentist-signature"
+                        value={consentForm.dentistSignatureName}
+                        onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
+                        disabled={isSavingConsent}
+                        placeholder="Dentist name"
+                        className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setConsentSignatureModalTarget("dentist")}
+                        disabled={isSavingConsent}
+                        className="mt-4 flex min-h-[88px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-3 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[96px]"
+                      >
+                        {consentForm.dentistSignatureImage ? (
+                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-[72px] max-w-full object-contain" />
+                        ) : (
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                            <PenLine className="h-4 w-4" />
+                            Add dentist signature
+                          </span>
+                        )}
+                      </button>
+                      <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2">
                         <Button
                           type="button"
                           variant="outline"
+                          size="sm"
                           onClick={() => setConsentSignatureModalTarget("dentist")}
                           disabled={isSavingConsent}
-                          className="h-10 shrink-0 rounded-lg px-3 font-bold"
+                          className="h-10 w-full rounded-lg border-slate-200 font-black"
                         >
                           <Upload className="mr-2 h-4 w-4" />
                           Upload
                         </Button>
-                      </div>
-                      {consentForm.dentistSignatureImage ? (
-                        <button
-                          type="button"
-                          onClick={() => setConsentSignatureModalTarget("dentist")}
-                          disabled={isSavingConsent}
-                          className="flex h-16 w-full items-center justify-center rounded-lg border border-slate-200 bg-white p-2 transition-colors hover:border-violet-200 hover:bg-violet-50/40 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-full max-w-full object-contain" />
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold">Patient / Parent / Guardian Drawn Signature *</Label>
-                    <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-4">
-                      <button
-                        type="button"
-                        onClick={() => setConsentSignatureModalTarget("patient")}
-                        disabled={isSavingConsent}
-                        className="flex h-40 w-full items-center justify-center rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/30 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {consentForm.patientSignatureImage ? (
-                          <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-full max-w-full object-contain" />
-                        ) : (
-                          <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
-                            <PenLine className="h-4 w-4" />
-                            Add signature
-                          </span>
-                        )}
-                      </button>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="w-full rounded-lg font-bold"
-                          onClick={() => setConsentSignatureModalTarget("patient")}
-                          disabled={isSavingConsent}
+                          onClick={() => updateConsentField("dentistSignatureImage", "")}
+                          disabled={isSavingConsent || !consentForm.dentistSignatureImage}
+                          className="h-10 w-full rounded-lg border-slate-200 font-black"
                         >
-                          <PenLine className="mr-2 h-4 w-4" />
-                          {consentForm.patientSignatureImage ? "Edit Signature" : "Open Signature Pad"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full rounded-lg font-bold"
-                          onClick={() => updateConsentField("patientSignatureImage", "")}
-                          disabled={isSavingConsent || !consentForm.patientSignatureImage}
-                        >
-                          Clear Signature
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Clear
                         </Button>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm font-medium text-slate-500">
-                      {isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}
+                  <div className="flex flex-col gap-4 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
+                      <span>{isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}</span>
                     </p>
                     <Button
                       type="button"
                       onClick={saveConsentForm}
                       disabled={isSavingConsent || !consentFormHasChanges}
-                      className="gap-2"
+                      className="h-11 gap-2 rounded-lg bg-violet-600 px-5 font-black text-white shadow-lg shadow-violet-200 hover:bg-violet-700"
                     >
                       {isSavingConsent ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
