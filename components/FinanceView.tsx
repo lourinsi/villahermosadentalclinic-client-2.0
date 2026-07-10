@@ -8,13 +8,14 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import DeleteExpenseDialog from "./DeleteExpenseDialog";
 import DeletePaymentDialog from "./DeletePaymentDialog";
 import { CurrencyText } from "./CurrencyAmount";
+import { MetricCardGrid, type MetricCardDefinition } from "./MetricCardGrid";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 
 import { toast } from "sonner";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -34,6 +35,7 @@ import {
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
+import ExpenseHistoryView from "./ExpenseHistoryView";
 import { FinanceExpensePaymentModal } from "./FinanceExpensePaymentModal";
 import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./FinanceInventoryChangeReviewModal";
 import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
@@ -71,10 +73,7 @@ import {
   type ReorderForm,
 } from "./financeModalOptions";
 import { 
-  DollarSign, 
   TrendingUp, 
-  TrendingDown, 
-  Package, 
   Download,
   FileText,
   ArrowUpRight,
@@ -814,6 +813,7 @@ export function FinanceView() {
   const canDeleteExpenses = normalizedEffectiveRole === "admin" || normalizedEffectiveRole === "receptionist";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
+  const [expenseSnapshot, setExpenseSnapshot] = useState<DetailedExpense | null>(null);
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
@@ -864,6 +864,8 @@ export function FinanceView() {
   const [patientImages, setPatientImages] = useState<Record<string, string | undefined>>({});
   const [financeHistoryLogs, setFinanceHistoryLogs] = useState<FinanceHistoryLog[]>([]);
   const [isFinanceHistoryLoading, setIsFinanceHistoryLoading] = useState(false);
+  const [financeHistoryError, setFinanceHistoryError] = useState<string | null>(null);
+  const financeHistoryRequestRef = useRef(0);
   const [financeRefreshKey, setFinanceRefreshKey] = useState(0);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -972,16 +974,19 @@ export function FinanceView() {
     entityType: FinanceHistoryEntityType,
     options: { entityId?: string; context?: string } = {}
   ) => {
+    const requestId = ++financeHistoryRequestRef.current;
     if (!options.entityId && entityType !== "payroll") {
       setFinanceHistoryLogs([]);
       setIsFinanceHistoryLoading(false);
+      setFinanceHistoryError(null);
       return;
     }
 
     setIsFinanceHistoryLoading(true);
+    setFinanceHistoryError(null);
     try {
       const params = new URLSearchParams();
-      params.set("limit", "150");
+      if (entityType !== "expense") params.set("limit", "150");
       if (options.context) params.set("context", options.context);
 
       const path = options.entityId
@@ -992,11 +997,13 @@ export function FinanceView() {
         `${path}${query ? `?${query}` : ""}`,
         `${entityType} history`
       );
-      setFinanceHistoryLogs(logs || []);
+      if (requestId === financeHistoryRequestRef.current) setFinanceHistoryLogs(logs || []);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load finance history";
+      if (requestId !== financeHistoryRequestRef.current) return;
       const routeUnavailable = /route not found|404/i.test(message);
       setFinanceHistoryLogs([]);
+      setFinanceHistoryError(message);
       if (routeUnavailable) {
         console.warn("Finance history route is not available from the current backend.");
       } else {
@@ -1004,13 +1011,15 @@ export function FinanceView() {
         toast.error(message);
       }
     } finally {
-      setIsFinanceHistoryLoading(false);
+      if (requestId === financeHistoryRequestRef.current) setIsFinanceHistoryLoading(false);
     }
   };
 
   const resetFinanceHistory = () => {
+    financeHistoryRequestRef.current += 1;
     setFinanceHistoryLogs([]);
     setIsFinanceHistoryLoading(false);
+    setFinanceHistoryError(null);
   };
 
   useEffect(() => {
@@ -1389,11 +1398,20 @@ export function FinanceView() {
     setSelectedExpense(expense || null);
     setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
     setExpenseFieldErrors({});
-    resetFinanceHistory();
-    if (mode === "edit" && expense?.id) {
-      void loadFinanceHistory("expense", { entityId: expense.id });
-    }
     setExpenseModalMode(mode);
+  };
+
+  const openExpenseSnapshot = (expense: DetailedExpense) => {
+    setExpenseSnapshot(expense);
+    resetFinanceHistory();
+    void loadFinanceHistory("expense", { entityId: expense.id });
+  };
+
+  const editExpenseFromSnapshot = (expense: DetailedExpense) => {
+    const liveExpense = detailedExpenses.find((item) => item.id === expense.id) || expenseSnapshot;
+    if (!liveExpense) return;
+    setExpenseSnapshot(null);
+    openExpenseModal("edit", liveExpense);
   };
 
   const closeExpenseModal = () => {
@@ -2402,7 +2420,7 @@ export function FinanceView() {
       }
 
       if (expense) {
-        openExpenseModal("edit", expense);
+        openExpenseSnapshot(expense);
         return;
       }
 
@@ -2784,75 +2802,46 @@ export function FinanceView() {
       </div>
 
       {/* Key Financial Metrics */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4 xl:gap-6">
-        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
-            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Revenue</CardTitle>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11 sm:rounded-2xl">
-              <DollarSign className="h-5 w-5 sm:h-6 sm:w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-                <CurrencyText value={formatCurrency(metricRevenue)} />
-              </span>
-              <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">{metricPeriodRange.label}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
-            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Expenses</CardTitle>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-500 sm:h-11 sm:w-11 sm:rounded-2xl">
-              <TrendingDown className="h-5 w-5 sm:h-6 sm:w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-                <CurrencyText value={formatCurrency(metricExpenses)} />
-              </span>
-              <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">{metricPeriodRange.label}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
-            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">{metricPeriodRange.title} Net Profit</CardTitle>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 sm:h-11 sm:w-11 sm:rounded-2xl">
-              <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-                <CurrencyText value={formatCurrency(metricProfit)} />
-              </span>
-              <span className="min-w-0 flex-1 truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">{metricPeriodRange.label}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-gray-100 bg-white shadow-md shadow-gray-200/40 sm:rounded-3xl">
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-3 pb-2 sm:p-4 sm:pb-2 md:p-6 md:pb-2">
-            <CardTitle className="min-w-0 truncate text-xs font-black text-slate-500 sm:text-sm">Profit Margin</CardTitle>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600 sm:h-11 sm:w-11 sm:rounded-2xl">
-              <Package className="h-5 w-5 sm:h-6 sm:w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0 md:p-6 md:pt-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="max-w-[calc(100%-2.5rem)] shrink-0 truncate text-2xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-                {metricMargin.toFixed(1)}%
-              </span>
-              <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-600">{metricPeriodRange.label}</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <MetricCardGrid
+        metrics={[
+          {
+            id: "revenue",
+            title: `${metricPeriodRange.title} Revenue`,
+            value: formatCurrency(metricRevenue),
+            helper: metricPeriodRange.label,
+            icon: Wallet,
+            iconClass: "bg-emerald-50 text-emerald-600",
+            pillClass: "bg-emerald-50 text-emerald-700",
+          },
+          {
+            id: "expenses",
+            title: `${metricPeriodRange.title} Expenses`,
+            value: formatCurrency(metricExpenses),
+            helper: metricPeriodRange.label,
+            icon: ArrowDownRight,
+            iconClass: "bg-rose-50 text-rose-600",
+            pillClass: "bg-rose-50 text-rose-700",
+          },
+          {
+            id: "net-profit",
+            title: `${metricPeriodRange.title} Net Profit`,
+            value: formatCurrency(metricProfit),
+            helper: metricPeriodRange.label,
+            icon: TrendingUp,
+            iconClass: "bg-blue-50 text-blue-600",
+            pillClass: "bg-blue-50 text-blue-700",
+          },
+          {
+            id: "profit-margin",
+            title: "Profit Margin",
+            value: `${metricMargin.toFixed(1)}%`,
+            helper: metricPeriodRange.label,
+            icon: ArrowUpRight,
+            iconClass: "bg-violet-50 text-violet-600",
+            pillClass: "bg-violet-50 text-violet-700",
+          },
+        ] satisfies MetricCardDefinition[]}
+      />
 
       <Tabs defaultValue="overview" className="space-y-6" onValueChange={() => fetchData()}>
         <TabsList className="grid h-auto w-full grid-cols-4 gap-2 overflow-x-auto rounded-none border-b border-gray-100 bg-transparent p-0">
@@ -3122,6 +3111,10 @@ export function FinanceView() {
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-wrap gap-2">
+                                  <Button variant="outline" size="sm" onClick={() => openExpenseSnapshot(expense)}>
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    View
+                                  </Button>
                                   {isDeletedExpense ? (
                                     <Button
                                       variant="outline"
@@ -3944,14 +3937,27 @@ export function FinanceView() {
         vendorOptions={expenseVendorOptions}
         canManageStatus={canManageExpenseStatus}
         fieldErrors={expenseFieldErrors}
-        historyLogs={financeHistoryLogs}
-        isHistoryLoading={isFinanceHistoryLoading}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         onCreateInventoryItem={() => openInventoryModal("create")}
         onOpenChange={(open) => !open && closeExpenseModal()}
         onFormChange={handleExpenseFormChange}
         onSave={handleSaveExpense}
+      />
+      <ExpenseHistoryView
+        open={Boolean(expenseSnapshot)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExpenseSnapshot(null);
+            resetFinanceHistory();
+          }
+        }}
+        currentExpense={expenseSnapshot}
+        historyLogs={financeHistoryLogs}
+        isHistoryLoading={isFinanceHistoryLoading}
+        historyError={financeHistoryError}
+        inventoryItems={inventoryData}
+        onEdit={(expense) => editExpenseFromSnapshot(expense as DetailedExpense)}
       />
       <FinanceExpensePaymentModal
         expense={expenseToPay}

@@ -9,7 +9,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
-import { Calendar, DollarSign, AlertCircle, Users, Clock, ChevronRight } from "lucide-react";
+import { Calendar, DollarSign, AlertCircle, Users, ChevronRight } from "lucide-react";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { NextAppointmentCard } from "./NextAppointmentCard";
@@ -22,7 +22,6 @@ import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appoi
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
-import { CurrencyText } from "./CurrencyAmount";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -365,59 +364,6 @@ export function Dashboard({ portal }: DashboardProps) {
     String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
   const managementBasePath = portal === "admin" && user?.role === "receptionist" ? "/receptionist" : `/${portal}`;
-  const mobileStats = portal === "admin"
-    ? [
-        {
-          title: `${dashboardPeriodRange.title} Expenses`,
-          value: `\u20b1${periodExpenses.toLocaleString()}`,
-          helper: "Paid expenses",
-          icon: DollarSign,
-          iconClass: "bg-rose-50 text-rose-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-        {
-          title: `${dashboardPeriodRange.title} Appointments`,
-          value: filteredAppointments.length.toString(),
-          helper: "Scheduled",
-          icon: Calendar,
-          iconClass: "bg-emerald-50 text-emerald-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-        {
-          title: "Appointment Requests",
-          value: pendingAppointmentsCount.toString(),
-          helper: "Action required",
-          icon: Clock,
-          iconClass: "bg-amber-50 text-amber-600",
-          pillClass: "bg-amber-50 text-amber-700",
-        },
-        {
-          title: `${dashboardPeriodRange.title} Revenue`,
-          value: `\u20b1${periodRevenue.toLocaleString()}`,
-          helper: "Recorded payments",
-          icon: DollarSign,
-          iconClass: "bg-violet-50 text-violet-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-      ]
-    : [
-        {
-          title: "Appointments",
-          value: filteredAppointments.length.toString(),
-          helper: "Current view",
-          icon: Calendar,
-          iconClass: "bg-violet-50 text-violet-600",
-          pillClass: "bg-violet-50 text-violet-700",
-        },
-        {
-          title: "Requests",
-          value: pendingAppointmentsCount.toString(),
-          helper: "Action required",
-          icon: AlertCircle,
-          iconClass: "bg-amber-50 text-amber-600",
-          pillClass: "bg-amber-50 text-amber-700",
-        },
-      ];
   const mobileVisitWeeks = [0.2, 0.47, 0.93, 0.58, 0.47, 0.32];
   const monthlyVisitTotal = currentMonthAppointments.length;
   const monthlyVisitAverage = Math.round((monthlyVisitTotal / Math.max(1, new Date().getDate())) * 10) / 10;
@@ -445,30 +391,6 @@ export function Dashboard({ portal }: DashboardProps) {
           </div>
         </div>
       )}
-
-      <div className="grid grid-cols-2 gap-2 sm:gap-3 md:hidden">
-        {mobileStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.title} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm sm:rounded-2xl sm:p-4">
-              <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 truncate text-[11px] font-black leading-snug text-slate-500 sm:text-xs">{stat.title}</p>
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:h-10 sm:w-10 ${stat.iconClass}`}>
-                  <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
-                </div>
-              </div>
-              <div className="mt-2 flex min-w-0 items-baseline gap-1.5">
-                <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black tracking-tight text-gray-950 sm:text-2xl">
-                  <CurrencyText value={stat.value} />
-                </span>
-                <span className={`min-w-0 max-w-[6.75rem] truncate rounded-full px-2 py-0.5 text-center text-[10px] font-black leading-4 sm:max-w-[8rem] sm:text-[11px] ${stat.pillClass}`}>
-                  {stat.helper}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
       <div className="hidden flex-col gap-4 md:flex md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
@@ -499,7 +421,6 @@ export function Dashboard({ portal }: DashboardProps) {
       {/* Stats Cards */}
       <div
         data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}
-        className="hidden md:block"
       >
         <DashboardStats
           portal={portal}

@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { History, WalletCards, X } from "lucide-react";
+import { WalletCards, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "./ui/select";
-import { FinanceHistoryDialog, type FinanceHistoryLog } from "./FinanceHistoryDialog";
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
@@ -37,8 +36,6 @@ type FinanceExpenseModalProps = {
   vendorOptions: string[];
   canManageStatus?: boolean;
   fieldErrors?: Partial<Record<keyof ExpenseForm, string>>;
-  historyLogs?: FinanceHistoryLog[];
-  isHistoryLoading?: boolean;
   originalInventoryItemId?: string;
   originalInventoryQuantity?: number;
   onCreateInventoryItem?: () => void;
@@ -84,8 +81,6 @@ export function FinanceExpenseModal({
   vendorOptions,
   canManageStatus = true,
   fieldErrors = {},
-  historyLogs = [],
-  isHistoryLoading = false,
   originalInventoryItemId = "",
   originalInventoryQuantity = 0,
   onCreateInventoryItem,
@@ -94,7 +89,6 @@ export function FinanceExpenseModal({
   onSave,
 }: FinanceExpenseModalProps) {
   const [isCreatingVendor, setIsCreatingVendor] = useState(false);
-  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
   const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
   const isCreateMode = mode === "create";
@@ -125,7 +119,6 @@ export function FinanceExpenseModal({
   useEffect(() => {
     if (!open) {
       setIsCreatingVendor(false);
-      setIsHistoryDialogOpen(false);
     }
   }, [open]);
 
@@ -241,19 +234,6 @@ export function FinanceExpenseModal({
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {!isCreateMode ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                    onClick={() => setIsHistoryDialogOpen(true)}
-                    aria-label="View expense history"
-                    title="View expense history"
-                  >
-                    <History className="h-4 w-4" />
-                  </Button>
-                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -551,15 +531,6 @@ export function FinanceExpenseModal({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <FinanceHistoryDialog
-        open={isHistoryDialogOpen}
-        onOpenChange={setIsHistoryDialogOpen}
-        entityType="expense"
-        title="Expense History"
-        description={`Recent expense changes${form.description ? ` for ${form.description}` : ""}`}
-        logs={historyLogs}
-        isLoading={isHistoryLoading}
-      />
     </>
   );
 }

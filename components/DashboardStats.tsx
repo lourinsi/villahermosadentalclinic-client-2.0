@@ -1,9 +1,12 @@
 "use client";
 
-import { Card, CardTitle } from "./ui/card";
 import { Users, Calendar, DollarSign, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
-import { CurrencyText } from "./CurrencyAmount";
+import { MetricCardGrid, type MetricCardDefinition } from "./MetricCardGrid";
+
+type DashboardUser = {
+  username?: string;
+} | null | undefined;
 
 interface DashboardStatsProps {
   portal: "admin" | "doctor" | "patient";
@@ -13,7 +16,7 @@ interface DashboardStatsProps {
   periodLabel?: string;
   periodRevenue?: number;
   periodExpenses?: number;
-  user: any;
+  user: DashboardUser;
 }
 
 export function DashboardStats({
@@ -26,40 +29,44 @@ export function DashboardStats({
   periodExpenses = 0,
   user
 }: DashboardStatsProps) {
-  const getStats = () => {
+  const getStats = (): MetricCardDefinition[] => {
     if (portal === "admin") {
       return [
         {
+          id: "expenses",
           title: `${periodLabel} Expenses`,
           value: `\u20b1${periodExpenses.toLocaleString()}`,
-          change: "Paid expenses",
+          helper: "Paid expenses",
           icon: DollarSign,
-          color: "text-red-600",
-          bgColor: "bg-red-50"
+          iconClass: "bg-rose-50 text-rose-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "appointments",
           title: `${periodLabel} Appointments`,
           value: monthlyAppointments.length.toString(),
-          change: "Scheduled",
+          helper: "Scheduled",
           icon: Calendar,
-          color: "text-green-600",
-          bgColor: "bg-green-50"
+          iconClass: "bg-emerald-50 text-emerald-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "appointment-requests",
           title: "Appointment Requests",
           value: pendingAppointmentsCount.toString(),
-          change: "Action required",
+          helper: "Action required",
           icon: AlertCircle,
-          color: "text-amber-600",
-          bgColor: "bg-amber-50"
+          iconClass: "bg-amber-50 text-amber-600",
+          pillClass: "bg-amber-50 text-amber-700",
         },
         {
+          id: "revenue",
           title: `${periodLabel} Revenue`,
           value: `\u20b1${periodRevenue.toLocaleString()}`,
-          change: "Recorded payments",
+          helper: "Recorded payments",
           icon: DollarSign,
-          color: "text-purple-600",
-          bgColor: "bg-purple-50"
+          iconClass: "bg-violet-50 text-violet-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         }
       ];
     } else if (portal === "doctor") {
@@ -70,38 +77,42 @@ export function DashboardStats({
 
       return [
         {
+          id: "my-patients",
           title: "My Patients",
           value: uniquePatients.toString(),
-          change: "Total seen",
+          helper: "Total seen",
           icon: Users,
-          color: "text-blue-600",
-          bgColor: "bg-blue-50"
+          iconClass: "bg-blue-50 text-blue-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "monthly-appointments",
           title: "This Month's Appointments",
           value: monthlyAppointments.length.toString(),
-          change: "Scheduled",
+          helper: "Scheduled",
           icon: Calendar,
-          color: "text-green-600",
-          bgColor: "bg-green-50"
+          iconClass: "bg-emerald-50 text-emerald-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "completed",
           title: "Completed",
           value: appointments
             .filter(apt => apt.doctor.toLowerCase() === user?.username?.toLowerCase() && apt.status === "completed")
             .length.toString(),
-          change: "Finished",
+          helper: "Finished",
           icon: CheckCircle2,
-          color: "text-emerald-600",
-          bgColor: "bg-emerald-50"
+          iconClass: "bg-emerald-50 text-emerald-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "appointment-requests",
           title: "Appointment Requests",
           value: pendingAppointmentsCount.toString(),
-          change: "Awaiting",
+          helper: "Awaiting",
           icon: AlertCircle,
-          color: "text-amber-600",
-          bgColor: "bg-amber-50"
+          iconClass: "bg-amber-50 text-amber-600",
+          pillClass: "bg-amber-50 text-amber-700",
         }
       ];
     } else {
@@ -111,36 +122,40 @@ export function DashboardStats({
 
       return [
         {
+          id: "total-appointments",
           title: "TOTAL APPOINTMENTS",
           value: appointments.length.toString(),
-          change: "All time",
+          helper: "All time",
           icon: Calendar,
-          color: "text-blue-600",
-          bgColor: "bg-blue-50"
+          iconClass: "bg-blue-50 text-blue-600",
+          pillClass: "bg-blue-50 text-blue-700",
         },
         {
+          id: "completed",
           title: "COMPLETED",
           value: completedCount.toString(),
-          change: "Finished",
+          helper: "Finished",
           icon: CheckCircle2,
-          color: "text-green-600",
-          bgColor: "bg-green-50"
+          iconClass: "bg-emerald-50 text-emerald-600",
+          pillClass: "bg-emerald-50 text-emerald-700",
         },
         {
+          id: "amount-paid",
           title: "AMOUNT PAID",
           value: `\u20b1${totalSpent.toLocaleString()}`,
-          change: "Total spent",
+          helper: "Total spent",
           icon: DollarSign,
-          color: "text-purple-600",
-          bgColor: "bg-purple-50"
+          iconClass: "bg-violet-50 text-violet-600",
+          pillClass: "bg-violet-50 text-violet-700",
         },
         {
+          id: "pending-balance",
           title: "PENDING BALANCE",
           value: `\u20b1${pendingBalance.toLocaleString()}`,
-          change: "Outstanding",
+          helper: "Outstanding",
           icon: AlertCircle,
-          color: "text-amber-600",
-          bgColor: "bg-amber-50"
+          iconClass: "bg-amber-50 text-amber-600",
+          pillClass: "bg-amber-50 text-amber-700",
         }
       ];
     }
@@ -148,35 +163,5 @@ export function DashboardStats({
 
   const stats = getStats();
 
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 xl:gap-6">
-      {stats.map((stat, index) => (
-        <Card key={index} className="relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-5 xl:p-6">
-          <div className="flex min-w-0 items-center gap-4 xl:gap-5">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full sm:h-16 sm:w-16 ${stat.bgColor} ${stat.color} transition-colors duration-300`}>
-              <stat.icon className="h-7 w-7 sm:h-8 sm:w-8" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <CardTitle className="min-w-0 truncate text-sm font-black uppercase tracking-wider text-slate-400 sm:text-base xl:text-lg">
-                {stat.title}
-              </CardTitle>
-              <div className="mt-3 flex min-w-0 items-center gap-3">
-                <span className="max-w-[calc(100%-2.25rem)] shrink-0 truncate text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">
-                  <CurrencyText value={stat.value} />
-                </span>
-                <span className={`min-w-0 max-w-[10rem] truncate rounded-full px-3 py-1 text-sm font-black ${
-                  stat.title.toUpperCase() === "APPOINTMENT REQUESTS" || stat.title.toUpperCase() === "PENDING BALANCE"
-                    ? "bg-amber-50 text-amber-600"
-                    : "bg-emerald-50 text-emerald-600"
-                }`}>
-                  {stat.change}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 border-t border-slate-100" />
-        </Card>
-      ))}
-    </div>
-  );
+  return <MetricCardGrid metrics={stats} />;
 }
