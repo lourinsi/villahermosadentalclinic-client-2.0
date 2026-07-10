@@ -13,7 +13,6 @@ import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
@@ -50,8 +49,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentTime,
     newAppointmentPatientId,
     newAppointmentDoctorName,
-    newAppointmentCreationMode,
-    selectedAppointmentInitialStep
+    newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -77,20 +75,20 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     confirmApprovalAction,
   } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
 
-  const handleEditAppointment = async (appointmentId: string, options?: { initialStep?: BookingInitialStep }) => {
+  const handleEditAppointment = async (appointmentId: string) => {
     console.log(`[DoctorLayout] Attempting to edit appointment: ${appointmentId}`);
     try {
-      await openEditModalById(appointmentId, false, false, options?.initialStep);
+      await openEditModalById(appointmentId);
     } catch (error) {
       console.error(`[DoctorLayout] Error in handleEditAppointment:`, error);
       toast.error("Appointment not found or could not be loaded");
     }
   };
 
-  const handleOpenSnapshotAppointment = async (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    await handleEditAppointment(appointmentId, options);
+    await handleEditAppointment(appointmentId);
   };
 
   const isSnapshotAppointmentOpen = Boolean(
@@ -279,7 +277,6 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
             defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
             doctorName={newAppointmentDoctorName}
             appointmentCreationMode={newAppointmentCreationMode}
-            initialStep={selectedAppointmentInitialStep}
           />
         )}
       </div>

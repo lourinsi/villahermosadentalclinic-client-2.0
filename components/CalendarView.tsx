@@ -62,7 +62,6 @@ import {
   getStatusBorderColorClass,
   getStatusSoftBgColorClass,
 } from "@/lib/status-colors";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 
 const COMPACT_TOOLBAR_WIDTH = 1280;
 
@@ -126,7 +125,7 @@ interface CalendarViewProps {
   isLoadingOverride?: boolean;
   onCreateAppointment?: (date?: Date, time?: string, doctorName?: string) => void;
   onOpenAppointment?: (appointment: Appointment) => void;
-  onOpenSnapshotAppointment?: (appointment: Appointment, options?: { initialStep?: BookingInitialStep }) => void;
+  onOpenSnapshotAppointment?: (appointment: Appointment) => void;
 }
 
 export function CalendarView({
@@ -346,7 +345,7 @@ export function CalendarView({
     }
   }, [updateAppointment]);
 
-  const handleOpenSnapshotAppointment = useCallback((appointmentId: string, appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = useCallback((appointmentId: string, appointmentSnapshot?: any) => {
     const appointment =
       displayedAppointments.find((item) => String(item.id) === String(appointmentId)) ||
       appointmentSnapshot;
@@ -355,11 +354,11 @@ export function CalendarView({
     if (!appointment) return;
 
     if (onOpenSnapshotAppointment) {
-      onOpenSnapshotAppointment(appointment, options);
+      onOpenSnapshotAppointment(appointment);
       return;
     }
 
-    openEditModal(appointment, false, false, options?.initialStep);
+    openEditModal(appointment);
   }, [displayedAppointments, onOpenSnapshotAppointment, openEditModal, resetAppointmentSnapshot, setIsAppointmentHistoryOpen]);
   const isSnapshotAppointmentOpen = Boolean(
     isEditModalOpen &&

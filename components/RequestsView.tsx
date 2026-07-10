@@ -82,7 +82,6 @@ import {
   normalizePaymentStatus,
 } from "@/lib/status-colors";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -167,7 +166,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     handleViewAppointment,
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot([...appointments, ...requests, ...history]);
-  const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment) => {
     const appointment = [...appointments, ...requests, ...history].find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
@@ -177,12 +176,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       : appointment;
 
     if (appointmentToOpen) {
-      openEditModal(appointmentToOpen, false, false, options?.initialStep);
+      openEditModal(appointmentToOpen);
       return;
     }
 
     try {
-      await openEditModalById(appointmentId, false, false, options?.initialStep);
+      await openEditModalById(appointmentId);
     } catch {
       toast.error("Appointment not found or could not be loaded");
     }

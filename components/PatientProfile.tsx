@@ -2386,7 +2386,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
-  const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any, options?: OpenBookingModalOptions) => {
+  const handleOpenSnapshotAppointment = (appointmentId: string, appointmentSnapshot?: any) => {
     const appointment =
       patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointmentId)) ||
       mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(appointmentId)) ||
@@ -2398,7 +2398,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    onOpenBookingModal?.(appointment as Appointment, options);
+    onOpenBookingModal?.(appointment as Appointment);
   };
 
   const openRescheduleModal = (appointment: Appointment | HistoryAppointment) => {

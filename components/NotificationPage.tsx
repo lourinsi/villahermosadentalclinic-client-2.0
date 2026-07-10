@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 const ApproveRejectDialog = dynamic(() => import("@/components/ApproveRejectDialog"), { ssr: false });
 
 type Portal = "patient" | "doctor" | "admin";
@@ -84,17 +83,17 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     confirmApprovalAction,
   } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
 
-  const handleReschedule = async (appointmentId: string, options?: { initialStep?: BookingInitialStep }) => {
+  const handleReschedule = async (appointmentId: string) => {
     console.log(`[NotificationPage] Attempting to view/edit appointment: ${appointmentId}`);
     try {
-      await openEditModalById(appointmentId, portal === "patient", false, options?.initialStep);
+      await openEditModalById(appointmentId, portal === "patient");
     } catch (error) {
       console.error(`[NotificationPage] Error in handleReschedule:`, error);
       toast.error("Appointment not found or could not be loaded");
     }
   };
 
-  const handleOpenSnapshotAppointment = async (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
     // Mark that we're attempting to open the appointment editor from the
@@ -102,7 +101,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     // provider and will open when `openEditModalById` completes.
     setIsSnapshotAppointmentOpen(true);
     try {
-      await handleReschedule(appointmentId, options);
+      await handleReschedule(appointmentId);
     } catch (err) {
       // If opening failed, clear the local flag so UI reflects reality.
       setIsSnapshotAppointmentOpen(false);

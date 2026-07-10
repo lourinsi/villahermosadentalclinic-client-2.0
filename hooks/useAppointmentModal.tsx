@@ -3,7 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
-import { isPastAppointmentSchedule, type BookingCreationMode, type BookingInitialStep } from "@/components/sharedBookingLogic";
+import { BookingCreationMode, isPastAppointmentSchedule } from "@/components/sharedBookingLogic";
 import { useAppointments, Appointment, AppointmentFilters, DeleteAppointmentOptions } from "./useAppointments";
 
 interface AppointmentModalContextType {
@@ -15,7 +15,6 @@ interface AppointmentModalContextType {
   isPatientFieldReadOnly: boolean;
   isPaymentFlow: boolean;
   selectedAppointment: Appointment | null;
-  selectedAppointmentInitialStep?: BookingInitialStep;
   newAppointmentDate?: Date;
   newAppointmentTime?: string;
   newAppointmentPatientName?: string;
@@ -32,8 +31,8 @@ interface AppointmentModalContextType {
   openAddPatientModal: (options?: { publicBooking?: boolean }) => void;
   closeAddPatientModal: () => void;
   addPatientModalMode: "standard" | "publicBooking";
-  openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean, isPaymentFlow?: boolean, initialStep?: BookingInitialStep) => void;
-  openEditModalById: (id: string, isPatientReadOnly?: boolean, isPaymentFlow?: boolean, initialStep?: BookingInitialStep) => Promise<void>;
+  openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => void;
+  openEditModalById: (id: string, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => Promise<void>;
   closeEditModal: () => void;
   refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshPatients: () => void;
@@ -61,7 +60,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [isPatientFieldReadOnly, setPatientFieldReadOnly] = useState(false);
   const [isPaymentFlow, setIsPaymentFlow] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [selectedAppointmentInitialStep, setSelectedAppointmentInitialStep] = useState<BookingInitialStep | undefined>();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [lastAddedPatient, setLastAddedPatient] = useState<any | null>(null);
   const [lastAddedPatientAt, setLastAddedPatientAt] = useState<number | null>(null);
@@ -104,7 +102,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     setNewAppointmentTime(time);
     setNewAppointmentDoctorName(doctorName ?? "");
     setNewAppointmentPatientId(defaultPatientId);
-    setSelectedAppointmentInitialStep(undefined);
     // If a selected schedule has already passed, open the modal in 'past' creation mode.
     try {
       const creationMode: BookingCreationMode = isPastAppointmentSchedule(date, time) ? "past" : "standard";
@@ -119,7 +116,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     setCreateModalOpen(false);
     setNewAppointmentPatientId(undefined);
     setNewAppointmentCreationMode("standard");
-    setSelectedAppointmentInitialStep(undefined);
   }, []);
 
   const openScheduleModal = useCallback((patientName?: string, patientId?: string) => {
@@ -160,20 +156,19 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   }, []);
   const closeAddPatientModal = useCallback(() => setAddPatientModalOpen(false), []);
   
-  const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false, initialStep?: BookingInitialStep) => {
+  const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false) => {
     setSelectedAppointment(appointment);
     setPatientFieldReadOnly(isPatientReadOnly);
     setIsPaymentFlow(isPaymentFlowMode);
-    setSelectedAppointmentInitialStep(initialStep);
     setEditModalOpen(true);
   }, []);
 
-  const openEditModalById = useCallback(async (id: string, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false, initialStep?: BookingInitialStep) => {
+  const openEditModalById = useCallback(async (id: string, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false) => {
     // 1. Try to find in existing appointments
     const existing = appointments.find(a => String(a.id) === String(id));
     if (existing) {
       console.log(`[useAppointmentModal] Found appointment ${id} in local state.`);
-      openEditModal(existing, isPatientReadOnly, isPaymentFlowMode, initialStep);
+      openEditModal(existing, isPatientReadOnly, isPaymentFlowMode);
       return;
     }
 
@@ -196,7 +191,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
       const result = await response.json();
       if (result.success && result.data) {
         console.log(`[useAppointmentModal] Successfully fetched appointment ${id} from API.`);
-        openEditModal(result.data, isPatientReadOnly, isPaymentFlowMode, initialStep);
+        openEditModal(result.data, isPatientReadOnly, isPaymentFlowMode);
       } else {
         console.error(`[useAppointmentModal] Failed to fetch appointment ${id}:`, result.message);
         throw new Error(result.message || "Appointment not found");
@@ -212,7 +207,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     setSelectedAppointment(null);
     setPatientFieldReadOnly(false);
     setIsPaymentFlow(false);
-    setSelectedAppointmentInitialStep(undefined);
   }, []);
 
   const value = useMemo(() => ({
@@ -224,7 +218,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     isPatientFieldReadOnly,
     isPaymentFlow,
     selectedAppointment,
-    selectedAppointmentInitialStep,
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentPatientName,
@@ -265,7 +258,6 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     isPatientFieldReadOnly,
     isPaymentFlow,
     selectedAppointment,
-    selectedAppointmentInitialStep,
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentPatientName,

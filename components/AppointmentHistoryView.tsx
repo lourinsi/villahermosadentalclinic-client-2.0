@@ -18,6 +18,7 @@ import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import AppointmentPatientChoiceDialog from "./AppointmentPatientChoiceDialog";
+import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
 import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
@@ -46,7 +47,6 @@ import {
   normalizeBookingHistoryStatus,
   parseLocalDateOnly,
   findNextAvailableRepeatSlot,
-  type BookingInitialStep,
 } from "./sharedBookingLogic";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
@@ -61,17 +61,13 @@ import { TimePickerModal } from "./TimePickerModal";
 import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 import { CurrencyText } from "./CurrencyAmount";
 
-type OpenAppointmentOptions = {
-  initialStep?: BookingInitialStep;
-};
-
 interface AppointmentHistoryViewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appointmentSnapshot: any;
   logDate: string;
   onViewCurrent?: (appointmentId: string) => void;
-  onOpenAppointment?: (appointmentId: string, appointmentSnapshot?: any, options?: OpenAppointmentOptions) => void | Promise<void>;
+  onOpenAppointment?: (appointmentId: string, appointmentSnapshot?: any) => void;
   isAppointmentOpen?: boolean;
   isHistorical?: boolean;
   actionsDisabled?: boolean;
@@ -506,6 +502,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
   const [isAssignDoctorOpen, setIsAssignDoctorOpen] = useState(false);
   const [isPatientChoiceOpen, setIsPatientChoiceOpen] = useState(false);
+  const [isSelectPatientOpen, setIsSelectPatientOpen] = useState(false);
   const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
   const [isOpeningPaymentEdit, setIsOpeningPaymentEdit] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
@@ -590,6 +587,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setIsCustomRepeatDatePickerOpen(false);
       setIsChangeTreatmentOpen(false);
       setIsPatientChoiceOpen(false);
+      setIsSelectPatientOpen(false);
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
       setSelectedTreatmentPrice("");
@@ -2135,17 +2133,53 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
 
     setIsPatientChoiceOpen(false);
+    setIsSelectPatientOpen(true);
+  };
+
+  const handleSelectAppointmentPatient = async (patient: PatientSelectOption) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const nextPatientId = String(patient.id || "").trim();
+    const nextPatientName = String(patient.name || "").trim();
+    if (!nextPatientId || !nextPatientName) {
+      toast.error("Please select a valid patient");
+      return;
+    }
 
     try {
-      if (onOpenAppointment) {
-        await onOpenAppointment(String(appointmentId), displayedSnapshot, { initialStep: "patient" });
-      } else {
-        await openEditModalById(String(appointmentId), false, false, "patient");
-      }
-      onOpenChange(false);
+      const updated = await updateAppointment(String(appointmentId), {
+        patientId: nextPatientId,
+        patientName: nextPatientName,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        patientId: updated?.patientId ?? nextPatientId,
+        patientName: updated?.patientName ?? nextPatientName,
+        patient: updated?.patient ?? patient,
+        patientProfile: patient.profilePicture || patient.profilePictureUrl || current?.patientProfile,
+        patientProfilePicture: patient.profilePicture || patient.profilePictureUrl || current?.patientProfilePicture,
+      }));
+      setPatientRecord(patient);
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Patient updated");
     } catch (error) {
-      console.error("[AppointmentHistoryView] Failed to open patient selector:", error);
-      toast.error("Failed to open patient selector");
+      console.error("[AppointmentHistoryView] Failed to update patient:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update patient");
+      throw error;
     }
   };
 
@@ -2943,6 +2977,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         canOpenProfile={canGoToPatient}
         onSelectPatient={openPatientSelector}
         onOpenProfile={goToPatient}
+      />
+
+      <SelectPatientModal
+        open={isSelectPatientOpen}
+        onOpenChange={setIsSelectPatientOpen}
+        selectedPatientId={String(displayedPatientId || "")}
+        selectedPatientName={patientName}
+        canCreatePatients={canSelectAppointmentPatient}
+        onConfirm={handleSelectAppointmentPatient}
       />
 
       <Dialog

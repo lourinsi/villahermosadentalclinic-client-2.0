@@ -33,7 +33,6 @@ import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appo
 import AppointmentHistoryView from "@/components/AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { findDoctorForValue, formatDoctorDisplayName, normalizeDoctorIdentity } from "@/lib/doctor-identity";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 
 interface DoctorAvailabilityViewProps {
   doctorName: string;
@@ -99,11 +98,11 @@ export function DoctorAvailabilityView({
 
     openPatientBookingModal(date, time, resolvedDoctorName);
   }, [resolvedDoctorName, onBookSlot, openPatientBookingModal]);
-  const handleOpenSnapshotAppointment = useCallback((appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = useCallback((appointmentId: string) => {
     const appointment = appointments.find((item) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    if (appointment) openEditModal(appointment, portal === "patient", false, options?.initialStep);
+    if (appointment) openEditModal(appointment, portal === "patient");
   }, [appointments, openEditModal, portal, resetAppointmentSnapshot, setIsAppointmentHistoryOpen]);
   const isSnapshotAppointmentOpen = Boolean(
     isEditModalOpen &&

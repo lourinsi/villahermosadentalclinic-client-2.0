@@ -23,7 +23,6 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { CurrencyText } from "./CurrencyAmount";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -353,11 +352,11 @@ export function Dashboard({ portal }: DashboardProps) {
   };
 
   const headerText = getHeaderText();
-  const handleOpenSnapshotAppointment = (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenSnapshotAppointment = (appointmentId: string) => {
     const appointment = appointments.find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
-    if (appointment) openEditModal(appointment, portal === "patient", false, options?.initialStep);
+    if (appointment) openEditModal(appointment, portal === "patient");
   };
   const isSnapshotAppointmentOpen = Boolean(
     isEditModalOpen &&

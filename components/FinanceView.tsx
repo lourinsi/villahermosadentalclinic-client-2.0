@@ -12,7 +12,6 @@ import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
-import type { BookingInitialStep } from "./sharedBookingLogic";
 
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
@@ -853,7 +852,6 @@ export function FinanceView() {
   const [transactionLedgerMode, setTransactionLedgerMode] = useState<TransactionLedgerMode>("all");
   const [transactionDateSortDirection, setTransactionDateSortDirection] = useState<SortDirection>("desc");
   const [showDeletedTransactions, setShowDeletedTransactions] = useState(false);
-  const [showDeletedExpenses, setShowDeletedExpenses] = useState(false);
   const [metricPeriod, setMetricPeriod] = useState<FinanceMetricPeriod>("day");
   
   // State for fetched data
@@ -1040,8 +1038,6 @@ export function FinanceView() {
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);
     return detailedExpenses.filter((expense) => {
-      if (expense.deleted && !showDeletedExpenses) return false;
-
       const status = normalizeFilterValue(expense.status);
       const method = normalizeFilterValue(expense.paymentMethod);
       const selectedMethod = normalizeFilterValue(paymentMethodFilter);
@@ -1066,7 +1062,7 @@ export function FinanceView() {
 
       return String(right.id || right.description).localeCompare(String(left.id || left.description));
     });
-  }, [detailedExpenses, endDate, paymentMethodFilter, showDeletedExpenses, startDate, statusFilter, timePeriodFilter]);
+  }, [detailedExpenses, endDate, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
 
   const detailedExpenseById = useMemo(
     () => new Map(detailedExpenses.map((expense) => [String(expense.id), expense])),
@@ -2419,7 +2415,7 @@ export function FinanceView() {
     await handleViewAppointmentSnapshot(transaction);
   };
 
-  const handleOpenAppointment = async (appointmentId: string, _appointmentSnapshot?: any, options?: { initialStep?: BookingInitialStep }) => {
+  const handleOpenAppointment = async (appointmentId: string) => {
     if (!appointmentId) {
       toast.error("No appointment is linked to this snapshot");
       return;
@@ -2428,7 +2424,7 @@ export function FinanceView() {
     setLoadingAppointmentId(appointmentId);
     try {
       setIsAppointmentHistoryOpen(false);
-      await openEditModalById(appointmentId, false, false, options?.initialStep);
+      await openEditModalById(appointmentId);
     } catch (error) {
       console.error("Failed to open appointment:", error);
       toast.error(error instanceof Error ? error.message : "Failed to open appointment");
@@ -3036,16 +3032,6 @@ export function FinanceView() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {canDeleteExpenses ? (
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowDeletedExpenses((showDeleted) => !showDeleted)}
-                      className={showDeletedExpenses ? "border-gray-300 bg-gray-100 text-gray-800" : ""}
-                    >
-                      <RotateCcw className="mr-2 h-4 w-4" />
-                      {showDeletedExpenses ? "Hide Deleted" : "Show Deleted"}
-                    </Button>
-                  ) : null}
                   <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Paid With" />
@@ -3890,6 +3876,32 @@ export function FinanceView() {
                                       Restore
                                     </Button>
                                   )}
+                                  {transaction.type === "expense" && expenseForTransaction && !isDeletedExpense ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                        title="Edit expense"
+                                        onClick={() => openExpenseModal("edit", expenseForTransaction)}
+                                      >
+                                        <Edit className="h-5 w-5" />
+                                        <span className="sr-only">Edit Expense</span>
+                                      </Button>
+                                      {canDeleteExpenses ? (
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                          title="Delete expense"
+                                          onClick={() => openExpenseDeleteDialog(expenseForTransaction)}
+                                        >
+                                          <Trash2 className="h-5 w-5" />
+                                          <span className="sr-only">Delete Expense</span>
+                                        </Button>
+                                      ) : null}
+                                    </>
+                                  ) : null}
                                   {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id ? (
                                     <Button
                                       variant="outline"
