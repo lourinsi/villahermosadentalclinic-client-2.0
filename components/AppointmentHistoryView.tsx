@@ -60,6 +60,7 @@ import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
 import { CurrencyText } from "./CurrencyAmount";
+import { CurrentChangeIndicator, createCurrentFieldChange } from "./HistorySnapshotUI";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -80,9 +81,6 @@ interface AppointmentHistoryViewProps {
 }
 
 type SnapshotState = "historical" | "latest" | "current";
-type CurrentFieldChange = {
-  title: string;
-};
 type SnapshotAuditChange = {
   field: string;
   previousValue: string;
@@ -316,45 +314,6 @@ const normalizeComparableDate = (value: unknown) => {
 const formatChangeValue = (value: unknown) => {
   const text = String(value ?? "").trim();
   return text || "Not set";
-};
-
-const createCurrentFieldChange = (
-  fieldName: string,
-  snapshotValue: unknown,
-  currentValue: unknown,
-  snapshotLabel = formatChangeValue(snapshotValue),
-  currentLabel = formatChangeValue(currentValue),
-  normalize: (value: unknown) => string = normalizeComparableText
-): CurrentFieldChange | null => {
-  const normalizedCurrent = normalize(currentValue);
-  const normalizedSnapshot = normalize(snapshotValue);
-
-  if (currentValue === undefined || currentValue === null || normalizedCurrent === normalizedSnapshot) return null;
-
-  return {
-    title: `Current ${fieldName}: ${currentLabel}.`,
-  };
-};
-
-const CurrentChangeIndicator = ({ change }: { change?: CurrentFieldChange | null }) => {
-  if (!change) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200"
-          aria-label={change.title}
-          title={change.title}
-        >
-          <AlertTriangle className="h-3.5 w-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-[260px]">
-        {change.title}
-      </TooltipContent>
-    </Tooltip>
-  );
 };
 
 const getExplicitSnapshotPaymentAmount = (snapshot: any) =>

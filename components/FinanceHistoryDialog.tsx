@@ -52,7 +52,8 @@ type FinanceHistoryDialogProps = {
   onViewExpenseSnapshot?: (snapshot: ExpenseHistoricalSnapshot, log: FinanceHistoryLog) => void;
 };
 
-type FinanceHistoryChange = { key: string; label: string; before: string; after: string };
+export type FinanceHistoryChange = { key: string; label: string; before: string; after: string };
+type FinanceHistoryFormatOptions = { inventoryNames?: Record<string, string> };
 
 const currencyFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -147,7 +148,7 @@ const formatHistoryDate = (value: any, includeTime = false) => {
     : date.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" });
 };
 
-const formatValue = (entityType: FinanceHistoryEntityType, key: string, value: any, state?: Record<string, any>) => {
+export const formatFinanceHistoryValue = (entityType: FinanceHistoryEntityType, key: string, value: any, state?: Record<string, any>, options?: FinanceHistoryFormatOptions) => {
   if (!hasMeaningfulValue(value)) return "Not set";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (entityType === "expense" && key === "deletedAt") return formatHistoryDate(value, true);
@@ -156,13 +157,14 @@ const formatValue = (entityType: FinanceHistoryEntityType, key: string, value: a
   if (entityType === "expense" && key === "category") return formatOptionLabel(String(value), EXPENSE_CATEGORY_OPTIONS);
   if (entityType === "expense" && key === "status") return formatOptionLabel(String(value), EXPENSE_STATUS_OPTIONS);
   if (key === "paymentMethod") return formatOptionLabel(String(value), PAYMENT_METHOD_OPTIONS);
+  if (entityType === "expense" && key === "inventoryItemId") return options?.inventoryNames?.[String(value)] || "Linked inventory item";
   if (entityType === "inventory" && key === "quantity") return `${Number(value) || 0}${state?.unit ? ` ${state.unit}` : ""}`;
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 };
 
-export const getFinanceHistoryChanges = (entityType: FinanceHistoryEntityType, log: FinanceHistoryLog): FinanceHistoryChange[] => {
+export const getFinanceHistoryChanges = (entityType: FinanceHistoryEntityType, log: FinanceHistoryLog, options?: FinanceHistoryFormatOptions): FinanceHistoryChange[] => {
   const previous = log.previousState || {};
   const next = log.newState || {};
   const hidden = new Set(["id", "entityId", "salaryRecordId", "createdAt", "updatedAt"]);
@@ -174,8 +176,8 @@ export const getFinanceHistoryChanges = (entityType: FinanceHistoryEntityType, l
     .map((key) => ({
       key,
       label: formatLabel(key),
-      before: creation ? "Not set" : formatValue(entityType, key, previous[key], previous),
-      after: formatValue(entityType, key, next[key], next),
+      before: creation ? "Not set" : formatFinanceHistoryValue(entityType, key, previous[key], previous, options),
+      after: formatFinanceHistoryValue(entityType, key, next[key], next, options),
     }));
 };
 
