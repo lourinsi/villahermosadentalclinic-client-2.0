@@ -220,7 +220,8 @@ export default function ExpenseHistoryView({
 
             {isHistorical && changes.length ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-center gap-2 text-sm font-black text-amber-900"><History className="h-4 w-4" />Changes in this version</div><div className="mt-3 space-y-2">{changes.map((change) => <div key={change.key} className="grid gap-1 rounded-xl bg-white/80 px-3 py-2 text-xs sm:grid-cols-[8rem_1fr_auto_1fr] sm:items-center"><span className="font-black text-slate-800">{change.label}</span><span className="break-words font-semibold text-slate-500"><span className="mr-1 text-[9px] font-black uppercase tracking-wider text-slate-400 sm:hidden">Before</span>{change.before}</span><span className="hidden text-amber-400 sm:block">→</span><span className="break-words font-bold text-slate-800"><span className="mr-1 text-[9px] font-black uppercase tracking-wider text-amber-600 sm:hidden">After</span>{change.after}</span></div>)}</div></section> : null}
 
-            <section className="mt-4"><h3 className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Expense record</h3><div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            <section className="mt-4"><h3 className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Expense record</h3>
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               <Detail label="Expense ID / Reference" value={displayedSnapshot.id || "Not recorded"} icon={ReceiptText} />
               <Detail label="Expense date" value={formatDate(displayedSnapshot.date)} icon={CalendarDays} />
               <Detail label="Category" value={formatOptionLabel(displayedSnapshot.category, EXPENSE_CATEGORY_OPTIONS)} icon={Tag} />
@@ -232,12 +233,14 @@ export default function ExpenseHistoryView({
               <Detail label="Inventory quantity" value={displayedSnapshot.inventoryItemId ? `${Number(displayedSnapshot.inventoryQuantity) || 0}${inventory?.unit ? ` ${inventory.unit}` : ""}` : "Not linked"} icon={Link2} />
             </div></section>
 
-            <section className="mt-5 border-t border-slate-100 pt-4"><h3 className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Record lifecycle</h3><div className="grid gap-2.5 sm:grid-cols-2">
+            {/* <section className="mt-5 border-t border-slate-100 pt-4"><h3 className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Record lifecycle</h3>
+            <div className="grid gap-2.5 sm:grid-cols-2">
               <Detail label="Created" value={formatTimestamp(displayedSnapshot.createdAt)} icon={Clock3} />
               <Detail label="Last updated" value={formatTimestamp(displayedSnapshot.updatedAt)} icon={Clock3} />
               <Detail label="Deleted state" value={hasOwnValue(displayedSnapshot, "deleted") ? displayedSnapshot.deleted ? "Deleted" : "Active" : "Not recorded"} icon={ReceiptText} />
               <Detail label="Deleted at" value={formatTimestamp(displayedSnapshot.deletedAt, displayedSnapshot.deleted ? "Timestamp not stored" : "Not deleted")} icon={Clock3} />
-            </div></section>
+            </div>
+            </section> */}
           </div>
 
           <DialogFooter className="shrink-0 border-t border-slate-100 bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.06)] sm:px-6 sm:pb-4 sm:shadow-none"><Button variant="outline" className="h-11 w-full rounded-xl font-bold sm:w-auto" onClick={() => onOpenChange(false)}>Close</Button></DialogFooter>

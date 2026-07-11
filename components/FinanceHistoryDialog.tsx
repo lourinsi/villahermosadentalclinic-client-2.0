@@ -188,6 +188,22 @@ const getActionLabel = (action: string) => ACTION_LABELS[action] || formatLabel(
 const getActionBadgeClass = (action: string) => action.includes("delete") ? "border-red-200 bg-red-50 text-red-700" : action.includes("restore") || ["pay", "process"].includes(action) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : action.includes("create") ? "border-violet-200 bg-violet-50 text-violet-700" : "border-amber-200 bg-amber-50 text-amber-700";
 const getEntityLabel = (entityType: FinanceHistoryEntityType) => entityType === "expense" ? "Expense" : entityType === "inventory" ? "Inventory" : "Payroll";
 
+/** Expense history is intentionally summary-only; field-level changes belong to the snapshot view. */
+const getExpenseHistorySummary = (log: FinanceHistoryLog) => {
+  const explicitSummary = String(log.summary || "").trim();
+  if (explicitSummary) return explicitSummary;
+
+  const action = String(log.action || "").trim().toLowerCase();
+  if (action.includes("create")) return "Expense created";
+  if (action.includes("update")) return "Expense updated";
+  if (action.includes("pay")) return "Expense paid";
+  if (action.includes("delete")) return "Expense deleted";
+  if (action.includes("restore")) return "Expense restored";
+
+  const actionLabel = getActionLabel(action || "updated");
+  return `Expense ${actionLabel.toLowerCase()}`;
+};
+
 export function FinanceHistoryDialog({ open, onOpenChange, entityType, title, description, logs, isLoading = false, error, onViewExpenseSnapshot }: FinanceHistoryDialogProps) {
   const sortedLogs = entityType === "expense" ? getExpenseHistoryEntries(logs) : logs.slice().sort((a, b) => new Date(b.changedAt || 0).getTime() - new Date(a.changedAt || 0).getTime());
 
@@ -213,18 +229,38 @@ export function FinanceHistoryDialog({ open, onOpenChange, entityType, title, de
           ) : sortedLogs.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50 p-8 text-center"><p className="text-sm font-black text-slate-900">No history yet</p><p className="mt-1 text-xs font-semibold text-slate-400">Changes will appear here after this {getEntityLabel(entityType).toLowerCase()} record is updated.</p></div>
           ) : sortedLogs.map((log, index) => {
-            const changes = getFinanceHistoryChanges(entityType, log);
             const actor = log.changedByName || log.changedBy;
-            const amount = Number(log.newState?.amount ?? log.previousState?.amount ?? log.amount);
+            const rawAmount = log.newState?.amount ?? log.previousState?.amount ?? log.amount;
+            const amount = Number(rawAmount);
+            const hasAmount = entityType === "expense" && rawAmount !== undefined && rawAmount !== null && Number.isFinite(amount);
+
+            if (entityType === "expense") {
+              return (
+                <article key={log.id || `${log.action}-${log.changedAt}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="min-w-0 truncate text-sm font-black text-slate-950">{getExpenseHistorySummary(log)}</p>
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getActionBadgeClass(log.action)}`}>{getActionLabel(log.action)}</span>
+                        {hasAmount ? <span className="rounded-full border border-red-100 bg-white px-2.5 py-1 text-[10px] font-black text-red-700"><CurrencyText value={formatCurrency(amount)} /></span> : null}
+                      </div>
+                      <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"><Clock className="h-3 w-3" /><span>{formatTimestamp(log.changedAt)}</span>{actor ? <span>— {actor}{log.changedByRole ? ` · ${log.changedByRole}` : ""}</span> : null}</p>
+                    </div>
+                    {onViewExpenseSnapshot ? <button type="button" onClick={() => { onOpenChange(false); onViewExpenseSnapshot(createExpenseSnapshotFromLog(log), log); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-slate-400 hover:border-violet-100 hover:bg-white hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" title="View this exact expense snapshot" aria-label="View this exact expense snapshot"><Eye className="h-4 w-4" /></button> : null}
+                  </div>
+                </article>
+              );
+            }
+
+            const changes = getFinanceHistoryChanges(entityType, log);
             return (
               <article key={log.id || `${log.action}-${log.changedAt}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-black text-slate-950">{log.summary || `${getEntityLabel(entityType)} ${getActionLabel(log.action).toLowerCase()}`}</p><span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getActionBadgeClass(log.action)}`}>{getActionLabel(log.action)}</span>{entityType === "expense" && Number.isFinite(amount) ? <span className="rounded-full border border-red-100 bg-white px-2.5 py-1 text-[10px] font-black text-red-700"><CurrencyText value={formatCurrency(amount)} /></span> : null}</div>
+                    <div className="flex flex-wrap items-center gap-2"><p className="min-w-0 truncate text-sm font-black text-slate-950">{log.summary || `${getEntityLabel(entityType)} ${getActionLabel(log.action).toLowerCase()}`}</p><span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getActionBadgeClass(log.action)}`}>{getActionLabel(log.action)}</span></div>
                     {log.synthetic ? <p className="mt-1 text-xs font-semibold text-amber-700">Legacy reconstruction from the oldest stored before-state.</p> : null}
                     <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"><Clock className="h-3 w-3" /><span>{formatTimestamp(log.changedAt)}</span>{actor ? <span>— {actor}{log.changedByRole ? ` · ${log.changedByRole}` : ""}</span> : null}</p>
                   </div>
-                  {entityType === "expense" && onViewExpenseSnapshot ? <button type="button" onClick={() => { onOpenChange(false); onViewExpenseSnapshot(createExpenseSnapshotFromLog(log), log); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-slate-400 hover:border-violet-100 hover:bg-white hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" title="View this exact expense snapshot" aria-label="View this exact expense snapshot"><Eye className="h-4 w-4" /></button> : null}
                 </div>
                 {changes.length === 0 ? <p className="mt-3 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-500">No field-level differences were stored for this log.</p> : <div className="mt-3 space-y-2">{changes.map((change) => <div key={`${log.id}-${change.key}`} className="rounded-xl bg-white px-3 py-2"><div className="text-xs font-black text-slate-900">{change.label}</div><div className="mt-1 grid gap-1 text-xs font-semibold text-slate-500 sm:grid-cols-[1fr_auto_1fr] sm:items-center"><span className="min-w-0 break-words"><span className="mr-1 text-[9px] font-black uppercase tracking-wider text-slate-400 sm:hidden">Before</span>{change.before}</span><span className="hidden text-slate-300 sm:block">→</span><span className="min-w-0 break-words text-slate-700"><span className="mr-1 text-[9px] font-black uppercase tracking-wider text-violet-600 sm:hidden">After</span>{change.after}</span></div></div>)}</div>}
               </article>
