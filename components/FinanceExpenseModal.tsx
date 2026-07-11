@@ -103,17 +103,17 @@ export function FinanceExpenseModal({
       ? linkedQuantity - savedInventoryQuantity
       : linkedQuantity
     : 0;
-  const enteredAmount = Number(form.amount) || 0;
-  const impliedUnitCost = linkedQuantity > 0 ? enteredAmount / linkedQuantity : 0;
+  const enteredPrice = Number(form.price) || 0;
+  const impliedUnitCost = linkedQuantity > 0 ? enteredPrice / linkedQuantity : 0;
   const linkedUnitLabel = singularizeUnit(selectedInventoryItem?.unit);
   const stockAmount = (item: ExpenseInventoryItem | undefined, quantity: number) =>
     item ? Math.max(0, quantity) * (Number(item.costPerUnit) || 0) : 0;
   const isSameAmount = (left: number, right: number) => Math.abs((Number(left) || 0) - (Number(right) || 0)) < 0.01;
   const shouldUseStockAmountDefault = () => {
     if (mode !== "create") return false;
-    if (Number(form.amount) <= 0) return true;
+    if (Number(form.price) <= 0) return true;
     if (!selectedInventoryItem) return false;
-    return isSameAmount(Number(form.amount), stockAmount(selectedInventoryItem, linkedQuantity));
+    return isSameAmount(Number(form.price), stockAmount(selectedInventoryItem, linkedQuantity));
   };
 
   useEffect(() => {
@@ -126,7 +126,6 @@ export function FinanceExpenseModal({
     if (!open || !isCreateMode) return;
 
     const createModeDefaults: Partial<ExpenseForm> = {};
-    if (form.status !== "paid") createModeDefaults.status = "paid";
     if (form.vendor) createModeDefaults.vendor = "";
     if (form.inventoryItemId) createModeDefaults.inventoryItemId = "";
     if (Number(form.inventoryQuantity) !== 0) createModeDefaults.inventoryQuantity = 0;
@@ -196,7 +195,7 @@ export function FinanceExpenseModal({
       category: form.category || "supplies",
       description: form.description || `Stock purchase: ${item.item}`,
       vendor: form.vendor || item.supplier || "",
-      ...(shouldDefaultAmount && { amount: stockAmount(item, quantity) }),
+      ...(shouldDefaultAmount && { price: stockAmount(item, quantity) }),
     });
   };
 
@@ -204,9 +203,11 @@ export function FinanceExpenseModal({
     const shouldDefaultAmount = shouldUseStockAmountDefault();
     updateForm({
       inventoryQuantity: quantity,
-      ...(shouldDefaultAmount && { amount: stockAmount(selectedInventoryItem, quantity) }),
+      ...(shouldDefaultAmount && { price: stockAmount(selectedInventoryItem, quantity) }),
     });
   };
+
+  const updatePrice = (price: number) => updateForm({ price });
 
   return (
     <>
@@ -228,7 +229,7 @@ export function FinanceExpenseModal({
                   </DialogTitle>
                   <DialogDescription className="mt-1 text-sm font-medium leading-5 text-slate-500">
                     {isCreateMode
-                      ? "Record a clinic expense paid manually."
+                      ? "Record the full bill and the amount paid today."
                       : "Update expense details, stock links, vendors, and payment status."}
                   </DialogDescription>
                 </div>
@@ -275,7 +276,7 @@ export function FinanceExpenseModal({
 
               <div className="space-y-2">
                 <Label htmlFor="expense-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Date
+                  Expense Date
                 </Label>
                 <Input
                   id="expense-date"
@@ -286,6 +287,22 @@ export function FinanceExpenseModal({
                   onChange={(event) => updateForm({ date: event.target.value })}
                 />
                 {renderFieldError("date")}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="expense-payment-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Payment Date
+                </Label>
+                <Input
+                  id="expense-payment-date"
+                  type="date"
+                  value={form.paymentDate}
+                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.paymentDate && errorClassName)}
+                  aria-invalid={Boolean(fieldErrors.paymentDate)}
+                  onChange={(event) => updateForm({ paymentDate: event.target.value })}
+                />
+                <p className="text-xs text-slate-500">Used when a payment is recorded.</p>
+                {renderFieldError("paymentDate")}
               </div>
 
               <div className="space-y-2 sm:col-span-2">
@@ -304,8 +321,25 @@ export function FinanceExpenseModal({
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="expense-price" className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Total Price ({"\u20b1"})
+                </Label>
+                <Input
+                  id="expense-price"
+                  type="number"
+                  min="0"
+                  value={form.price}
+                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.price && errorClassName)}
+                  aria-invalid={Boolean(fieldErrors.price)}
+                  onChange={(event) => updatePrice(Number(event.target.value))}
+                />
+                <p className="text-xs text-slate-500">Full cost of the item or expense.</p>
+                {renderFieldError("price")}
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="expense-amount" className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Amount ({"\u20b1"})
+                  {isCreateMode ? "Payment Made Now" : "Total Paid to Date"} ({"\u20b1"})
                 </Label>
                 <Input
                   id="expense-amount"
@@ -316,6 +350,7 @@ export function FinanceExpenseModal({
                   aria-invalid={Boolean(fieldErrors.amount)}
                   onChange={(event) => updateForm({ amount: Number(event.target.value) })}
                 />
+                <p className="text-xs text-slate-500">{isCreateMode ? "Leave at zero when no payment is made yet." : "Payments made after creation are added through the Pay action."}</p>
                 {renderFieldError("amount")}
               </div>
 
@@ -499,14 +534,14 @@ export function FinanceExpenseModal({
                         <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
                           <div className="font-semibold text-slate-950">Purchase math</div>
                           <p className="mt-1 text-slate-600">
-                            {formatExpenseCurrency(enteredAmount)} total for {linkedQuantity || 0}{" "}
+                            {formatExpenseCurrency(enteredPrice)} total for {linkedQuantity || 0}{" "}
                             {selectedInventoryItem.unit || "units"}
                             {linkedQuantity > 0
                               ? ` means ${formatExpenseCurrency(impliedUnitCost)} per ${linkedUnitLabel}.`
                               : "."}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            Inventory only adds the quantity. Expenses records the actual total you paid.
+                            Inventory only adds the quantity. The bill total and amount paid are recorded separately.
                           </p>
                         </div>
                       </div>

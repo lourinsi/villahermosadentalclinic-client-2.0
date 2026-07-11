@@ -3,9 +3,13 @@
 export type ExpenseForm = {
   category: string;
   description: string;
+  /** Full billed price of the item or service. */
+  price: number;
+  /** Cumulative amount paid against the expense. */
   amount: number;
   vendor: string;
   date: string;
+  paymentDate: string;
   paymentMethod: string;
   status: string;
   inventoryItemId: string;
@@ -25,7 +29,7 @@ export type ReorderForm = {
   quantityToAdd: number;
 };
 
-type ExpenseRecord = Partial<ExpenseForm>;
+type ExpenseRecord = Partial<ExpenseForm> & { totalPaid?: number };
 
 type InventoryRecord = Partial<InventoryForm>;
 
@@ -77,7 +81,9 @@ export const PAYMENT_METHOD_OPTIONS = [
 
 export const EXPENSE_STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
+  { value: "partial", label: "Partially paid" },
   { value: "paid", label: "Paid" },
+  { value: "overpaid", label: "Overpaid" },
   { value: "cancelled", label: "Cancelled" },
 ];
 
@@ -139,11 +145,13 @@ export const formatOptionLabel = (
 export const createEmptyExpense = (): ExpenseForm => ({
   category: "",
   description: "",
+  price: 0,
   amount: 0,
   vendor: "",
   date: todayDate(),
+  paymentDate: todayDate(),
   paymentMethod: "",
-  status: "paid",
+  status: "pending",
   inventoryItemId: "",
   inventoryQuantity: 0,
 });
@@ -164,9 +172,13 @@ export const createEmptyReorderForm = (): ReorderForm => ({
 export const createExpenseFormFromExpense = (expense: ExpenseRecord): ExpenseForm => ({
   category: resolveOptionValue(expense.category, EXPENSE_CATEGORY_OPTIONS),
   description: expense.description || "",
-  amount: Number(expense.amount) || 0,
+  // Older records stored only `amount`, where it represented the full price.
+  // Treat pending legacy records as unpaid while preserving paid records.
+  price: Number(expense.price ?? expense.amount) || 0,
+  amount: Number(expense.totalPaid ?? (["paid", "partial", "overpaid"].includes(resolveOptionValue(expense.status, EXPENSE_STATUS_OPTIONS)) ? expense.amount : 0)) || 0,
   vendor: expense.vendor || "",
   date: expense.date || todayDate(),
+  paymentDate: expense.paymentDate || expense.date || todayDate(),
   paymentMethod: resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS),
   status: resolveOptionValue(expense.status, EXPENSE_STATUS_OPTIONS) || "pending",
   inventoryItemId: expense.inventoryItemId || "",

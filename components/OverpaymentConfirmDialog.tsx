@@ -16,6 +16,7 @@ interface OverpaymentConfirmDialogProps {
   onKeepPrice: () => void;
   onAdjustPrice: () => void;
   loadingAction?: "keep" | "adjust" | null;
+  subjectLabel?: string;
 }
 
 const money = (value: number) => `\u20b1${Math.max(0, Number(value) || 0).toLocaleString()}`;
@@ -31,6 +32,7 @@ export default function OverpaymentConfirmDialog({
   onKeepPrice,
   onAdjustPrice,
   loadingAction = null,
+  subjectLabel = "treatment",
 }: OverpaymentConfirmDialogProps) {
   const nextTotalPaid = Math.max(0, previousPaidAmount + paymentAmount);
   const overpaidBy = Math.max(0, nextTotalPaid - currentTotalDue);
@@ -50,7 +52,7 @@ export default function OverpaymentConfirmDialog({
             <div className="min-w-0">
               <DialogTitle className="text-xl font-black text-slate-950">Confirm overpayment</DialogTitle>
               <DialogDescription className="mt-1 text-sm font-medium text-slate-600">
-                This payment is {money(overpaidBy)} more than the current treatment total.
+                This payment is {money(overpaidBy)} more than the current {subjectLabel} total.
               </DialogDescription>
             </div>
           </div>
@@ -59,7 +61,7 @@ export default function OverpaymentConfirmDialog({
         <div className="space-y-5 px-6 py-5">
           <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm">
             <div className="flex items-center justify-between gap-4">
-              <span className="font-medium text-slate-500">Current treatment total</span>
+              <span className="font-medium text-slate-500">Current {subjectLabel} total</span>
               <span className="font-black text-slate-950">{money(currentTotalDue)}</span>
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -78,7 +80,7 @@ export default function OverpaymentConfirmDialog({
 
           <div className="space-y-2">
             <Label htmlFor="overpaymentAdjustedPrice" className="text-sm font-bold text-slate-800">
-              Adjusted treatment price
+              Adjusted {subjectLabel} price
             </Label>
             <Input
               id="overpaymentAdjustedPrice"
@@ -90,7 +92,7 @@ export default function OverpaymentConfirmDialog({
               className="h-12 rounded-xl text-lg font-black"
             />
             <p className="text-xs font-medium text-slate-500">
-              Adjusting keeps the appointment total aligned with the total payment. Keeping the current total records the payment as overpaid.
+              Adjusting keeps the {subjectLabel} total aligned with the total payment. Keeping the current total records the payment as overpaid.
             </p>
           </div>
         </div>

@@ -113,14 +113,14 @@ export const getExpenseHistoryEntries = (logs: FinanceHistoryLog[]) => {
 };
 
 const FIELD_ORDER: Record<FinanceHistoryEntityType, string[]> = {
-  expense: ["date", "category", "description", "amount", "vendor", "paymentMethod", "paymentDate", "status", "recurring", "inventoryItemId", "inventoryQuantity", "deleted", "deletedAt"],
+  expense: ["date", "category", "description", "price", "amount", "totalPaid", "balance", "vendor", "paymentMethod", "paymentDate", "status", "recurring", "inventoryItemId", "inventoryQuantity", "deleted", "deletedAt"],
   inventory: ["item", "quantity", "unit", "costPerUnit", "totalValue", "supplier", "lastOrdered"],
   payroll: ["name", "staffName", "role", "type", "baseSalary", "staffBaseSalary", "amount", "bonus", "managedAdjustment", "total", "date", "paymentDate", "status", "month", "notes", "repaymentSchedule"],
 };
 
 const FIELD_LABELS: Record<string, string> = {
   item: "Item name", costPerUnit: "Unit cost", totalValue: "Total value", lastOrdered: "Last ordered",
-  paymentMethod: "Payment method", paymentDate: "Payment date", inventoryItemId: "Linked stock item",
+  price: "Total price", amount: "Amount paid", totalPaid: "Total paid", balance: "Balance", paymentMethod: "Payment method", paymentDate: "Payment date", inventoryItemId: "Linked stock item",
   inventoryQuantity: "Linked stock quantity", baseSalary: "Base salary", staffBaseSalary: "Staff base salary",
   managedAdjustment: "Managed adjustment", staffName: "Staff member", repaymentSchedule: "Repayment schedule",
   deletedAt: "Deleted at", deleted: "Deleted state",
@@ -153,7 +153,7 @@ export const formatFinanceHistoryValue = (entityType: FinanceHistoryEntityType, 
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (entityType === "expense" && key === "deletedAt") return formatHistoryDate(value, true);
   if (entityType === "expense" && ["date", "paymentDate"].includes(key)) return formatHistoryDate(value);
-  if (["amount", "baseSalary", "staffBaseSalary", "bonus", "managedAdjustment", "total", "costPerUnit", "totalValue"].includes(key)) return formatCurrency(Number(value));
+  if (["price", "amount", "totalPaid", "balance", "baseSalary", "staffBaseSalary", "bonus", "managedAdjustment", "total", "costPerUnit", "totalValue"].includes(key)) return formatCurrency(Number(value));
   if (entityType === "expense" && key === "category") return formatOptionLabel(String(value), EXPENSE_CATEGORY_OPTIONS);
   if (entityType === "expense" && key === "status") return formatOptionLabel(String(value), EXPENSE_STATUS_OPTIONS);
   if (key === "paymentMethod") return formatOptionLabel(String(value), PAYMENT_METHOD_OPTIONS);
@@ -232,7 +232,7 @@ export function FinanceHistoryDialog({ open, onOpenChange, entityType, title, de
             <div className="rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50 p-8 text-center"><p className="text-sm font-black text-slate-900">No history yet</p><p className="mt-1 text-xs font-semibold text-slate-400">Changes will appear here after this {getEntityLabel(entityType).toLowerCase()} record is updated.</p></div>
           ) : sortedLogs.map((log, index) => {
             const actor = log.changedByName || log.changedBy;
-            const rawAmount = log.newState?.amount ?? log.previousState?.amount ?? log.amount;
+            const rawAmount = log.newState?.totalPaid ?? log.newState?.amount ?? log.previousState?.totalPaid ?? log.previousState?.amount ?? log.amount;
             const amount = Number(rawAmount);
             const hasAmount = entityType === "expense" && rawAmount !== undefined && rawAmount !== null && Number.isFinite(amount);
 

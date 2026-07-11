@@ -37,6 +37,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
 import ExpenseHistoryView from "./ExpenseHistoryView";
 import { FinanceExpensePaymentModal } from "./FinanceExpensePaymentModal";
+import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./FinanceInventoryChangeReviewModal";
 import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
 import { FinanceInventoryReorderModal } from "./FinanceInventoryReorderModal";
@@ -395,7 +396,10 @@ export interface DetailedExpense {
   date: string;
   category: string;
   description: string;
+  price?: number;
   amount: number;
+  totalPaid?: number;
+  balance?: number;
   vendor: string;
   paymentMethod: string;
   paymentDate?: string;
@@ -409,6 +413,22 @@ export interface DetailedExpense {
   inventoryQuantity?: number;
   notes?: string;
 }
+
+const getExpenseTotalPrice = (expense: Pick<DetailedExpense, "price" | "amount">) =>
+  Math.max(0, Number(expense.price ?? expense.amount) || 0);
+
+const getExpenseTotalPaid = (expense: Pick<DetailedExpense, "amount" | "totalPaid" | "status">) => {
+  if (expense.totalPaid !== undefined && expense.totalPaid !== null) return Math.max(0, Number(expense.totalPaid) || 0);
+  return ["paid", "partial"].includes(normalizeFilterValue(expense.status)) ? Math.max(0, Number(expense.amount) || 0) : 0;
+};
+
+const getExpenseBalance = (expense: Pick<DetailedExpense, "price" | "amount" | "totalPaid" | "balance" | "status">) =>
+  expense.balance !== undefined && expense.balance !== null
+    ? Number(expense.balance) || 0
+    : getExpenseTotalPrice(expense) - getExpenseTotalPaid(expense);
+
+const getExpensePaymentStatus = (price: number, totalPaid: number) =>
+  totalPaid > price + 0.01 ? "overpaid" : totalPaid >= price - 0.01 && price > 0 ? "paid" : totalPaid > 0 ? "partial" : "pending";
 
 export interface InventoryItem {
   id: string; // Changed from number for consistency
@@ -820,6 +840,11 @@ export function FinanceView() {
   const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<RecentTransaction | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
+  const [expensePaymentAmount, setExpensePaymentAmount] = useState(0);
+  const [expensePaymentDate, setExpensePaymentDate] = useState(todayDate());
+  const [expenseOverpaymentAction, setExpenseOverpaymentAction] = useState<"save" | "payment" | null>(null);
+  const [expenseOverpaymentAdjustedPrice, setExpenseOverpaymentAdjustedPrice] = useState("");
+  const [expenseOverpaymentLoadingAction, setExpenseOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
   const [inventoryForm, setInventoryForm] = useState(createEmptyInventoryItem);
@@ -1333,9 +1358,9 @@ export function FinanceView() {
   ), [metricPeriodRange, recentTransactions]);
   const metricExpenses = useMemo(() => (
     activeDetailedExpenses
-      .filter((expense) => normalizeFilterValue(expense.status) === "paid")
+      .filter((expense) => normalizeFilterValue(expense.status) !== "cancelled")
       .filter((expense) => isDateWithinRange(getExpenseReportingDate(expense), metricPeriodRange))
-      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
+      .reduce((sum, expense) => sum + getExpenseTotalPaid(expense), 0)
   ), [activeDetailedExpenses, metricPeriodRange]);
   const metricProfit = metricRevenue - metricExpenses;
   const metricMargin = metricRevenue > 0 ? (metricProfit / metricRevenue) * 100 : 0;
@@ -1425,19 +1450,24 @@ export function FinanceView() {
   const openExpensePaymentModal = (expense: DetailedExpense) => {
     setExpenseToPay(expense);
     setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
+    setExpensePaymentAmount(0);
+    setExpensePaymentDate(todayDate());
   };
 
   const openExpenseDeleteDialog = (expense: DetailedExpense) => {
     setExpenseToDelete(expense);
   };
 
-  const handleSaveExpense = async () => {
+  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number) => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
     if (!expenseForm.date) requiredErrors.date = "Choose a date.";
     if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
-    if (Number(expenseForm.amount) <= 0) requiredErrors.amount = "Enter an amount greater than zero.";
-    if (normalizeFilterValue(expenseForm.status) === "paid" && !expenseForm.paymentMethod) {
+    const price = Math.max(0, Number(expenseForm.price) || 0);
+    const totalPaid = Math.max(0, Number(expenseForm.amount) || 0);
+    if (price <= 0) requiredErrors.price = "Enter a total price greater than zero.";
+    if (totalPaid > 0 && !expenseForm.paymentDate) requiredErrors.paymentDate = "Choose the payment date.";
+    if (totalPaid > 0 && !expenseForm.paymentMethod) {
       requiredErrors.paymentMethod = "Choose a payment method.";
     }
 
@@ -1446,6 +1476,16 @@ export function FinanceView() {
       toast.error("Please complete the required expense fields");
       return;
     }
+
+    if (totalPaid > price && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(totalPaid));
+      setExpenseOverpaymentAction("save");
+      return;
+    }
+
+    const effectivePrice = adjustedPrice !== undefined && Number.isFinite(adjustedPrice) && adjustedPrice >= 0
+      ? adjustedPrice
+      : price;
 
     if (expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
       setExpenseFieldErrors({ inventoryQuantity: "Enter a stock quantity greater than zero." });
@@ -1464,11 +1504,23 @@ export function FinanceView() {
     setIsSavingExpense(true);
     try {
       const isEditingExpense = expenseModalMode === "edit" && selectedExpense;
+      const calculatedStatus = getExpensePaymentStatus(effectivePrice, totalPaid);
       const expensePayload = isEditingExpense
-        ? expenseForm
+        ? {
+            ...expenseForm,
+            price: effectivePrice,
+            amount: totalPaid,
+            totalPaid,
+            balance: effectivePrice - totalPaid,
+            status: normalizeFilterValue(expenseForm.status) === "cancelled" ? "cancelled" : calculatedStatus,
+          }
         : {
             ...expenseForm,
-            status: "paid",
+            price: effectivePrice,
+            amount: totalPaid,
+            totalPaid,
+            balance: effectivePrice - totalPaid,
+            status: calculatedStatus,
             vendor: "",
             inventoryItemId: "",
             inventoryQuantity: 0,
@@ -1483,7 +1535,10 @@ export function FinanceView() {
           method: isEditingExpense ? "PUT" : "POST",
           body: JSON.stringify({
             ...expensePayload,
+            price: Number(expensePayload.price),
             amount: Number(expensePayload.amount),
+            totalPaid: Number(expensePayload.totalPaid),
+            balance: Number(expensePayload.balance),
           }),
         }
       );
@@ -1499,8 +1554,31 @@ export function FinanceView() {
     }
   };
 
-  const handlePayExpense = async () => {
+  const handlePayExpense = async (confirmedOverpayment = false, adjustedPrice?: number) => {
     if (!expenseToPay) return;
+
+    const price = getExpenseTotalPrice(expenseToPay);
+    const totalPaid = getExpenseTotalPaid(expenseToPay);
+    const balance = getExpenseBalance(expenseToPay);
+    if (expensePaymentAmount <= 0) {
+      toast.error("Enter a payment amount greater than zero");
+      return;
+    }
+    if (!expensePaymentDate) {
+      toast.error("Choose the payment date");
+      return;
+    }
+
+    if (expensePaymentAmount > Math.max(0, balance) && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(totalPaid + expensePaymentAmount));
+      setExpenseOverpaymentAction("payment");
+      return;
+    }
+
+    const effectivePrice = adjustedPrice !== undefined && Number.isFinite(adjustedPrice) && adjustedPrice >= 0
+      ? adjustedPrice
+      : price;
+    const newTotalPaid = totalPaid + expensePaymentAmount;
 
     setIsSavingExpensePayment(true);
     try {
@@ -1508,17 +1586,46 @@ export function FinanceView() {
         method: "POST",
         body: JSON.stringify({
           paymentMethod: expensePaymentMethod,
+          paymentDate: expensePaymentDate,
+          amount: expensePaymentAmount,
+          paymentAmount: expensePaymentAmount,
+          price: effectivePrice,
+          totalPaid: newTotalPaid,
+          balance: effectivePrice - newTotalPaid,
+          status: getExpensePaymentStatus(effectivePrice, newTotalPaid),
         }),
       });
 
-      toast.success("Expense marked as paid");
+      toast.success(newTotalPaid > effectivePrice ? "Expense overpayment recorded" : newTotalPaid >= effectivePrice ? "Expense marked as paid" : "Expense payment recorded");
       setExpenseToPay(null);
+      setExpensePaymentAmount(0);
+      setExpensePaymentDate(todayDate());
       await fetchData();
     } catch (error) {
       console.error("Error paying expense:", error);
       toast.error(error instanceof Error ? error.message : "Failed to mark expense paid");
     } finally {
       setIsSavingExpensePayment(false);
+    }
+  };
+
+  const handleExpenseOverpaymentDecision = async (shouldAdjustPrice: boolean) => {
+    if (!expenseOverpaymentAction) return;
+
+    const parsedAdjustedPrice = Number(expenseOverpaymentAdjustedPrice);
+    const adjustedPrice = shouldAdjustPrice && Number.isFinite(parsedAdjustedPrice) && parsedAdjustedPrice >= 0
+      ? parsedAdjustedPrice
+      : undefined;
+    setExpenseOverpaymentLoadingAction(shouldAdjustPrice ? "adjust" : "keep");
+    try {
+      if (expenseOverpaymentAction === "save") {
+        await handleSaveExpense(true, adjustedPrice);
+      } else {
+        await handlePayExpense(true, adjustedPrice);
+      }
+      setExpenseOverpaymentAction(null);
+    } finally {
+      setExpenseOverpaymentLoadingAction(null);
     }
   };
 
@@ -1585,8 +1692,11 @@ export function FinanceView() {
           Date: formatFinanceDate(expense.date),
           "Created At": expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "",
           Description: expense.description,
-          Amount: expense.amount,
-          Expenses: expense.amount,
+          "Total Price": getExpenseTotalPrice(expense),
+          "Amount Paid": getExpenseTotalPaid(expense),
+          Balance: getExpenseBalance(expense),
+          Amount: getExpenseTotalPaid(expense),
+          Expenses: getExpenseTotalPaid(expense),
           Profit: "",
         })),
         ...(PAYROLL_DISABLED ? [] : payrollData.map((employee) => ({
@@ -3062,7 +3172,9 @@ export function FinanceView() {
                         <TableHead>Category</TableHead>
                         <TableHead>Description</TableHead>
                         <TableHead>Vendor</TableHead>
-                        <TableHead>Amount</TableHead>
+                        <TableHead>Total Price</TableHead>
+                        <TableHead>Amount Paid</TableHead>
+                        <TableHead>Balance</TableHead>
                         <TableHead>Paid With</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
@@ -3071,13 +3183,16 @@ export function FinanceView() {
                     <TableBody>
                       {filteredDetailedExpenses.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                             No detailed expenses found.
                           </TableCell>
                         </TableRow>
                       ) : (
                         filteredDetailedExpenses.map((expense) => {
                           const expenseStatus = normalizeFilterValue(expense.status);
+                          const totalPrice = getExpenseTotalPrice(expense);
+                          const totalPaid = getExpenseTotalPaid(expense);
+                          const balance = getExpenseBalance(expense);
                           const isDeletedExpense = isDeletedExpenseRecord(expense);
                           return (
                             <TableRow key={expense.id} className={isDeletedExpense ? deletedPaymentRowClass : undefined}>
@@ -3090,9 +3205,11 @@ export function FinanceView() {
                               </TableCell>
                               <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
                               <TableCell>{expense.vendor || "-"}</TableCell>
-                              <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
+                              <TableCell className="font-medium">{formatCurrency(totalPrice)}</TableCell>
+                              <TableCell className="font-medium text-emerald-700">{formatCurrency(totalPaid)}</TableCell>
+                              <TableCell className="font-medium text-amber-700">{formatCurrency(balance)}</TableCell>
                               <TableCell className="text-sm text-muted-foreground">
-                                {expenseStatus === "paid"
+                                {totalPaid > 0
                                   ? formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)
                                   : "-"}
                               </TableCell>
@@ -3132,7 +3249,7 @@ export function FinanceView() {
                                         <Edit className="h-3 w-3 mr-1" />
                                         Edit
                                       </Button>
-                                      {expenseStatus === "pending" && (
+                                      {expenseStatus !== "paid" && balance > 0 && (
                                         <Button size="sm" onClick={() => openExpensePaymentModal(expense)}>
                                           Pay
                                         </Button>
@@ -3962,11 +4079,30 @@ export function FinanceView() {
       <FinanceExpensePaymentModal
         expense={expenseToPay}
         paymentMethod={expensePaymentMethod}
+        paymentAmount={expensePaymentAmount}
+        paymentDate={expensePaymentDate}
         isSaving={isSavingExpensePayment}
         formatCurrency={formatCurrency}
         onOpenChange={(open) => !open && setExpenseToPay(null)}
         onPaymentMethodChange={setExpensePaymentMethod}
+        onPaymentAmountChange={setExpensePaymentAmount}
+        onPaymentDateChange={setExpensePaymentDate}
         onConfirm={handlePayExpense}
+      />
+      <OverpaymentConfirmDialog
+        open={Boolean(expenseOverpaymentAction)}
+        onOpenChange={(open) => {
+          if (!open && !expenseOverpaymentLoadingAction) setExpenseOverpaymentAction(null);
+        }}
+        currentTotalDue={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPrice(expenseToPay) : Number(expenseForm.price) || 0}
+        previousPaidAmount={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPaid(expenseToPay) : 0}
+        paymentAmount={expenseOverpaymentAction === "payment" ? expensePaymentAmount : Number(expenseForm.amount) || 0}
+        adjustedPrice={expenseOverpaymentAdjustedPrice}
+        onAdjustedPriceChange={setExpenseOverpaymentAdjustedPrice}
+        onKeepPrice={() => void handleExpenseOverpaymentDecision(false)}
+        onAdjustPrice={() => void handleExpenseOverpaymentDecision(true)}
+        loadingAction={expenseOverpaymentLoadingAction}
+        subjectLabel="expense"
       />
       <DeleteExpenseDialog
         open={Boolean(expenseToDelete)}

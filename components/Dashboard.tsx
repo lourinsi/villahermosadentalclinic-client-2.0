@@ -63,6 +63,13 @@ const getDashboardTransactionReportingDate = (transaction: { date?: string | nul
 const getDashboardExpenseReportingDate = (expense: { date?: string | null }) =>
   toDashboardDateOnly(expense.date);
 
+const getDashboardExpensePaidAmount = (expense: { amount?: number | string | null; totalPaid?: number | string | null; status?: string | null }) => {
+  if (expense.totalPaid !== undefined && expense.totalPaid !== null) return Math.max(0, Number(expense.totalPaid) || 0);
+  return ["paid", "partial", "overpaid"].includes(String(expense.status || "").toLowerCase().trim())
+    ? Math.max(0, Number(expense.amount) || 0)
+    : 0;
+};
+
 const getAppointmentDateTime = (appointment: Appointment) => new Date(`${appointment.date}T${appointment.time}`);
 
 const isVisibleDashboardAppointment = (appointment: Appointment) => {
@@ -258,9 +265,9 @@ export function Dashboard({ portal }: DashboardProps) {
   ), [dashboardPeriodRange, financeTransactions]);
   const periodExpenses = useMemo(() => (
     detailedExpenses
-      .filter((expense) => String(expense.status || "").toLowerCase().trim() === "paid")
+      .filter((expense) => String(expense.status || "").toLowerCase().trim() !== "cancelled")
       .filter((expense) => isDateWithinDashboardRange(getDashboardExpenseReportingDate(expense), dashboardPeriodRange))
-      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
+      .reduce((sum, expense) => sum + getDashboardExpensePaidAmount(expense), 0)
   ), [dashboardPeriodRange, detailedExpenses]);
 
   // Get upcoming appointments visible to the current portal.
