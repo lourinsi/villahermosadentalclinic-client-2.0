@@ -531,6 +531,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [latestPaymentLogMethod, setLatestPaymentLogMethod] = useState<string>("");
   const [paymentLogEntries, setPaymentLogEntries] = useState<any[]>([]);
   const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
+  const [historyLogsRefreshKey, setHistoryLogsRefreshKey] = useState(0);
   const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
   const [historyLogs, setHistoryLogs] = useState<any[]>([]);
   const [paymentHistoryLogs, setPaymentHistoryLogs] = useState<any[]>([]);
@@ -577,6 +578,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const shouldUseCurrentAppointmentDetails = Boolean(useCurrentAppointmentDetails && !openedFromBookingModal);
 
   useEffect(() => {
+    if (!open) return;
     setDisplayedSnapshot(appointmentSnapshot);
     setSelectedFocusedPaymentSnapshot(null);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
@@ -588,7 +590,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? Boolean(appointmentSnapshot._isHistorical)
       : Boolean(isHistorical);
     setSnapshotState(derivedHistorical ? "historical" : "current");
-  }, [appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
+  }, [open, appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
 
   useEffect(() => {
     if (!open) {
@@ -679,12 +681,74 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
       if (!changedAppointmentId || changedAppointmentId === appointmentId) {
         setPaymentLogsRefreshKey((key) => key + 1);
+        setHistoryLogsRefreshKey((key) => key + 1);
       }
     };
 
     window.addEventListener("payments:updated", handlePaymentsUpdated as EventListener);
     return () => window.removeEventListener("payments:updated", handlePaymentsUpdated as EventListener);
   }, [open, displayedAppointmentId]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || typeof window === "undefined") return;
+
+    const handleAppointmentUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        appointmentId?: string | number | null;
+        appointment?: { id?: string | number | null } | null;
+      }>).detail;
+      const changedAppointmentId = String(
+        detail?.appointmentId ?? detail?.appointment?.id ?? ""
+      ).trim();
+
+      if (!changedAppointmentId || changedAppointmentId === appointmentId) {
+        setHistoryLogsRefreshKey((key) => key + 1);
+      }
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentUpdated as EventListener);
+    return () => window.removeEventListener("appointments:updated", handleAppointmentUpdated as EventListener);
+  }, [open, displayedAppointmentId]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || isHistorical) return;
+
+    const controller = new AbortController();
+    const refreshCurrentSnapshotOnOpen = async () => {
+      try {
+        const response = await fetch(
+          apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`),
+          {
+            credentials: "include",
+            headers: getAuthHeaders(),
+            signal: controller.signal,
+          }
+        );
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.data) return;
+
+        setDisplayedSnapshot({
+          ...result.data,
+          id: result.data.id || appointmentId,
+          appointmentId,
+          _isHistorical: false,
+        });
+        setSelectedFocusedPaymentSnapshot(null);
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(result.data);
+        setShowAdditionalPayments(false);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to refresh current appointment on open:", error);
+        }
+      }
+    };
+
+    void refreshCurrentSnapshotOnOpen();
+    return () => controller.abort();
+  }, [open, displayedAppointmentId, isHistorical]);
 
   useEffect(() => {
     const appointmentId = String(displayedAppointmentId || "").trim();
@@ -921,7 +985,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     return () => {
       cancelled = true;
     };
-  }, [open, displayedAppointmentId, paymentLogsRefreshKey]);
+  }, [open, displayedAppointmentId, paymentLogsRefreshKey, historyLogsRefreshKey]);
 
   if (!displayedSnapshot) return null;
 
@@ -1340,40 +1404,53 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       return {
         id: String(payment?.id || `${dateValue}-${amount}`),
         raw: payment,
+        actionRaw: payment,
         amount,
         amountLabel: `\u20b1${amount.toLocaleString()}`,
         dateLabel: dateValue ? formatLongDate(dateValue) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(payment)),
         currentChange,
+        isCurrentlyDeleted: latestLifecycleAction === "restored"
+          ? false
+          : latestLifecycleAction === "deleted"
+            ? true
+            : Boolean(payment?.deleted || payment?.paymentDeleted),
       };
     })
     .filter((payment): payment is NonNullable<typeof payment> => Boolean(payment && payment.amount > 0));
+  const matchedCurrentPaymentRow = hasFocusedPaymentSnapshot
+    ? paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot)) || null
+    : null;
   const selectedPaymentRow = hasFocusedPaymentSnapshot
     ? {
         id: getPaymentEntryIdentity(focusedPaymentSnapshot) || `selected-${getPaymentLogDateValue(focusedPaymentSnapshot)}-${focusedPaymentAmount}`,
         raw: focusedPaymentSnapshot,
+        actionRaw: matchedCurrentPaymentRow?.raw || focusedPaymentSnapshot,
         amount: focusedPaymentAmount,
         amountLabel: `\u20b1${focusedPaymentAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
         currentChange:
-          paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot))?.currentChange ||
+          matchedCurrentPaymentRow?.currentChange ||
           (focusedPaymentAction === "restored"
             ? { title: "Payment restored." }
             : focusedPaymentAction === "deleted"
               ? { title: "Payment deleted." }
               : null),
+        isCurrentlyDeleted: matchedCurrentPaymentRow?.isCurrentlyDeleted ?? focusedPaymentAction === "deleted",
       }
     : null;
   const mainPaymentRow = hasPaidInSnapshot
     ? selectedPaymentRow || {
         id: getPaymentEntryIdentity(displayedSnapshot) || `snapshot-${paidInSnapshotPaymentDateRaw}-${paidInSnapshotAmount}`,
         raw: displayedSnapshot,
+        actionRaw: displayedSnapshot,
         amount: paidInSnapshotAmount,
         amountLabel: `\u20b1${paidInSnapshotAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(displayedSnapshot)),
         currentChange: null,
+        isCurrentlyDeleted: Boolean(displayedSnapshot?.deleted || displayedSnapshot?.paymentDeleted),
       }
     : shouldShowLatestPayment
       ? paymentLogRows[0] || null
@@ -3025,10 +3102,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-36">
-                              {isDeletedPaymentEntry(mainPaymentRow?.raw) ? (
+                              {mainPaymentRow?.isCurrentlyDeleted ? (
                                 <DropdownMenuItem
-                                  onClick={() => handleRestorePaymentEntry(mainPaymentRow?.raw)}
-                                  disabled={!getRestorablePaymentEntryId(mainPaymentRow?.raw)}
+                                  onClick={() => handleRestorePaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                  disabled={!getRestorablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
                                   className="text-emerald-700 focus:text-emerald-700"
                                 >
                                   <RotateCcw className="mr-2 h-3.5 w-3.5" />
@@ -3037,15 +3114,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               ) : (
                                 <>
                                   <DropdownMenuItem
-                                    onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
-                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                    onClick={() => handleEditPaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
                                   >
                                     <Pencil className="mr-2 h-3.5 w-3.5" />
                                     Edit
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
-                                    onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
-                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                    onClick={() => handleDeletePaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
                                     className="text-red-600 focus:text-red-600"
                                   >
                                     <Trash2 className="mr-2 h-3.5 w-3.5" />
@@ -3071,7 +3148,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                                 {additionalPaymentRows.map((payment) => {
                                   const paymentId = getEditablePaymentEntryId(payment.raw);
                                   const restorePaymentId = getRestorablePaymentEntryId(payment.raw);
-                                  const isDeletedPayment = isDeletedPaymentEntry(payment.raw);
+                                  const isDeletedPayment = payment.isCurrentlyDeleted;
                                   const paymentUnavailableMessage = getPaymentEntryEditUnavailableMessage(payment.raw);
 
                                   return (
