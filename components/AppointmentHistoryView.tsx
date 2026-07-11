@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import BookingAppointmentHistory, { getMergedBookingLogs } from "./BookingAppointmentHistory";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, Calculator, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
 import AppointmentPatientChoiceDialog from "./AppointmentPatientChoiceDialog";
@@ -1232,7 +1232,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : "";
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
-  const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
+  const fallbackTotalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
     ? Math.max(0, Number(displayedEffectivePrice) - Number(displayedBalanceNumeric))
     : (snapshotPaymentAmount ?? 0);
 
@@ -1428,6 +1428,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       };
     })
     .filter((payment): payment is NonNullable<typeof payment> => Boolean(payment && payment.amount > 0));
+  // The visible payment rows are the source of truth for the paid summary. This
+  // preserves reconstructed historical payments (including payments deleted later)
+  // while excluding records that were already deleted at the selected snapshot.
+  const totalPaidAmount = paymentLogRows.length > 0
+    ? paymentLogRows.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+    : fallbackTotalPaidAmount;
   const matchedCurrentPaymentRow = hasFocusedPaymentSnapshot
     ? paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot)) || null
     : null;
@@ -3198,7 +3204,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                       <Label className="block text-xs font-bold uppercase tracking-wide text-slate-500 sm:text-sm">Price</Label>
                       <CurrentChangeIndicator change={priceCurrentChange} />
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-2">
                       {displayedDiscountAmount > 0 ? (
                         <>
                           <div className="text-sm font-bold text-slate-300 line-through sm:text-lg">
@@ -3213,6 +3219,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                           <CurrencyText value={formatCurrencyLabel(Number(displayedEffectivePrice) || 0)} />
                         </span>
                       )}
+                      <div className="mb-1 flex min-w-0 items-center gap-1.5 text-violet-700 sm:mb-1.5">
+                        <Calculator className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+                        <span className="text-xs font-black tracking-tight sm:text-sm">
+                          PAID: {formatCurrencyLabel(Number(totalPaidAmount) || 0)}
+                        </span>
+                        <span className="text-[10px] font-medium text-slate-700 sm:text-xs">
+                          ({paymentLogRows.length} {paymentLogRows.length === 1 ? "payment" : "payments"})
+                        </span>
+                      </div>
                     </div>
                   </div>
 
