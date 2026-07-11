@@ -83,6 +83,11 @@ type SnapshotState = "historical" | "latest" | "current";
 type CurrentFieldChange = {
   title: string;
 };
+type SnapshotAuditChange = {
+  field: string;
+  previousValue: string;
+  snapshotValue: string;
+};
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
 const REPEAT_OPTIONS = [
@@ -533,6 +538,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
   const [historyLogsRefreshKey, setHistoryLogsRefreshKey] = useState(0);
   const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
+  const [isAuditHistoryExpanded, setIsAuditHistoryExpanded] = useState(false);
   const [historyLogs, setHistoryLogs] = useState<any[]>([]);
   const [paymentHistoryLogs, setPaymentHistoryLogs] = useState<any[]>([]);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
@@ -617,6 +623,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setTreatmentToothNumberEntries([""]);
     }
   }, [open]);
+
+  useEffect(() => {
+    setIsAuditHistoryExpanded(false);
+  }, [displayedSnapshot]);
 
   const pushSnapshotHistory = (snapshot: any, state: SnapshotState) => {
     if (!snapshot) return;
@@ -1663,6 +1673,176 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     notesCurrentChange,
     treatmentNotesCurrentChange,
   ];
+
+  const snapshotAuditChanges: SnapshotAuditChange[] = (() => {
+    const previous = isPlainObject(displayedSnapshot?.previousState) ? displayedSnapshot.previousState : null;
+    const selected = isPlainObject(displayedSnapshot?.newState) ? displayedSnapshot.newState : null;
+    if (!previous || !selected || !Object.keys(previous).length || previous.status === "none") return [];
+
+    const changes: SnapshotAuditChange[] = [];
+    const seenFields = new Set<string>();
+    const readable = (value: unknown) => {
+      if (value === null || value === undefined || String(value).trim() === "") return "Not set";
+      if (typeof value === "boolean") return value ? "Yes" : "No";
+      return String(value);
+    };
+    const addChange = (
+      field: string,
+      previousValue: unknown,
+      snapshotValue: unknown,
+      format: (value: unknown) => string = readable,
+      normalize: (value: unknown) => string = normalizeComparableText,
+      previousComparisonValue: unknown = previousValue,
+      snapshotComparisonValue: unknown = snapshotValue
+    ) => {
+      if (seenFields.has(field) || normalize(previousComparisonValue) === normalize(snapshotComparisonValue)) return;
+      seenFields.add(field);
+      changes.push({ field, previousValue: format(previousValue), snapshotValue: format(snapshotValue) });
+    };
+    const firstDefined = (state: any, keys: string[]) => {
+      for (const key of keys) {
+        if (state?.[key] !== undefined) return state[key];
+      }
+      return undefined;
+    };
+    const money = (value: unknown) => {
+      if (value === null || value === undefined || value === "") return "Not set";
+      const numeric = parseCurrencyNumber(value);
+      return numeric === null ? readable(value) : formatCurrencyLabel(numeric);
+    };
+    const status = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : formatBookingHistoryStatusLabel(value);
+    const date = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : formatWordyDate(value as any, { fallback: readable(value) });
+    const method = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : normalizeBookingPaymentMethod(value);
+    const personName = (state: any, kind: "patient" | "doctor") => {
+      if (kind === "doctor") return resolveDoctorDisplayNameFromSnapshot(state) || "Not set";
+      const resolved = resolvePatientName(state);
+      const rawId = String(state?.patientId || state?.patient_id || "").trim();
+      if (rawId && resolved === rawId) {
+        const recordId = String(patientRecord?.id || patientRecord?.patientId || "").trim();
+        if (recordId === rawId) return resolvePatientName({ patient: patientRecord });
+        return "Assigned patient";
+      }
+      return resolved || "Not set";
+    };
+    const patientIdentity = (state: any) => String(
+      state?.patient?.id || state?.patientId || state?.patient_id ||
+      state?.patient?.name || state?.patientName || state?.patient_name ||
+      [state?.patientFirstName || state?.patient?.firstName, state?.patientLastName || state?.patient?.lastName].filter(Boolean).join(" ") ||
+      ""
+    ).trim();
+    const doctorIdentity = (state: any) => String(
+      state?.doctorId || state?.doctor?.id || state?.doctor?.name || state?.doctorName || state?.doctor || ""
+    ).trim();
+    const treatment = (state: any) => {
+      if (state?.type === undefined && !state?.customType && !state?.serviceType) return "Not set";
+      return resolveAppointmentTypeName(state?.type ?? state?.serviceType, state?.customType);
+    };
+    const totalPaid = (state: any) => {
+      const explicit = firstDefined(state, ["totalPaid", "paid", "amountPaid"]);
+      if (explicit !== undefined) return explicit;
+      const price = parseCurrencyNumber(firstDefined(state, ["price", "totalPrice"]));
+      const discount = parseCurrencyNumber(firstDefined(state, ["discount", "discountAmount"])) ?? 0;
+      const balance = parseCurrencyNumber(firstDefined(state, ["balance", "remaining", "balanceAmount"]));
+      return price !== null && balance !== null ? Math.max(0, price - discount - balance) : undefined;
+    };
+    addChange("Appointment status", previous.status, selected.status, status, normalizeBookingHistoryStatus);
+    addChange("Payment status", previous.paymentStatus, selected.paymentStatus, status, normalizeBookingHistoryStatus);
+    addChange("Remaining balance", firstDefined(previous, ["balance", "remaining", "balanceAmount"]), firstDefined(selected, ["balance", "remaining", "balanceAmount"]), money, normalizeNumberComparison);
+    addChange("Total paid", totalPaid(previous), totalPaid(selected), money, normalizeNumberComparison);
+    addChange("Price", firstDefined(previous, ["price", "totalPrice"]), firstDefined(selected, ["price", "totalPrice"]), money, normalizeNumberComparison);
+    addChange("Discount", firstDefined(previous, ["discount", "discountAmount"]), firstDefined(selected, ["discount", "discountAmount"]), money, normalizeNumberComparison);
+    const previousPatientIdentity = patientIdentity(previous);
+    const selectedPatientIdentity = patientIdentity(selected);
+    const previousPatientName = personName(previous, "patient");
+    const selectedPatientName = personName(selected, "patient");
+    addChange(
+      "Patient",
+      previousPatientName === "Assigned patient" ? "Previous patient" : previousPatientName,
+      selectedPatientName === "Assigned patient" ? "Selected patient" : selectedPatientName,
+      readable,
+      normalizeComparableText,
+      previousPatientIdentity,
+      selectedPatientIdentity
+    );
+    addChange(
+      "Doctor",
+      personName(previous, "doctor"),
+      personName(selected, "doctor"),
+      readable,
+      normalizeDoctorName,
+      doctorIdentity(previous),
+      doctorIdentity(selected)
+    );
+    addChange("Appointment date", previous.date, selected.date, date, normalizeComparableDate);
+    addChange(
+      "Time slot",
+      `${previous.time || ""}|${previous.duration || ""}`,
+      `${selected.time || ""}|${selected.duration || ""}`,
+      (value) => {
+        const [time, duration] = String(value || "").split("|");
+        return time ? formatAppointmentTimeRange(time, duration) : "Not set";
+      }
+    );
+    addChange(
+      "Service / treatment",
+      treatment(previous),
+      treatment(selected),
+      readable,
+      normalizeComparableText,
+      `${previous.type ?? previous.serviceType ?? ""}|${previous.customType || ""}`,
+      `${selected.type ?? selected.serviceType ?? ""}|${selected.customType || ""}`
+    );
+    addChange("Tooth numbers", getBookingToothNumbersValue(previous), getBookingToothNumbersValue(selected));
+    addChange("Treatment notes", getBookingTreatmentNotesValue(previous), getBookingTreatmentNotesValue(selected));
+    addChange("Remarks / notes", previous.notes, selected.notes);
+    addChange("Cancellation reason", previous.cancellationReason, selected.cancellationReason);
+    if (focusedPaymentAction === "deleted") {
+      addChange("Payment state", "Active", "Deleted");
+    } else if (focusedPaymentAction === "restored") {
+      addChange("Payment state", "Deleted", "Active");
+    } else if (appointmentLifecycleAction === "deleted") {
+      addChange("Appointment state", "Active", "Deleted");
+    } else if (appointmentLifecycleAction === "restored") {
+      addChange("Appointment state", "Deleted", "Active");
+    } else {
+      addChange("Appointment deleted", Boolean(previous.deleted || previous.deletedAt), Boolean(selected.deleted || selected.deletedAt));
+    }
+
+    const adjustmentSource = displayedSnapshot?.paymentAdjustment || displayedSnapshot?.paymentAdjustmentDetails || selected?.paymentAdjustment || selected?._paymentAdjustment || {};
+    const adjustment = getBookingPaymentAdjustment(displayedSnapshot);
+    if (adjustment.isAdjustment && adjustment.previousAmount !== null && adjustment.newAmount !== null) {
+      addChange("Selected payment", adjustment.previousAmount, adjustment.newAmount, money, normalizeNumberComparison);
+    } else {
+      addChange(
+        "Selected payment",
+        firstDefined(previous, ["paymentAmount", "amountPaidThisTransaction"]),
+        firstDefined(selected, ["paymentAmount", "amountPaidThisTransaction"]),
+        money,
+        normalizeNumberComparison
+      );
+    }
+    addChange(
+      "Payment date",
+      adjustmentSource.previousDate ?? adjustmentSource.previousPaymentDate ?? adjustmentSource.oldPaymentDate ?? adjustmentSource.fromPaymentDate ?? previous.paymentDate,
+      adjustmentSource.newDate ?? adjustmentSource.newPaymentDate ?? adjustmentSource.updatedPaymentDate ?? adjustmentSource.toPaymentDate ?? selected.paymentDate,
+      date,
+      normalizeComparableDate
+    );
+    addChange(
+      "Payment method",
+      adjustmentSource.previousMethod ?? adjustmentSource.previousPaymentMethod ?? adjustmentSource.oldPaymentMethod ?? adjustmentSource.fromPaymentMethod ?? previous.paymentMethod,
+      adjustmentSource.newMethod ?? adjustmentSource.newPaymentMethod ?? adjustmentSource.updatedPaymentMethod ?? adjustmentSource.toPaymentMethod ?? selected.paymentMethod,
+      method
+    );
+
+    return changes;
+  })();
   const hasLaterChanges = Boolean(
     latestStateForComparison &&
     snapshotState !== "historical" &&
@@ -3227,6 +3407,67 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   </div>
                 </section>
               </div>
+
+              {showsLogSnapshotState ? (
+                <section className="overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.06)]">
+                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                        <History className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-black uppercase tracking-wide text-violet-700">Detailed Audit History</h3>
+                        <p className="mt-1 text-xs font-semibold text-slate-500 sm:text-sm">
+                          {snapshotAuditChanges.length === 1
+                            ? "1 change in this snapshot"
+                            : `${snapshotAuditChanges.length} changes in this snapshot`}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-expanded={isAuditHistoryExpanded}
+                      aria-controls="detailed-audit-history-content"
+                      onClick={() => setIsAuditHistoryExpanded((expanded) => !expanded)}
+                      className="h-9 self-start rounded-full px-3 text-xs font-black text-violet-700 hover:bg-violet-50 hover:text-violet-800 sm:self-auto sm:text-sm"
+                    >
+                      {isAuditHistoryExpanded ? "Show less" : "Show more"}
+                      <ChevronRight className={`ml-1.5 h-4 w-4 transition-transform ${isAuditHistoryExpanded ? "rotate-90" : ""}`} />
+                    </Button>
+                  </div>
+
+                  {isAuditHistoryExpanded ? (
+                    <div id="detailed-audit-history-content" className="border-t border-slate-100 bg-violet-50/35 p-3 sm:p-4">
+                      {snapshotAuditChanges.length > 0 ? (
+                        <div className="space-y-2">
+                          {snapshotAuditChanges.map((change) => (
+                            <div
+                              key={change.field}
+                              className="grid min-w-0 gap-2 rounded-xl border border-violet-100/80 bg-white/85 px-3 py-3 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-3 sm:px-4"
+                            >
+                              <p className="break-words text-sm font-black text-slate-600">
+                                {change.field}
+                              </p>
+                              <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-semibold leading-5 text-slate-500">
+                                {change.previousValue}
+                              </p>
+                              <ChevronRight className="h-4 w-4 shrink-0 rotate-90 text-violet-400 sm:rotate-0" aria-hidden="true" />
+                              <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-black leading-5 text-violet-800">
+                                {change.snapshotValue}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="rounded-xl border border-violet-100/80 bg-white/85 px-4 py-3 text-sm font-semibold italic text-slate-500">
+                          No detailed changes were recorded for this snapshot.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
 
               <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
                 <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
