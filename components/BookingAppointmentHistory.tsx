@@ -178,6 +178,10 @@ const getPaymentLifecycleSnapshot = (log: BookingHistoryLog) => {
     paymentMethod,
     changedAt: log.changedAt,
     notes: log.notes,
+    deleted: paymentAction === "deleted",
+    paymentDeleted: paymentAction === "deleted",
+    deletedAt: paymentAction === "deleted" ? log.changedAt : null,
+    paymentDeletedAt: paymentAction === "deleted" ? log.changedAt : null,
     _paymentHistoryAction: paymentAction || undefined,
   };
 };
@@ -438,6 +442,8 @@ export default function BookingAppointmentHistory({
             _appointmentHistoryAction: lifecycleAction || undefined,
             _paymentHistoryAction: paymentLifecycleAction || undefined,
             _focusedPaymentSnapshot: paymentLifecycleSnapshot,
+            _mergedHistoryIndex: index,
+            _mergedHistoryLogId: log.id,
           }
         : {
             ...appointmentToEdit,
@@ -457,6 +463,8 @@ export default function BookingAppointmentHistory({
             _appointmentHistoryAction: lifecycleAction || undefined,
             _paymentHistoryAction: paymentLifecycleAction || undefined,
             _focusedPaymentSnapshot: paymentLifecycleSnapshot,
+            _mergedHistoryIndex: index,
+            _mergedHistoryLogId: log.id,
           };
 
     setIsHistoryDialogOpen(false);

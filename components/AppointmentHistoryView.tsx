@@ -494,6 +494,26 @@ const isSamePaymentEntry = (first: any, second: any) => {
   );
 };
 
+const getPaymentAdjustmentDetails = (log: any) =>
+  log?.paymentAdjustment ||
+  log?.paymentAdjustmentDetails ||
+  log?.newState?.paymentAdjustment ||
+  log?.newState?._paymentAdjustment ||
+  null;
+
+const getPaymentAdjustmentId = (log: any) =>
+  String(
+    getPaymentAdjustmentDetails(log)?.paymentId ||
+    log?.paymentId ||
+    log?.paymentRecordId ||
+    ""
+  ).trim();
+
+const getHistoryTimestamp = (value: unknown) => {
+  const timestamp = new Date(String(value || "")).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true, selectedPaymentSnapshot, useCurrentAppointmentDetails = false }: AppointmentHistoryViewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -738,7 +758,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         };
 
         const paymentRecords = await fetchPaymentRows(
-          `/api/payments/appointment/${encodeURIComponent(appointmentId)}`,
+          `/api/payments/appointment/${encodeURIComponent(appointmentId)}${snapshotState === "historical" ? "?includeDeleted=true" : ""}`,
           (payment: any) => ({
             ...payment,
             paymentId: payment.paymentId || payment.id,
@@ -865,7 +885,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             credentials: "include",
             headers: getAuthHeaders(),
           }),
-          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}`), {
+          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}?includeDeleted=true`), {
             credentials: "include",
             headers: getAuthHeaders(),
           }),
@@ -901,7 +921,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     return () => {
       cancelled = true;
     };
-  }, [open, displayedAppointmentId]);
+  }, [open, displayedAppointmentId, paymentLogsRefreshKey]);
 
   if (!displayedSnapshot) return null;
 
@@ -1205,10 +1225,91 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         ? latestPaymentDateRaw
         : "";
   const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
-  const paymentLogRows = paymentLogEntries
+  const snapshotTimestamp = getHistoryTimestamp(displayedSnapshot?.changedAt || logDate);
+  const mergedHistoryForSnapshot = getMergedBookingLogs(historyLogs, paymentHistoryLogs);
+  const selectedMergedHistoryIndex = Number.isInteger(displayedSnapshot?._mergedHistoryIndex)
+    ? Number(displayedSnapshot._mergedHistoryIndex)
+    : -1;
+  const futureHistoryLogs = selectedMergedHistoryIndex >= 0
+    ? mergedHistoryForSnapshot.slice(0, selectedMergedHistoryIndex)
+    : mergedHistoryForSnapshot.filter((log) => getHistoryTimestamp(log?.changedAt) > snapshotTimestamp);
+  const futureDeletedPaymentSnapshots = futureHistoryLogs
+    .filter((log) => String(log?.notes || "").toLowerCase().includes("payment deleted"))
+    .map((log) => {
+      const state = log?.newState || log?.previousState || {};
+      const amount = Math.abs(Number(state?.paymentAmount || log?.amount || 0));
+      const paymentId = String(state?.paymentId || state?.paymentRecordId || log?.paymentId || log?.paymentRecordId || "").trim();
+      if (!paymentId || amount <= 0) return null;
+
+      return {
+        ...state,
+        id: paymentId,
+        paymentId,
+        paymentRecordId: paymentId,
+        amount,
+        paymentAmount: amount,
+        paymentDate: state?.paymentDate || log?.paymentDate || log?.date,
+        paymentMethod: state?.paymentMethod || log?.paymentMethod,
+        deleted: true,
+        deletedAt: state?.paymentDeletedAt || log?.changedAt,
+        paymentDeleted: true,
+        paymentDeletedAt: state?.paymentDeletedAt || log?.changedAt,
+      };
+    })
+    .filter(Boolean);
+  const futureDeletedPaymentIds = new Set(
+    futureDeletedPaymentSnapshots.map((payment: any) => getPaymentEntryIdentity(payment))
+  );
+  const historicalPaymentEntries = [...paymentLogEntries];
+  if (isPastSnapshot) {
+    futureDeletedPaymentSnapshots.forEach((deletedPayment: any) => {
+      if (!historicalPaymentEntries.some((payment) => getPaymentEntryIdentity(payment) === getPaymentEntryIdentity(deletedPayment))) {
+        historicalPaymentEntries.push(deletedPayment);
+      }
+    });
+  }
+  const paymentLogRows = historicalPaymentEntries
     .map((payment) => {
-      const amount = getPaymentLogAmountValue(payment);
+      const paymentId = getPaymentEntryIdentity(payment);
+      const createdTimestamp = getHistoryTimestamp(payment?.createdAt);
+      if (isPastSnapshot && snapshotTimestamp && createdTimestamp && createdTimestamp > snapshotTimestamp) return null;
+
+      const currentAmount = getPaymentLogAmountValue(payment);
+      const futureAdjustments = isPastSnapshot && snapshotTimestamp && paymentId
+        ? historyLogs
+            .filter((log) => {
+              const adjustment = getPaymentAdjustmentDetails(log);
+              return Boolean(
+                adjustment?.isAdjustment &&
+                getPaymentAdjustmentId(log) === paymentId &&
+                getHistoryTimestamp(log?.changedAt) > snapshotTimestamp
+              );
+            })
+            .sort((a, b) => getHistoryTimestamp(b?.changedAt) - getHistoryTimestamp(a?.changedAt))
+        : [];
+      const amount = futureAdjustments.reduce((historicalAmount, log) => {
+        const previousAmount = Number(getPaymentAdjustmentDetails(log)?.previousAmount);
+        return Number.isFinite(previousAmount) ? previousAmount : historicalAmount;
+      }, currentAmount);
+      const deletedAtTimestamp = getHistoryTimestamp(payment?.deletedAt || payment?.paymentDeletedAt);
+      const deletedAfterSnapshot = futureDeletedPaymentIds.has(paymentId) || Boolean(
+        isPastSnapshot && snapshotTimestamp && deletedAtTimestamp && deletedAtTimestamp > snapshotTimestamp
+      );
+      const wasAlreadyDeleted = Boolean(
+        payment?.deleted && !deletedAfterSnapshot && (!snapshotTimestamp || !deletedAtTimestamp || deletedAtTimestamp <= snapshotTimestamp)
+      );
+      if (wasAlreadyDeleted) return null;
+
       const dateValue = getPaymentLogDateValue(payment);
+      const amountChanged = Math.abs(amount - currentAmount) > 0.01;
+      const amountDifference = Math.abs(currentAmount - amount);
+      const currentChange = deletedAfterSnapshot
+        ? { title: "Payment deleted." }
+        : amountChanged
+          ? {
+              title: `Payment ${currentAmount > amount ? "increased" : "decreased"} by ${formatCurrencyLabel(amountDifference)} (${formatCurrencyLabel(amount)} → ${formatCurrencyLabel(currentAmount)}).`,
+            }
+          : null;
 
       return {
         id: String(payment?.id || `${dateValue}-${amount}`),
@@ -1217,9 +1318,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         amountLabel: `\u20b1${amount.toLocaleString()}`,
         dateLabel: dateValue ? formatLongDate(dateValue) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(payment)),
+        currentChange,
       };
     })
-    .filter((payment) => payment.amount > 0);
+    .filter((payment): payment is NonNullable<typeof payment> => Boolean(payment && payment.amount > 0));
   const selectedPaymentRow = hasFocusedPaymentSnapshot
     ? {
         id: getPaymentEntryIdentity(focusedPaymentSnapshot) || `selected-${getPaymentLogDateValue(focusedPaymentSnapshot)}-${focusedPaymentAmount}`,
@@ -1228,6 +1330,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         amountLabel: `\u20b1${focusedPaymentAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
+        currentChange:
+          paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot))?.currentChange ||
+          (focusedPaymentAction === "deleted" ? { title: "Payment deleted." } : null),
       }
     : null;
   const mainPaymentRow = hasPaidInSnapshot
@@ -1238,10 +1343,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         amountLabel: `\u20b1${paidInSnapshotAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(displayedSnapshot)),
+        currentChange: null,
       }
     : shouldShowLatestPayment
       ? paymentLogRows[0] || null
       : null;
+  const displayedMainPaymentAmountLabel = !isPaymentAdjustmentSnapshot && mainPaymentRow
+    ? mainPaymentRow.amountLabel
+    : snapshotPaymentAmountLabel;
   const paymentAdjustmentDateKey = paymentAdjustmentDateRaw ? formatBookingDateKey(paymentAdjustmentDateRaw as any) : "";
   let removedAdjustmentDuplicatePayment = false;
   const additionalPaymentRows = paymentLogRows.filter((payment) => {
@@ -1619,6 +1728,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const isLegacyPaymentRow = (payment: any) => String(payment?.id || "").startsWith("legacy-");
   const isReadOnlyPaymentRow = (payment: any) => isLegacyPaymentRow(payment) || isStoredPaymentLogRow(payment);
+  const isDeletedPaymentEntry = (payment: any) => Boolean(
+    payment?.deleted || payment?.paymentDeleted || payment?.deletedAt || payment?.paymentDeletedAt
+  );
+
+  const getRestorablePaymentEntryId = (payment: any) => {
+    if (!isDeletedPaymentEntry(payment)) return "";
+    return String(payment?.paymentId || payment?.paymentRecordId || payment?.id || "").trim();
+  };
 
   const getEditablePaymentEntryId = (payment: any) => {
     if (isReadOnlyPaymentRow(payment)) return "";
@@ -2121,6 +2238,40 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     router.push(`${managementBasePath}/patients/${encodeURIComponent(patientRouteName)}`);
   };
 
+  const handleRestorePaymentEntry = async (payment: any) => {
+    const paymentId = getRestorablePaymentEntryId(payment);
+    if (!paymentId) {
+      toast.error("Could not find the deleted payment record.");
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/payments/${encodeURIComponent(paymentId)}/restore`), {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        toast.error(result?.message || "Failed to restore payment");
+        return;
+      }
+
+      setPaymentLogsRefreshKey((key) => key + 1);
+      window.dispatchEvent(new CustomEvent("payments:updated", {
+        detail: {
+          appointmentId: String(appointmentId),
+          payment: { id: paymentId, appointmentId: String(appointmentId) },
+        },
+      }));
+      toast.success("Payment restored successfully");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to restore payment:", error);
+      toast.error("Failed to restore payment");
+    }
+  };
+
   const openPatientChoiceDialog = () => {
     if (!canOpenPatientChoice) return;
     setIsPatientChoiceOpen(true);
@@ -2230,13 +2381,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const viewLatestSnapshot = () => {
     if (!displayedSnapshot) return;
     pushSnapshotHistory(displayedSnapshot, snapshotState);
-
-    if (appointmentId && typeof onViewCurrent === "function") {
-      onViewCurrent(appointmentId);
-      return;
-    }
-
-    fetchLatestLogSnapshot();
+    void fetchLatestLogSnapshot();
   };
 
   const fetchLatestLogSnapshotForAppointment = async (targetAppointmentId: string) => {
@@ -2350,6 +2495,33 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
     setIsFetchingLogs(true);
     try {
+      const currentResponse = await fetch(
+        apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`),
+        {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }
+      );
+      const currentPayload = await currentResponse.json().catch(() => ({}));
+      const currentAppointment = currentResponse.ok && currentPayload?.data
+        ? currentPayload.data
+        : null;
+
+      if (currentAppointment) {
+        setDisplayedSnapshot({
+          ...currentAppointment,
+          id: currentAppointment.id || appointmentId,
+          appointmentId,
+          _isHistorical: false,
+        });
+        setSelectedFocusedPaymentSnapshot(null);
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(currentAppointment);
+        setShowAdditionalPayments(false);
+        onViewCurrent?.(appointmentId);
+        return;
+      }
+
       const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
         credentials: "include",
         headers: getAuthHeaders(),
@@ -2368,7 +2540,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
       // Server returns logs ordered desc; take the first as the most recent
       const latest = logs[0];
-      const snap = latest.newState && Object.keys(latest.newState).length > 0 ? latest.newState : latest.previousState;
+      const latestState = latest.newState && Object.keys(latest.newState).length > 0 ? latest.newState : latest.previousState;
+      const snap = latestState ? { ...latestState } : null;
       if (!snap) {
         toast.error("No snapshot data available in latest log");
         return;
@@ -2380,8 +2553,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       snap.changedByName = latest.changedByName;
 
       setDisplayedSnapshot(snap);
+      setSelectedFocusedPaymentSnapshot(null);
       setSnapshotState("current");
       setLatestComparisonSnapshot(null);
+      setShowAdditionalPayments(false);
     } catch (err) {
       console.error("Failed to load logs:", err);
       toast.error("Failed to load appointment logs");
@@ -2782,9 +2957,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                           <div className="grid min-w-0 grid-cols-[minmax(4.5rem,max-content)_minmax(7.5rem,1fr)] gap-x-6 gap-y-2 max-[420px]:grid-cols-1 sm:gap-x-8">
                             <div className="min-w-0">
                               <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Amount</p>
-                              <p className={`mt-1 truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`} title={snapshotPaymentAmountTitle}>
-                                <CurrencyText value={snapshotPaymentAmountLabel} />
-                              </p>
+                              <div className="mt-1 flex items-center gap-2">
+                                <p className={`truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`} title={snapshotPaymentAmountTitle}>
+                                  <CurrencyText value={displayedMainPaymentAmountLabel} />
+                                </p>
+                                <CurrentChangeIndicator change={mainPaymentRow?.currentChange} />
+                              </div>
                               {snapshotPreviousPaymentAmountLabel ? (
                                 <p className={`mt-0.5 truncate text-[10px] font-black leading-tight sm:text-xs ${mainPaymentMutedTextClass}`} title={snapshotPreviousPaymentAmountLabel}>
                                   <CurrencyText value={snapshotPreviousPaymentAmountLabel} />
@@ -2811,21 +2989,34 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-36">
-                              <DropdownMenuItem
-                                onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
-                                disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                              >
-                                <Pencil className="mr-2 h-3.5 w-3.5" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
-                                disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                                className="text-red-600 focus:text-red-600"
-                              >
-                                <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                Delete
-                              </DropdownMenuItem>
+                              {isDeletedPaymentEntry(mainPaymentRow?.raw) ? (
+                                <DropdownMenuItem
+                                  onClick={() => handleRestorePaymentEntry(mainPaymentRow?.raw)}
+                                  disabled={!getRestorablePaymentEntryId(mainPaymentRow?.raw)}
+                                  className="text-emerald-700 focus:text-emerald-700"
+                                >
+                                  <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                                  Restore
+                                </DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                  >
+                                    <Pencil className="mr-2 h-3.5 w-3.5" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
+                                    className="text-red-600 focus:text-red-600"
+                                  >
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -2843,13 +3034,18 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               <div className="mt-2 space-y-2">
                                 {additionalPaymentRows.map((payment) => {
                                   const paymentId = getEditablePaymentEntryId(payment.raw);
+                                  const restorePaymentId = getRestorablePaymentEntryId(payment.raw);
+                                  const isDeletedPayment = isDeletedPaymentEntry(payment.raw);
                                   const paymentUnavailableMessage = getPaymentEntryEditUnavailableMessage(payment.raw);
 
                                   return (
                                     <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
-                                      <p className="min-w-0 max-w-[70%] shrink-0 truncate text-sm font-black text-emerald-700" title={payment.amountLabel}>
-                                        <CurrencyText value={payment.amountLabel} />
-                                      </p>
+                                      <div className="flex min-w-0 max-w-[70%] shrink-0 items-center gap-2">
+                                        <p className="truncate text-sm font-black text-emerald-700" title={payment.amountLabel}>
+                                          <CurrencyText value={payment.amountLabel} />
+                                        </p>
+                                        <CurrentChangeIndicator change={payment.currentChange} />
+                                      </div>
                                       <div className="flex min-w-0 flex-1 items-center justify-end gap-2 text-right">
                                         <div className="min-w-0">
                                           <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
@@ -2868,23 +3064,37 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                                             </Button>
                                           </DropdownMenuTrigger>
                                           <DropdownMenuContent align="end" className="w-36">
-                                            <DropdownMenuItem
-                                              onClick={() => handleEditPaymentEntry(payment.raw)}
-                                              disabled={!paymentId}
-                                              title={paymentId ? "Edit payment" : paymentUnavailableMessage}
-                                            >
-                                              <Pencil className="mr-2 h-3 w-3" />
-                                              Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={() => handleDeletePaymentEntry(payment.raw)}
-                                              disabled={!paymentId}
-                                              title={paymentId ? "Delete payment" : paymentUnavailableMessage}
-                                              className="text-red-600 focus:text-red-600"
-                                            >
-                                              <Trash2 className="mr-2 h-3 w-3" />
-                                              Delete
-                                            </DropdownMenuItem>
+                                            {isDeletedPayment ? (
+                                              <DropdownMenuItem
+                                                onClick={() => handleRestorePaymentEntry(payment.raw)}
+                                                disabled={!restorePaymentId}
+                                                title={restorePaymentId ? "Restore payment" : "Could not find the deleted payment record."}
+                                                className="text-emerald-700 focus:text-emerald-700"
+                                              >
+                                                <RotateCcw className="mr-2 h-3 w-3" />
+                                                Restore
+                                              </DropdownMenuItem>
+                                            ) : (
+                                              <>
+                                                <DropdownMenuItem
+                                                  onClick={() => handleEditPaymentEntry(payment.raw)}
+                                                  disabled={!paymentId}
+                                                  title={paymentId ? "Edit payment" : paymentUnavailableMessage}
+                                                >
+                                                  <Pencil className="mr-2 h-3 w-3" />
+                                                  Edit
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                  onClick={() => handleDeletePaymentEntry(payment.raw)}
+                                                  disabled={!paymentId}
+                                                  title={paymentId ? "Delete payment" : paymentUnavailableMessage}
+                                                  className="text-red-600 focus:text-red-600"
+                                                >
+                                                  <Trash2 className="mr-2 h-3 w-3" />
+                                                  Delete
+                                                </DropdownMenuItem>
+                                              </>
+                                            )}
                                           </DropdownMenuContent>
                                         </DropdownMenu>
                                       </div>
