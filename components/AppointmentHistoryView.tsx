@@ -1233,6 +1233,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const futureHistoryLogs = selectedMergedHistoryIndex >= 0
     ? mergedHistoryForSnapshot.slice(0, selectedMergedHistoryIndex)
     : mergedHistoryForSnapshot.filter((log) => getHistoryTimestamp(log?.changedAt) > snapshotTimestamp);
+  const futurePaymentLifecycleById = new Map<string, "deleted" | "restored">();
+  futureHistoryLogs.forEach((log) => {
+    const notes = String(log?.notes || "").trim().toLowerCase();
+    const action = notes.includes("payment restored")
+      ? "restored"
+      : notes.includes("payment deleted")
+        ? "deleted"
+        : null;
+    if (!action) return;
+
+    const state = log?.newState || log?.previousState || {};
+    const paymentId = String(
+      state?.paymentId ||
+      state?.paymentRecordId ||
+      log?.paymentId ||
+      log?.paymentRecordId ||
+      ""
+    ).trim();
+    // Logs are newest first, so retain the first (most current) lifecycle action.
+    if (paymentId && !futurePaymentLifecycleById.has(paymentId)) {
+      futurePaymentLifecycleById.set(paymentId, action);
+    }
+  });
   const futureDeletedPaymentSnapshots = futureHistoryLogs
     .filter((log) => String(log?.notes || "").toLowerCase().includes("payment deleted"))
     .map((log) => {
@@ -1303,8 +1326,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       const dateValue = getPaymentLogDateValue(payment);
       const amountChanged = Math.abs(amount - currentAmount) > 0.01;
       const amountDifference = Math.abs(currentAmount - amount);
-      const currentChange = deletedAfterSnapshot
-        ? { title: "Payment deleted." }
+      const latestLifecycleAction = futurePaymentLifecycleById.get(paymentId);
+      const currentChange = latestLifecycleAction === "restored"
+        ? { title: "Payment restored." }
+        : latestLifecycleAction === "deleted" || deletedAfterSnapshot
+          ? { title: "Payment deleted." }
         : amountChanged
           ? {
               title: `Payment ${currentAmount > amount ? "increased" : "decreased"} by ${formatCurrencyLabel(amountDifference)} (${formatCurrencyLabel(amount)} → ${formatCurrencyLabel(currentAmount)}).`,
@@ -1332,7 +1358,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
         currentChange:
           paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot))?.currentChange ||
-          (focusedPaymentAction === "deleted" ? { title: "Payment deleted." } : null),
+          (focusedPaymentAction === "restored"
+            ? { title: "Payment restored." }
+            : focusedPaymentAction === "deleted"
+              ? { title: "Payment deleted." }
+              : null),
       }
     : null;
   const mainPaymentRow = hasPaidInSnapshot
@@ -1351,6 +1381,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const displayedMainPaymentAmountLabel = !isPaymentAdjustmentSnapshot && mainPaymentRow
     ? mainPaymentRow.amountLabel
     : snapshotPaymentAmountLabel;
+  const mainPaymentHistoryNote = focusedPaymentAction === "restored" ? "Was deleted" : "";
   const paymentAdjustmentDateKey = paymentAdjustmentDateRaw ? formatBookingDateKey(paymentAdjustmentDateRaw as any) : "";
   let removedAdjustmentDuplicatePayment = false;
   const additionalPaymentRows = paymentLogRows.filter((payment) => {
@@ -2966,6 +2997,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               {snapshotPreviousPaymentAmountLabel ? (
                                 <p className={`mt-0.5 truncate text-[10px] font-black leading-tight sm:text-xs ${mainPaymentMutedTextClass}`} title={snapshotPreviousPaymentAmountLabel}>
                                   <CurrencyText value={snapshotPreviousPaymentAmountLabel} />
+                                </p>
+                              ) : null}
+                              {mainPaymentHistoryNote ? (
+                                <p className={`mt-0.5 text-[10px] font-bold leading-tight sm:text-xs ${mainPaymentMutedTextClass}`}>
+                                  {mainPaymentHistoryNote}
                                 </p>
                               ) : null}
                             </div>
