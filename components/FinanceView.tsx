@@ -2487,7 +2487,7 @@ export function FinanceView() {
 
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
     (transaction.type === "income" || isExpensePaymentTransaction(transaction)) &&
-    Number(transaction.amount || 0) > 0 &&
+    Math.abs(Number(transaction.amount || 0)) > 0 &&
     !isPaymentLogLikeTransaction(transaction) &&
     (
       isExpensePaymentTransaction(transaction) ||
@@ -4038,6 +4038,8 @@ export function FinanceView() {
                       const isDeletedExpense = isDeletedExpenseTransaction(transaction, expenseForTransaction);
                       const isDeletedTransaction = isDeletedPayment || isDeletedExpense;
                       const restorablePaymentId = getRestorablePaymentId(transaction);
+                      const showExpenseActionButtons = transaction.type === "expense" && expenseForTransaction && !isDeletedExpense && !isExpensePaymentTransaction(transaction);
+                      const showPaymentActionButtons = shouldShowPaymentEdit && !isDeletedPayment && canEditPayment;
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
@@ -4152,28 +4154,28 @@ export function FinanceView() {
                                     <span className="sr-only">View transaction details</span>
                                   </Button>
                                   {shouldShowPaymentEdit && !isDeletedPayment && (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
-                                      title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
-                                      onClick={() => handleEditPaymentTransaction(transaction)}
-                                    >
-                                      <Edit className="h-5 w-5" />
-                                      <span className="sr-only">Edit Payment</span>
-                                    </Button>
-                                  )}
-                                  {shouldShowPaymentEdit && !isDeletedPayment && (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700 ${canEditPayment ? "" : "opacity-60"}`}
-                                      title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(transaction)}
-                                      onClick={() => handleRequestDeletePaymentTransaction(transaction)}
-                                    >
-                                      <Trash2 className="h-5 w-5" />
-                                      <span className="sr-only">Delete Payment</span>
-                                    </Button>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-10 w-10 rounded-lg border-violet-100 bg-white text-violet-700 shadow-sm hover:bg-violet-50 ${canEditPayment ? "" : "opacity-60"}`}
+                                        title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
+                                        onClick={() => handleEditPaymentTransaction(transaction)}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                        <span className="sr-only">Edit Payment</span>
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-10 w-10 rounded-lg border-red-100 bg-white text-red-600 shadow-sm hover:bg-red-50 ${canEditPayment ? "" : "opacity-60"}`}
+                                        title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(transaction)}
+                                        onClick={() => handleRequestDeletePaymentTransaction(transaction)}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="sr-only">Delete Payment</span>
+                                      </Button>
+                                    </div>
                                   )}
                                   {shouldShowPaymentEdit && isActualDeletedPayment && restorablePaymentId && (
                                     <Button
@@ -4186,7 +4188,7 @@ export function FinanceView() {
                                       Restore
                                     </Button>
                                   )}
-                                  {transaction.type === "expense" && expenseForTransaction && !isDeletedExpense ? (
+                                  {showExpenseActionButtons ? (
                                     <>
                                       <Button
                                         variant="outline"
@@ -4212,7 +4214,7 @@ export function FinanceView() {
                                       ) : null}
                                     </>
                                   ) : null}
-                                  {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id ? (
+                                  {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id && !isExpensePaymentTransaction(transaction) ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
