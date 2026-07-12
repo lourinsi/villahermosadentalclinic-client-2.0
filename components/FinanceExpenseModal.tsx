@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { WalletCards, X } from "lucide-react";
+import { CalendarDays, CircleDollarSign, ClipboardList, CreditCard, WalletCards, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Sele
 import {
   EXPENSE_CATEGORY_OPTIONS,
   EXPENSE_STATUS_OPTIONS,
-  PAYMENT_METHOD_OPTIONS,
   normalizeFinanceValue,
   type ExpenseForm,
 } from "./financeModalOptions";
@@ -38,10 +37,13 @@ type FinanceExpenseModalProps = {
   fieldErrors?: Partial<Record<keyof ExpenseForm, string>>;
   originalInventoryItemId?: string;
   originalInventoryQuantity?: number;
+  totalPaid?: number;
+  balance?: number;
   onCreateInventoryItem?: () => void;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ExpenseForm) => void;
   onSave: () => void;
+  onSaveAndAddPayment?: () => void;
 };
 
 const NO_VENDOR_VALUE = "__no_vendor__";
@@ -83,10 +85,13 @@ export function FinanceExpenseModal({
   fieldErrors = {},
   originalInventoryItemId = "",
   originalInventoryQuantity = 0,
+  totalPaid: savedTotalPaid = 0,
+  balance: savedBalance,
   onCreateInventoryItem,
   onOpenChange,
   onFormChange,
   onSave,
+  onSaveAndAddPayment,
 }: FinanceExpenseModalProps) {
   const [isCreatingVendor, setIsCreatingVendor] = useState(false);
   const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
@@ -121,19 +126,6 @@ export function FinanceExpenseModal({
       setIsCreatingVendor(false);
     }
   }, [open]);
-
-  useEffect(() => {
-    if (!open || !isCreateMode) return;
-
-    const createModeDefaults: Partial<ExpenseForm> = {};
-    if (form.vendor) createModeDefaults.vendor = "";
-    if (form.inventoryItemId) createModeDefaults.inventoryItemId = "";
-    if (Number(form.inventoryQuantity) !== 0) createModeDefaults.inventoryQuantity = 0;
-
-    if (Object.keys(createModeDefaults).length > 0) {
-      onFormChange({ ...form, ...createModeDefaults });
-    }
-  }, [form, isCreateMode, onFormChange, open]);
 
   const allVendorOptions = useMemo(() => {
     const vendors = new Map<string, string>();
@@ -208,29 +200,32 @@ export function FinanceExpenseModal({
   };
 
   const updatePrice = (price: number) => updateForm({ price });
+  const totalPrice = Math.max(0, Number(form.price) || 0);
+  const totalPaid = isCreateMode ? 0 : Math.max(0, Number(savedTotalPaid) || 0);
+  const balance = isCreateMode ? totalPrice : Number(savedBalance ?? (totalPrice - totalPaid)) || 0;
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[92vh] sm:w-full sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-2xl sm:border sm:border-slate-200"
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(58rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem] sm:border sm:border-slate-200"
         >
-          <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 text-left shadow-sm sm:px-6 sm:py-5">
+          <DialogHeader className="shrink-0 border-b border-slate-100 bg-white px-5 pb-4 pt-3 text-left shadow-sm sm:px-7 sm:py-5">
             <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-violet-100">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 ring-1 ring-blue-100">
                   <WalletCards className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
                   <DialogTitle className="text-xl font-black tracking-tight text-slate-950">
-                    {isCreateMode ? "Add Manual Expense" : "Edit Expense"}
+                    {isCreateMode ? "Add New Expense" : "Edit Expense"}
                   </DialogTitle>
                   <DialogDescription className="mt-1 text-sm font-medium leading-5 text-slate-500">
                     {isCreateMode
-                      ? "Record the full bill and the amount paid today."
-                      : "Update expense details, stock links, vendors, and payment status."}
+                      ? "Record the bill and purchase details. Payments are added separately."
+                      : "Update the bill details. Existing payments are managed from the expense ledger."}
                   </DialogDescription>
                 </div>
               </div>
@@ -249,9 +244,49 @@ export function FinanceExpenseModal({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-5 sm:px-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-7 sm:py-7">
+            <div className="mx-auto max-w-3xl space-y-6">
+              <section className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+                      <ClipboardList className="h-6 w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">{isCreateMode ? "New expense" : "Editing this expense"}</p>
+                      <p className="truncate text-xl font-black tracking-tight text-slate-950">{form.description || "Expense description"}</p>
+                      <p className="mt-0.5 text-sm font-semibold text-slate-500">{form.vendor || "No vendor recorded"}{form.category ? ` · ${form.category}` : ""}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-blue-50 px-4 py-3 text-left sm:min-w-44">
+                    <p className="flex items-center gap-1.5 text-xs font-black text-blue-600"><CalendarDays className="h-3.5 w-3.5" /> Expense date</p>
+                    <p className="mt-1 text-sm font-black text-slate-900">{form.date || "Select a date"}</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <h3 className="text-xl font-black tracking-tight text-slate-950">Bill Summary</h3>
+                <dl className="mt-4 divide-y divide-slate-100">
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <dt className="flex items-center gap-3 text-sm font-bold text-slate-500"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-50 text-violet-600"><ClipboardList className="h-5 w-5" /></span>Total Price</dt>
+                    <dd className="text-xl font-black text-slate-950">{formatExpenseCurrency(totalPrice)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <dt className="flex items-center gap-3 text-sm font-bold text-slate-500"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><CreditCard className="h-5 w-5" /></span>Total Paid</dt>
+                    <dd className="text-xl font-black text-emerald-600">{formatExpenseCurrency(totalPaid)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 pt-3">
+                    <dt className="flex items-center gap-3 text-sm font-bold text-slate-500"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600"><CircleDollarSign className="h-5 w-5" /></span>Current Balance Due</dt>
+                    <dd className={`text-xl font-black ${balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>{formatExpenseCurrency(balance)}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="mb-5"><h3 className="text-xl font-black tracking-tight text-slate-950">Expense Details</h3><p className="mt-1 text-sm font-medium text-slate-500">Enter the bill details. Payments have their own dated ledger records.</p></div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="expense-category" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                   Category
                 </Label>
@@ -282,7 +317,7 @@ export function FinanceExpenseModal({
                   id="expense-date"
                   type="date"
                   value={form.date}
-                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.date && errorClassName)}
+                  className={cn("h-14 rounded-2xl border-slate-200 bg-white px-4 text-base font-bold shadow-sm focus-visible:ring-blue-500", fieldErrors.date && errorClassName)}
                   aria-invalid={Boolean(fieldErrors.date)}
                   onChange={(event) => updateForm({ date: event.target.value })}
                 />
@@ -290,22 +325,6 @@ export function FinanceExpenseModal({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="expense-payment-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Payment Date
-                </Label>
-                <Input
-                  id="expense-payment-date"
-                  type="date"
-                  value={form.paymentDate}
-                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.paymentDate && errorClassName)}
-                  aria-invalid={Boolean(fieldErrors.paymentDate)}
-                  onChange={(event) => updateForm({ paymentDate: event.target.value })}
-                />
-                <p className="text-xs text-slate-500">Used when a payment is recorded.</p>
-                {renderFieldError("paymentDate")}
-              </div>
-
-              <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="expense-description" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                   Description
                 </Label>
@@ -324,61 +343,12 @@ export function FinanceExpenseModal({
                 <Label htmlFor="expense-price" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                   Total Price ({"\u20b1"})
                 </Label>
-                <Input
-                  id="expense-price"
-                  type="number"
-                  min="0"
-                  value={form.price}
-                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.price && errorClassName)}
-                  aria-invalid={Boolean(fieldErrors.price)}
-                  onChange={(event) => updatePrice(Number(event.target.value))}
-                />
+                <div className="relative"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-slate-700">{"\u20b1"}</span><Input id="expense-price" type="number" min="0" value={form.price} className={cn("h-16 rounded-2xl border-slate-200 bg-white pl-9 text-2xl font-black shadow-sm focus-visible:ring-blue-500", fieldErrors.price && errorClassName)} aria-invalid={Boolean(fieldErrors.price)} onChange={(event) => updatePrice(Number(event.target.value))} /></div>
                 <p className="text-xs text-slate-500">Full cost of the item or expense.</p>
                 {renderFieldError("price")}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="expense-amount" className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  {isCreateMode ? "Payment Made Now" : "Total Paid to Date"} ({"\u20b1"})
-                </Label>
-                <Input
-                  id="expense-amount"
-                  type="number"
-                  min="0"
-                  value={form.amount}
-                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.amount && errorClassName)}
-                  aria-invalid={Boolean(fieldErrors.amount)}
-                  onChange={(event) => updateForm({ amount: Number(event.target.value) })}
-                />
-                <p className="text-xs text-slate-500">{isCreateMode ? "Leave at zero when no payment is made yet." : "Payments made after creation are added through the Pay action."}</p>
-                {renderFieldError("amount")}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="expense-payment-method" className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Payment Method
-                </Label>
-                <Select value={form.paymentMethod} onValueChange={(value) => updateForm({ paymentMethod: value })}>
-                  <SelectTrigger
-                    id="expense-payment-method"
-                    className={cn("h-11 border-slate-200 bg-white", fieldErrors.paymentMethod && errorClassName)}
-                    aria-invalid={Boolean(fieldErrors.paymentMethod)}
-                  >
-                    <SelectValue placeholder="Select method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_METHOD_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {renderFieldError("paymentMethod")}
-              </div>
-
-              {!isCreateMode ? (
-                <>
+              <>
                   <div className="space-y-2">
                     <Label htmlFor="expense-vendor" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                       Vendor/Supplier
@@ -430,7 +400,7 @@ export function FinanceExpenseModal({
                     ) : null}
                   </div>
 
-                  <div className="space-y-2">
+                  {!isCreateMode ? <div className="space-y-2">
                     <Label htmlFor="expense-status" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                       Payment Status
                     </Label>
@@ -464,7 +434,7 @@ export function FinanceExpenseModal({
                       </Select>
                     )}
                     {renderFieldError("status")}
-                  </div>
+                  </div> : null}
 
                   <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
                     <div>
@@ -548,16 +518,27 @@ export function FinanceExpenseModal({
                     ) : null}
                   </section>
                 </>
-              ) : null}
+            </div>
+              </section>
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 !grid grid-cols-2 gap-3 border-t border-slate-100 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.06)] sm:!flex sm:justify-end sm:px-6 sm:pb-4 sm:shadow-none">
-            <Button variant="outline" className="h-11 w-full rounded-xl font-semibold sm:w-auto" onClick={() => onOpenChange(false)}>
+          <DialogFooter className="shrink-0 !flex flex-col-reverse gap-3 border-t border-slate-100 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] sm:!flex-row sm:justify-end sm:px-7 sm:pb-5">
+            <Button variant="outline" className="h-12 w-full rounded-full font-bold sm:w-auto sm:min-w-36" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
+            {isCreateMode && onSaveAndAddPayment ? (
+              <Button
+                variant="outline"
+                className="h-12 w-full rounded-full border-blue-200 font-black text-blue-700 hover:bg-blue-50 sm:w-auto sm:min-w-48"
+                onClick={onSaveAndAddPayment}
+                disabled={isSaving}
+              >
+                Save &amp; Add Payment
+              </Button>
+            ) : null}
             <Button
-              className="h-11 w-full rounded-xl bg-violet-600 font-bold text-white shadow-sm shadow-violet-100 hover:bg-violet-700 sm:w-auto"
+              className="h-12 w-full rounded-full bg-blue-600 font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700 sm:w-auto sm:min-w-48"
               onClick={onSave}
               disabled={isSaving}
             >

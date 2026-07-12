@@ -29,6 +29,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
+  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -36,7 +37,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
 import ExpenseHistoryView from "./ExpenseHistoryView";
-import { FinanceExpensePaymentModal } from "./FinanceExpensePaymentModal";
+import { FinanceExpensePaymentModal, type ExpensePayment } from "./FinanceExpensePaymentModal";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./FinanceInventoryChangeReviewModal";
 import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
@@ -98,6 +99,8 @@ import {
   Clock,
   Menu,
   MoreHorizontal,
+  List,
+  History as HistoryIcon,
   Search,
   ShieldCheck,
   Trash2
@@ -412,6 +415,10 @@ export interface DetailedExpense {
   inventoryItemId?: string;
   inventoryQuantity?: number;
   notes?: string;
+  paymentCount?: number;
+  latestPayment?: ExpensePayment;
+  payments?: ExpensePayment[];
+  paymentMethods?: string[];
 }
 
 const getExpenseTotalPrice = (expense: Pick<DetailedExpense, "price" | "amount">) =>
@@ -419,7 +426,7 @@ const getExpenseTotalPrice = (expense: Pick<DetailedExpense, "price" | "amount">
 
 const getExpenseTotalPaid = (expense: Pick<DetailedExpense, "amount" | "totalPaid" | "status">) => {
   if (expense.totalPaid !== undefined && expense.totalPaid !== null) return Math.max(0, Number(expense.totalPaid) || 0);
-  return ["paid", "partial"].includes(normalizeFilterValue(expense.status)) ? Math.max(0, Number(expense.amount) || 0) : 0;
+  return ["paid", "partial", "overpaid"].includes(normalizeFilterValue(expense.status)) ? Math.max(0, Number(expense.amount) || 0) : 0;
 };
 
 const getExpenseBalance = (expense: Pick<DetailedExpense, "price" | "amount" | "totalPaid" | "balance" | "status">) =>
@@ -591,6 +598,8 @@ export interface RecentTransaction {
   patientName?: string;
   paymentId?: string;
   paymentRecordId?: string;
+  expenseId?: string;
+  expensePaymentId?: string;
   currentAppointmentBalance?: number;
   currentAppointmentTotalPaid?: number;
   currentAppointmentPrice?: number;
@@ -842,6 +851,11 @@ export function FinanceView() {
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
   const [expensePaymentAmount, setExpensePaymentAmount] = useState(0);
   const [expensePaymentDate, setExpensePaymentDate] = useState(todayDate());
+  const [expensePaymentMode, setExpensePaymentMode] = useState<"create" | "edit">("create");
+  const [selectedExpensePayment, setSelectedExpensePayment] = useState<ExpensePayment | null>(null);
+  const [expensePaymentTransactionId, setExpensePaymentTransactionId] = useState("");
+  const [expensePaymentNotes, setExpensePaymentNotes] = useState("");
+  const [expenseViewMode, setExpenseViewMode] = useState<"history" | "list">("history");
   const [expenseOverpaymentAction, setExpenseOverpaymentAction] = useState<"save" | "payment" | null>(null);
   const [expenseOverpaymentAdjustedPrice, setExpenseOverpaymentAdjustedPrice] = useState("");
   const [expenseOverpaymentLoadingAction, setExpenseOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);
@@ -883,6 +897,7 @@ export function FinanceView() {
   const [revenueData, setRevenueData] = useState<RevenueEntry[]>([]);
   const [expenseBreakdown, setExpenseBreakdown] = useState<ExpenseBreakdownEntry[]>([]);
   const [detailedExpenses, setDetailedExpenses] = useState<DetailedExpense[]>([]);
+  const [expensePaymentsByExpense, setExpensePaymentsByExpense] = useState<Record<string, ExpensePayment[]>>({});
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
@@ -1069,15 +1084,35 @@ export function FinanceView() {
     [detailedExpenses]
   );
 
+  useEffect(() => {
+    let active = true;
+    const loadPaymentLedgers = async () => {
+      const rows = await Promise.all(detailedExpenses.map(async (expense) => {
+        try {
+          const payments = await fetchApiData<ExpensePayment[]>(`/api/finance/detailed-expenses/${encodeURIComponent(expense.id)}/payments`, "expense payments");
+          return [expense.id, payments || []] as const;
+        } catch { return [expense.id, []] as const; }
+      }));
+      if (active) setExpensePaymentsByExpense(Object.fromEntries(rows));
+    };
+    if (detailedExpenses.length) void loadPaymentLedgers(); else setExpensePaymentsByExpense({});
+    const refresh = () => void loadPaymentLedgers();
+    window.addEventListener("expense-payments:updated", refresh);
+    return () => { active = false; window.removeEventListener("expense-payments:updated", refresh); };
+  }, [detailedExpenses]);
+
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);
     return detailedExpenses.filter((expense) => {
       const status = normalizeFilterValue(expense.status);
-      const method = normalizeFilterValue(expense.paymentMethod);
       const selectedMethod = normalizeFilterValue(paymentMethodFilter);
+      const ledgerMethods = [
+        ...(expense.paymentMethods || []),
+        ...(expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).map((payment) => payment.method),
+      ].map(normalizeFilterValue).filter(Boolean);
 
       if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (paymentMethodFilter !== "all" && (status !== "paid" || method !== selectedMethod)) return false;
+      if (paymentMethodFilter !== "all" && !ledgerMethods.includes(selectedMethod)) return false;
 
       const rangeStart = timePeriodFilter === "custom" ? startDate : periodRange?.start || startDate;
       const rangeEnd = timePeriodFilter === "custom" ? endDate : periodRange?.end || endDate;
@@ -1096,7 +1131,7 @@ export function FinanceView() {
 
       return String(right.id || right.description).localeCompare(String(left.id || left.description));
     });
-  }, [detailedExpenses, endDate, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
+  }, [detailedExpenses, endDate, expensePaymentsByExpense, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
 
   const detailedExpenseById = useMemo(
     () => new Map(detailedExpenses.map((expense) => [String(expense.id), expense])),
@@ -1449,27 +1484,38 @@ export function FinanceView() {
 
   const openExpensePaymentModal = (expense: DetailedExpense) => {
     setExpenseToPay(expense);
+    setExpensePaymentMode("create");
+    setSelectedExpensePayment(null);
     setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
     setExpensePaymentAmount(0);
     setExpensePaymentDate(todayDate());
+    setExpensePaymentTransactionId("");
+    setExpensePaymentNotes("");
+  };
+
+  const openExpensePaymentEditModal = (expense: DetailedExpense, payment: ExpensePayment) => {
+    setExpenseToPay(expense);
+    setExpensePaymentMode("edit");
+    setSelectedExpensePayment(payment);
+    setExpensePaymentMethod(resolveOptionValue(payment.method, PAYMENT_METHOD_OPTIONS) || "cash");
+    setExpensePaymentAmount(Number(payment.amount) || 0);
+    setExpensePaymentDate(String(payment.paymentDate || payment.date || "").slice(0, 10) || todayDate());
+    setExpensePaymentTransactionId(payment.transactionId || "");
+    setExpensePaymentNotes(payment.notes || "");
   };
 
   const openExpenseDeleteDialog = (expense: DetailedExpense) => {
     setExpenseToDelete(expense);
   };
 
-  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number) => {
+  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number, addPaymentAfterSave = false) => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
     if (!expenseForm.date) requiredErrors.date = "Choose a date.";
     if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
     const price = Math.max(0, Number(expenseForm.price) || 0);
-    const totalPaid = Math.max(0, Number(expenseForm.amount) || 0);
+    const totalPaid = expenseModalMode === "edit" && selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0;
     if (price <= 0) requiredErrors.price = "Enter a total price greater than zero.";
-    if (totalPaid > 0 && !expenseForm.paymentDate) requiredErrors.paymentDate = "Choose the payment date.";
-    if (totalPaid > 0 && !expenseForm.paymentMethod) {
-      requiredErrors.paymentMethod = "Choose a payment method.";
-    }
 
     if (Object.keys(requiredErrors).length > 0) {
       setExpenseFieldErrors(requiredErrors);
@@ -1504,29 +1550,18 @@ export function FinanceView() {
     setIsSavingExpense(true);
     try {
       const isEditingExpense = expenseModalMode === "edit" && selectedExpense;
-      const calculatedStatus = getExpensePaymentStatus(effectivePrice, totalPaid);
       const expensePayload = isEditingExpense
         ? {
             ...expenseForm,
             price: effectivePrice,
-            amount: totalPaid,
-            totalPaid,
-            balance: effectivePrice - totalPaid,
-            status: normalizeFilterValue(expenseForm.status) === "cancelled" ? "cancelled" : calculatedStatus,
           }
         : {
             ...expenseForm,
             price: effectivePrice,
-            amount: totalPaid,
-            totalPaid,
-            balance: effectivePrice - totalPaid,
-            status: calculatedStatus,
-            vendor: "",
-            inventoryItemId: "",
-            inventoryQuantity: 0,
+            status: "pending",
           };
 
-      await fetchApiData<DetailedExpense>(
+      const savedExpense = await fetchApiData<DetailedExpense>(
         isEditingExpense
           ? `/api/finance/detailed-expenses/${encodeURIComponent(selectedExpense.id)}`
           : "/api/finance/detailed-expenses",
@@ -1536,9 +1571,6 @@ export function FinanceView() {
           body: JSON.stringify({
             ...expensePayload,
             price: Number(expensePayload.price),
-            amount: Number(expensePayload.amount),
-            totalPaid: Number(expensePayload.totalPaid),
-            balance: Number(expensePayload.balance),
           }),
         }
       );
@@ -1546,6 +1578,7 @@ export function FinanceView() {
       toast.success(isEditingExpense ? "Expense updated" : "Expense added");
       closeExpenseModal();
       await fetchData();
+      if (!isEditingExpense && addPaymentAfterSave && savedExpense) openExpensePaymentModal(savedExpense);
     } catch (error) {
       console.error("Error saving expense:", error);
       toast.error(error instanceof Error ? error.message : "Failed to save expense");
@@ -1569,8 +1602,10 @@ export function FinanceView() {
       return;
     }
 
-    if (expensePaymentAmount > Math.max(0, balance) && !confirmedOverpayment) {
-      setExpenseOverpaymentAdjustedPrice(String(totalPaid + expensePaymentAmount));
+    const originalPaymentAmount = expensePaymentMode === "edit" ? Number(selectedExpensePayment?.amount) || 0 : 0;
+    const projectedTotalPaid = totalPaid - originalPaymentAmount + expensePaymentAmount;
+    if (projectedTotalPaid > price + 0.01 && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(projectedTotalPaid));
       setExpenseOverpaymentAction("payment");
       return;
     }
@@ -1578,21 +1613,25 @@ export function FinanceView() {
     const effectivePrice = adjustedPrice !== undefined && Number.isFinite(adjustedPrice) && adjustedPrice >= 0
       ? adjustedPrice
       : price;
-    const newTotalPaid = totalPaid + expensePaymentAmount;
+    const newTotalPaid = totalPaid - originalPaymentAmount + expensePaymentAmount;
 
     setIsSavingExpensePayment(true);
     try {
-      await fetchApiData<DetailedExpense>(`/api/finance/detailed-expenses/${encodeURIComponent(expenseToPay.id)}/pay`, "expense payment", {
-        method: "POST",
+      await fetchApiData<{ payment: ExpensePayment; expense: DetailedExpense }>(
+        expensePaymentMode === "edit" && selectedExpensePayment
+          ? `/api/finance/expense-payments/${encodeURIComponent(selectedExpensePayment.id)}`
+          : `/api/finance/detailed-expenses/${encodeURIComponent(expenseToPay.id)}/payments`,
+        "expense payment",
+        {
+        method: expensePaymentMode === "edit" ? "PUT" : "POST",
         body: JSON.stringify({
-          paymentMethod: expensePaymentMethod,
+          method: expensePaymentMethod,
           paymentDate: expensePaymentDate,
           amount: expensePaymentAmount,
-          paymentAmount: expensePaymentAmount,
-          price: effectivePrice,
-          totalPaid: newTotalPaid,
-          balance: effectivePrice - newTotalPaid,
-          status: getExpensePaymentStatus(effectivePrice, newTotalPaid),
+          transactionId: expensePaymentTransactionId.trim() || undefined,
+          notes: expensePaymentNotes.trim() || undefined,
+          overpaymentPolicy: adjustedPrice !== undefined ? "increase_expense_price" : "allow",
+          ...(adjustedPrice !== undefined ? { adjustedPrice: effectivePrice } : {}),
         }),
       });
 
@@ -1600,6 +1639,10 @@ export function FinanceView() {
       setExpenseToPay(null);
       setExpensePaymentAmount(0);
       setExpensePaymentDate(todayDate());
+      setSelectedExpensePayment(null);
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expenseToPay.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      window.dispatchEvent(new CustomEvent("finance:updated"));
       await fetchData();
     } catch (error) {
       console.error("Error paying expense:", error);
@@ -1607,6 +1650,27 @@ export function FinanceView() {
     } finally {
       setIsSavingExpensePayment(false);
     }
+  };
+
+  const handleDeleteExpensePayment = async (expense: DetailedExpense, payment: ExpensePayment) => {
+    if (!window.confirm(`Delete the ${formatCurrency(payment.amount)} payment dated ${formatFinanceDate(payment.paymentDate || payment.date)}?`)) return;
+    try {
+      await fetchApiData(`/api/finance/expense-payments/${encodeURIComponent(payment.id)}`, "expense payment deletion", { method: "DELETE" });
+      toast.success("Expense payment deleted");
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expense.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      await fetchData();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to delete payment"); }
+  };
+
+  const handleRestoreExpensePayment = async (expense: DetailedExpense, payment: ExpensePayment) => {
+    try {
+      await fetchApiData(`/api/finance/expense-payments/${encodeURIComponent(payment.id)}/restore`, "expense payment restoration", { method: "POST" });
+      toast.success("Expense payment restored");
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expense.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      await fetchData();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to restore payment"); }
   };
 
   const handleExpenseOverpaymentDecision = async (shouldAdjustPrice: boolean) => {
@@ -2337,14 +2401,21 @@ export function FinanceView() {
     getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
     getAppointmentIdFromDescription(transaction.description);
 
+  const isExpensePaymentTransaction = (transaction: RecentTransaction) =>
+    transaction.source === "expense-payment" || Boolean(transaction.expensePaymentId);
+
+  const getExpensePaymentTransactionId = (transaction: RecentTransaction) =>
+    String(transaction.expensePaymentId || transaction.paymentId || transaction.paymentRecordId || transaction.id || "").trim();
+
   const isEditablePaymentTransaction = (transaction: RecentTransaction) =>
-    !isSoftDeletedPaymentTransaction(transaction) && Boolean(getEditablePaymentId(transaction));
+    !isSoftDeletedPaymentTransaction(transaction) && Boolean(isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : getEditablePaymentId(transaction));
 
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
-    transaction.type === "income" &&
+    (transaction.type === "income" || isExpensePaymentTransaction(transaction)) &&
     Number(transaction.amount || 0) > 0 &&
     !isPaymentLogLikeTransaction(transaction) &&
     (
+      isExpensePaymentTransaction(transaction) ||
       transaction.source === "payment" ||
       Boolean(getTransactionAppointmentId(transaction)) ||
       /payment/i.test(`${transaction.description || ""} ${transaction.method || ""}`)
@@ -2366,6 +2437,7 @@ export function FinanceView() {
 
   const getRestorablePaymentId = (transaction: RecentTransaction) => {
     if (isPaymentLogLikeTransaction(transaction)) return "";
+    if (isExpensePaymentTransaction(transaction)) return getExpensePaymentTransactionId(transaction);
 
     const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
     if (explicitPaymentId) return String(explicitPaymentId).trim();
@@ -2396,7 +2468,20 @@ export function FinanceView() {
     return "Could not find the payment record to edit.";
   };
 
-  const handleEditPaymentTransaction = (transaction: RecentTransaction) => {
+  const handleEditPaymentTransaction = async (transaction: RecentTransaction) => {
+    if (isExpensePaymentTransaction(transaction)) {
+      const paymentId = getExpensePaymentTransactionId(transaction);
+      if (!paymentId) { toast.error("Could not find the linked expense payment."); return; }
+      try {
+        const [expense, paymentRecord] = await Promise.all([
+          resolveExpensePaymentParent(transaction),
+          fetchApiData<ExpensePayment>(`/api/finance/expense-payments/${encodeURIComponent(paymentId)}`, "expense payment"),
+        ]);
+        if (!expense) { toast.error("Could not find the expense linked to this payment."); return; }
+        openExpensePaymentEditModal(expense, paymentRecord || { id: paymentId, expenseId: expense.id, amount: Math.abs(Number(transaction.amount) || 0), method: transaction.method || "cash", date: transaction.paymentDate || transaction.date, transactionId: transaction.transactionId });
+      } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to load expense payment"); }
+      return;
+    }
     const paymentId = getEditablePaymentId(transaction);
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(transaction));
@@ -2414,7 +2499,7 @@ export function FinanceView() {
   };
 
   const handleRequestDeletePaymentTransaction = (transaction: RecentTransaction) => {
-    const paymentId = getEditablePaymentId(transaction);
+    const paymentId = isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : getEditablePaymentId(transaction);
 
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(transaction));
@@ -2427,7 +2512,8 @@ export function FinanceView() {
   const handleDeletePaymentTransaction = async () => {
     if (!paymentToDelete) return;
 
-    const paymentId = getEditablePaymentId(paymentToDelete);
+    const isExpensePayment = isExpensePaymentTransaction(paymentToDelete);
+    const paymentId = isExpensePayment ? getExpensePaymentTransactionId(paymentToDelete) : getEditablePaymentId(paymentToDelete);
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(paymentToDelete));
       setPaymentToDelete(null);
@@ -2437,12 +2523,13 @@ export function FinanceView() {
     setIsDeletingPayment(true);
     try {
       await fetchApiData<null>(
-        `/api/payments/${encodeURIComponent(paymentId)}`,
+        isExpensePayment ? `/api/finance/expense-payments/${encodeURIComponent(paymentId)}` : `/api/payments/${encodeURIComponent(paymentId)}`,
         "payment deletion",
         { method: "DELETE" }
       );
 
       toast.success("Payment deleted");
+      if (isExpensePayment) window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: paymentToDelete.expenseId } }));
       setPaymentToDelete(null);
       await fetchData();
     } catch (error) {
@@ -2454,7 +2541,8 @@ export function FinanceView() {
   };
 
   const handleRestorePaymentTransaction = async (transaction: RecentTransaction) => {
-    const paymentId = getRestorablePaymentId(transaction);
+    const isExpensePayment = isExpensePaymentTransaction(transaction);
+    const paymentId = isExpensePayment ? getExpensePaymentTransactionId(transaction) : getRestorablePaymentId(transaction);
     if (!paymentId) {
       toast.error("Could not find the payment record to restore.");
       return;
@@ -2462,12 +2550,13 @@ export function FinanceView() {
 
     try {
       await fetchApiData(
-        `/api/payments/${encodeURIComponent(paymentId)}/restore`,
+        isExpensePayment ? `/api/finance/expense-payments/${encodeURIComponent(paymentId)}/restore` : `/api/payments/${encodeURIComponent(paymentId)}/restore`,
         "payment restoration",
         { method: "POST" }
       );
 
       toast.success("Payment restored");
+      if (isExpensePayment) window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: transaction.expenseId } }));
       await fetchData();
     } catch (error) {
       console.error("Error restoring payment:", error);
@@ -2479,17 +2568,16 @@ export function FinanceView() {
     transaction: RecentTransaction,
     expenses: DetailedExpense[] = detailedExpenses
   ) => {
-    if (transaction.type !== "expense") return null;
+    if (transaction.type !== "expense" && !isExpensePaymentTransaction(transaction)) return null;
 
     const transactionExpenseId =
-      transaction.source === "expense"
-        ? String(transaction.id || transaction.transactionId || "").trim()
-        : "";
+      String(transaction.expenseId || (transaction.source === "expense" ? transaction.id || transaction.transactionId : "") || "").trim();
     const directMatch = transactionExpenseId
       ? expenses.find((expense) => String(expense.id) === transactionExpenseId)
       : null;
 
     if (directMatch) return directMatch;
+    if (isExpensePaymentTransaction(transaction)) return null;
 
     const transactionAmount = Math.abs(Number(transaction.amount) || 0);
     const transactionDescription = normalizeFilterValue(transaction.description);
@@ -2508,17 +2596,34 @@ export function FinanceView() {
     );
   };
 
-  const handleViewTransaction = async (transaction: RecentTransaction) => {
-    if (transaction.type === "expense") {
-      let expense = findExpenseForTransaction(transaction);
+  const resolveExpensePaymentParent = async (transaction: RecentTransaction) => {
+    if (!isExpensePaymentTransaction(transaction)) return findExpenseForTransaction(transaction);
+    const direct = findExpenseForTransaction(transaction);
+    if (direct) return direct;
+    const paymentId = getExpensePaymentTransactionId(transaction);
+    if (!paymentId) return null;
+    const payment = await fetchApiData<ExpensePayment>(`/api/finance/expense-payments/${encodeURIComponent(paymentId)}`, "expense payment");
+    const expenseId = String(payment?.expenseId || "").trim();
+    if (!expenseId) return null;
+    const cached = detailedExpenses.find((expense) => String(expense.id) === expenseId);
+    if (cached) return cached;
+    const refreshed = await fetchApiData<DetailedExpense[]>(`/api/finance/detailed-expenses${canDeleteExpenses ? "?includeDeleted=true" : ""}`, "detailed expenses");
+    if (refreshed) setDetailedExpenses(refreshed);
+    return refreshed?.find((expense) => String(expense.id) === expenseId) || null;
+  };
 
-      if (!expense && transaction.source === "expense") {
+  const handleViewTransaction = async (transaction: RecentTransaction) => {
+    if (transaction.type === "expense" || isExpensePaymentTransaction(transaction)) {
+      let expense = isExpensePaymentTransaction(transaction) ? await resolveExpensePaymentParent(transaction) : findExpenseForTransaction(transaction);
+
+      if (!expense && (transaction.source === "expense" || isExpensePaymentTransaction(transaction))) {
         setLoadingAppointmentId(transaction.id);
         try {
           const detailedExpensesPath = `/api/finance/detailed-expenses${canDeleteExpenses ? "?includeDeleted=true" : ""}`;
           const refreshedExpenses = await fetchApiData<DetailedExpense[]>(detailedExpensesPath, "detailed expenses");
           setDetailedExpenses(refreshedExpenses || []);
           expense = findExpenseForTransaction(transaction, refreshedExpenses || []);
+          if (!expense && isExpensePaymentTransaction(transaction)) expense = await resolveExpensePaymentParent(transaction);
         } catch (error) {
           console.error("Error loading expense details:", error);
           toast.error(error instanceof Error ? error.message : "Failed to load expense details");
@@ -3147,6 +3252,10 @@ export function FinanceView() {
                   <Button variant="outline" size="icon" onClick={() => fetchData()} title="Refresh finance data">
                     <Filter className="h-4 w-4" />
                   </Button>
+                  <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Expense view">
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("history")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "history" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><HistoryIcon className="mr-1.5 h-3.5 w-3.5" />History</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("list")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><List className="mr-1.5 h-3.5 w-3.5" />List</Button>
+                  </div>
                   <Button onClick={() => openExpenseModal("create")}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Manual Expense
@@ -3164,7 +3273,24 @@ export function FinanceView() {
                 </div>
               ) : (
                 <>
-                  <Table>
+                  {expenseViewMode === "history" ? (
+                    filteredDetailedExpenses.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 py-14 text-center text-sm font-semibold text-slate-500">No detailed expenses found.</div>
+                    ) : (
+                      <div className="relative space-y-5 pl-7 sm:pl-11">
+                        <div className="absolute bottom-8 left-[13px] top-8 border-l-2 border-dashed border-violet-100 sm:left-[17px]" />
+                        {filteredDetailedExpenses.map((expense) => {
+                          const totalPrice = getExpenseTotalPrice(expense); const totalPaid = getExpenseTotalPaid(expense); const balance = getExpenseBalance(expense); const deleted = isDeletedExpenseRecord(expense); const dateParts = getFinanceTimelineDateParts(expense.date); const normalizedStatus = normalizeFilterValue(expense.status); const paymentRows = (expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).sort((a, b) => String(b.date).localeCompare(String(a.date))); const latestPayment = paymentRows[0] || expense.latestPayment; const paymentCount = paymentRows.length || expense.paymentCount || 0; const paidPercent = totalPrice > 0 ? Math.min(100, Math.max(0, (totalPaid / totalPrice) * 100)) : 0;
+                          return <article key={expense.id} className="relative"><span className={`absolute -left-[1.55rem] top-9 h-4 w-4 rounded-full border-4 border-white shadow sm:-left-[2.15rem] ${deleted ? "bg-slate-400" : normalizedStatus === "paid" ? "bg-emerald-500" : "bg-violet-600"}`} /><div className={`rounded-2xl border p-4 shadow-sm transition hover:border-violet-200 hover:shadow-md sm:p-5 ${deleted ? "border-red-100 bg-red-50/40" : "border-slate-200 bg-white"}`}>
+                            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 gap-4"><div className="hidden w-20 shrink-0 border-r border-slate-100 pr-4 text-center sm:block"><div className="text-xs font-black tracking-widest text-violet-600">{dateParts.month}</div><div className="text-3xl font-black text-slate-950">{dateParts.day}</div><div className="text-xs font-bold text-slate-400">{dateParts.year}</div></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h4 className="truncate text-lg font-black text-slate-950">{expense.description}</h4><Badge className={deleted ? deletedPaymentBadgeClass : normalizedStatus === "paid" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{deleted ? "Deleted" : formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}</Badge></div><p className="mt-1 text-sm font-semibold text-slate-500">{formatOptionLabel(expense.category, EXPENSE_CATEGORY_OPTIONS)}{expense.vendor ? <>{" · "}{expense.vendor}</> : null}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-bold text-slate-500"><span>{formatFinanceDate(expense.date)}</span><span>{paymentCount} payment{paymentCount === 1 ? "" : "s"}</span>{expense.inventoryItemId ? <span className="text-violet-700">Inventory linked</span> : null}</div></div></div>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid grid-cols-3 gap-4 sm:min-w-[330px]"><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Price</p><p className="mt-1 font-black text-slate-950">{formatCurrency(totalPrice)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Paid</p><p className="mt-1 font-black text-emerald-600">{formatCurrency(totalPaid)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Balance</p><p className={`mt-1 font-black ${balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>{formatCurrency(balance)}</p></div></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => openExpenseSnapshot(expense)}><Eye className="mr-1 h-3.5 w-3.5" />View</Button>{!deleted ? <Button size="sm" onClick={() => openExpensePaymentModal(expense)} className="bg-violet-600 hover:bg-violet-700"><Plus className="mr-1 h-3.5 w-3.5" />Payment</Button> : null}<DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="h-9 w-9" aria-label="More expense actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{deleted ? <DropdownMenuItem onClick={() => handleRestoreExpense(expense)}><RotateCcw className="mr-2 h-4 w-4" />Restore expense</DropdownMenuItem> : <><DropdownMenuItem onClick={() => openExpenseModal("edit", expense)}><Edit className="mr-2 h-4 w-4" />Edit expense</DropdownMenuItem>{canDeleteExpenses ? <DropdownMenuItem onClick={() => openExpenseDeleteDialog(expense)} className="text-red-700"><Trash2 className="mr-2 h-4 w-4" />Delete expense</DropdownMenuItem> : null}</>}</DropdownMenuContent></DropdownMenu></div></div></div>
+                            <div className="mt-5 border-t border-slate-100 pt-4"><div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-wider"><span className="text-slate-500">Payment progress</span><span className={balance > 0 ? "text-amber-700" : "text-emerald-700"}>{Math.round(paidPercent)}% paid</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${paidPercent}%` }} /></div><div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">{latestPayment ? <span className="rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-emerald-800">Latest: {formatCurrency(latestPayment.amount)}{" · "}{formatOptionLabel(latestPayment.method, PAYMENT_METHOD_OPTIONS)}{" · "}{formatFinanceDate(latestPayment.date)}</span> : <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-500">No payments yet</span>}{paymentRows.slice(0, 3).map((payment) => <span key={payment.id} className="inline-flex items-center gap-1 rounded-lg bg-violet-50 px-2 py-1 text-violet-700"><span className="h-1.5 w-1.5 rounded-full bg-violet-500" />{formatFinanceDate(payment.date)} · {formatCurrency(payment.amount)}</span>)}{paymentCount > 3 ? <span className="text-violet-700">+{paymentCount - 3} more</span> : null}</div></div>
+                          </div></article>;
+                        })}
+                      </div>
+                    )
+                  ) : null}
+                  <Table className={expenseViewMode === "list" ? "" : "hidden"}>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
@@ -3175,7 +3301,7 @@ export function FinanceView() {
                         <TableHead>Total Price</TableHead>
                         <TableHead>Amount Paid</TableHead>
                         <TableHead>Balance</TableHead>
-                        <TableHead>Paid With</TableHead>
+                        <TableHead>Payments</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -3208,11 +3334,7 @@ export function FinanceView() {
                               <TableCell className="font-medium">{formatCurrency(totalPrice)}</TableCell>
                               <TableCell className="font-medium text-emerald-700">{formatCurrency(totalPaid)}</TableCell>
                               <TableCell className="font-medium text-amber-700">{formatCurrency(balance)}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {totalPaid > 0
-                                  ? formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)
-                                  : "-"}
-                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{(() => { const rows = (expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).sort((a, b) => String(b.date).localeCompare(String(a.date))); const count = rows.length || expense.paymentCount || 0; const latest = rows[0] || expense.latestPayment; return count > 0 ? <div><div className="font-bold text-slate-700">{count} payment{count === 1 ? "" : "s"}</div>{latest ? <div className="mt-0.5 text-xs">Latest: {formatOptionLabel(latest.method, PAYMENT_METHOD_OPTIONS)} · {formatFinanceDate(latest.date)}</div> : null}</div> : "No payments"; })()}</TableCell>
                               <TableCell>
                                 <Badge className={
                                   isDeletedExpense
@@ -3827,8 +3949,8 @@ export function FinanceView() {
                       const transactionDateLabel = formatFinanceDate(transactionReportingDate);
                       const transactionDateParts = getFinanceTimelineDateParts(transactionReportingDate || transaction.date);
                       const canViewExpense =
-                        transaction.type === "expense" &&
-                        (Boolean(expenseForTransaction) || transaction.source === "expense");
+                        (transaction.type === "expense" || isExpensePaymentTransaction(transaction)) &&
+                        (Boolean(expenseForTransaction) || transaction.source === "expense" || isExpensePaymentTransaction(transaction));
                       const canViewAppointmentSnapshot = Boolean(appointmentId || transaction.appointmentSnapshot);
                       const canEditPayment = isEditablePaymentTransaction(transaction);
                       const shouldShowPaymentEdit = isPaymentTransactionRow(transaction);
@@ -4056,10 +4178,13 @@ export function FinanceView() {
         fieldErrors={expenseFieldErrors}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
+        totalPaid={selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0}
+        balance={selectedExpense ? getExpenseBalance(selectedExpense) : Number(expenseForm.price) || 0}
         onCreateInventoryItem={() => openInventoryModal("create")}
         onOpenChange={(open) => !open && closeExpenseModal()}
         onFormChange={handleExpenseFormChange}
-        onSave={handleSaveExpense}
+        onSave={() => void handleSaveExpense()}
+        onSaveAndAddPayment={() => void handleSaveExpense(false, undefined, true)}
       />
       <ExpenseHistoryView
         open={Boolean(expenseSnapshot)}
@@ -4075,19 +4200,30 @@ export function FinanceView() {
         historyError={financeHistoryError}
         inventoryItems={inventoryData}
         onEdit={(expense) => editExpenseFromSnapshot(expense as DetailedExpense)}
+        onAddPayment={(expense) => openExpensePaymentModal(expense as DetailedExpense)}
+        onEditPayment={(expense, payment) => openExpensePaymentEditModal(expense as DetailedExpense, payment)}
+        onDeletePayment={(expense, payment) => void handleDeleteExpensePayment(expense as DetailedExpense, payment)}
+        onRestorePayment={(expense, payment) => void handleRestoreExpensePayment(expense as DetailedExpense, payment)}
+        canManagePayments={canDeleteExpenses}
       />
       <FinanceExpensePaymentModal
         expense={expenseToPay}
+        mode={expensePaymentMode}
+        payment={selectedExpensePayment}
         paymentMethod={expensePaymentMethod}
         paymentAmount={expensePaymentAmount}
         paymentDate={expensePaymentDate}
+        transactionId={expensePaymentTransactionId}
+        notes={expensePaymentNotes}
         isSaving={isSavingExpensePayment}
         formatCurrency={formatCurrency}
         onOpenChange={(open) => !open && setExpenseToPay(null)}
         onPaymentMethodChange={setExpensePaymentMethod}
         onPaymentAmountChange={setExpensePaymentAmount}
         onPaymentDateChange={setExpensePaymentDate}
-        onConfirm={handlePayExpense}
+        onTransactionIdChange={setExpensePaymentTransactionId}
+        onNotesChange={setExpensePaymentNotes}
+        onConfirm={() => void handlePayExpense()}
       />
       <OverpaymentConfirmDialog
         open={Boolean(expenseOverpaymentAction)}
@@ -4096,7 +4232,7 @@ export function FinanceView() {
         }}
         currentTotalDue={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPrice(expenseToPay) : Number(expenseForm.price) || 0}
         previousPaidAmount={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPaid(expenseToPay) : 0}
-        paymentAmount={expenseOverpaymentAction === "payment" ? expensePaymentAmount : Number(expenseForm.amount) || 0}
+        paymentAmount={expenseOverpaymentAction === "payment" ? expensePaymentAmount : selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0}
         adjustedPrice={expenseOverpaymentAdjustedPrice}
         onAdjustedPriceChange={setExpenseOverpaymentAdjustedPrice}
         onKeepPrice={() => void handleExpenseOverpaymentDecision(false)}
