@@ -8,7 +8,7 @@ export type BackendReadinessResult = "ready" | "timed-out" | "aborted";
 
 type HealthCheckResult = "ready" | "not-ready" | "aborted";
 
-const waitForNextCheck = (delayMs: number, signal: AbortSignal) =>
+export const waitForNextCheck = (delayMs: number, signal: AbortSignal) =>
   new Promise<boolean>((resolve) => {
     if (signal.aborted) {
       resolve(false);

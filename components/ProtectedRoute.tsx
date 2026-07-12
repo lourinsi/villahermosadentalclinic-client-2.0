@@ -5,12 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { Loader2, ServerCog, ShieldCheck, WifiOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { waitForBackendReady } from "@/lib/backend-readiness";
 import {
   SESSION_EXPIRED_MESSAGE,
   clearPendingAuthRedirect,
   rememberAuthRedirect,
 } from "@/lib/auth-redirect";
+import {
+  BACKEND_STARTUP_TIMEOUT_MS,
+  waitForNextCheck,
+} from "@/lib/backend-readiness";
 import {
   MANAGEMENT_LOGOUT_REDIRECT_KEY,
   STAFF_PORTAL_LOGIN_PATH,
@@ -171,36 +174,41 @@ export default function ProtectedRoute({
       }
 
       setState("checking-backend");
-      const readiness = await waitForBackendReady({
-        signal: controller.signal,
-        onWaiting: () => {
-          if (!controller.signal.aborted) setState("starting-backend");
-        },
-      });
+      const deadline = Date.now() + BACKEND_STARTUP_TIMEOUT_MS;
+      let waitingWasReported = false;
 
-      if (readiness === "aborted" || controller.signal.aborted) return;
-      if (readiness === "timed-out") {
-        setState("unavailable");
-        return;
-      }
+      while (!controller.signal.aborted && Date.now() < deadline) {
+        setState("restoring-session");
+        const validation = await startup.checkAuth({ signal: controller.signal });
+        if (controller.signal.aborted || validation.kind === "aborted") return;
 
-      setState("restoring-session");
-      const validation = await startup.checkAuth({ signal: controller.signal });
-      if (controller.signal.aborted || validation.kind === "aborted") return;
+        if (validation.kind === "authenticated") {
+          clearPendingAuthRedirect();
+          setState("ready");
+          return;
+        }
 
-      if (validation.kind === "authenticated") {
-        clearPendingAuthRedirect();
-        setState("ready");
-        return;
-      }
+        if (validation.kind === "unauthorized") {
+          startup.clearAuthState();
+          setState("session-expired");
+          redirectToLogin(true);
+          return;
+        }
 
-      if (validation.kind === "unauthorized") {
-        // There is no refresh-token protocol in this project. A 401 is only
-        // acted on after /health succeeded, so it is definitive here.
-        startup.clearAuthState();
-        setState("session-expired");
-        redirectToLogin(true);
-        return;
+        if (!waitingWasReported) {
+          waitingWasReported = true;
+          setState("starting-backend");
+        }
+
+        const remainingMs = Math.max(0, deadline - Date.now());
+        const delayUntilNextAttempt = Math.min(4_000, remainingMs);
+
+        if (
+          delayUntilNextAttempt > 0 &&
+          !(await waitForNextCheck(delayUntilNextAttempt, controller.signal))
+        ) {
+          return;
+        }
       }
 
       // A 403 is an authorization outcome, and 5xx/network failures are
