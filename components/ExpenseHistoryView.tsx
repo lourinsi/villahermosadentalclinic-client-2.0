@@ -328,12 +328,20 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
   const goBack = () =>
     setBackStack((stack) => {
       const prior = stack[stack.length - 1];
-      if (prior) setDisplayedSnapshot(prior);
+      if (prior) {
+        setDisplayedSnapshot(prior);
+        setSelectedPaymentId(String(prior._historyFocusedPaymentId || ""));
+      }
       return stack.slice(0, -1);
     });
   const showLatest = () => {
     if (displayedSnapshot && currentExpense && displayedSnapshot !== currentExpense) setBackStack((stack) => [...stack.slice(-4), displayedSnapshot]);
+    const latestCurrentPayment = [...payments]
+      .filter((payment) => !payment.deleted)
+      .sort((a, b) => timestamp(b.updatedAt || b.createdAt) - timestamp(a.updatedAt || a.createdAt))[0];
     setDisplayedSnapshot(currentExpense);
+    setSelectedPaymentId(latestCurrentPayment?.id || "");
+    setPaymentsExpanded(false);
   };
   if (!displayedSnapshot) return null;
 

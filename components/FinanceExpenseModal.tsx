@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronDown, CircleDollarSign, ClipboardList, CreditCard, WalletCards, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, ChevronDown, CircleDollarSign, ClipboardList, CreditCard, WalletCards, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -55,6 +55,7 @@ type FinanceExpenseModalProps = {
   onFormChange: (form: ExpenseForm) => void;
   onInitialPaymentChange?: (payment: InitialExpensePayment) => void;
   onSave: () => void;
+  onSaveWithoutPayment?: () => void;
   onSaveAndAddPayment?: () => void;
 };
 
@@ -105,15 +106,27 @@ export function FinanceExpenseModal({
   onFormChange,
   onInitialPaymentChange,
   onSave,
+  onSaveWithoutPayment,
   onSaveAndAddPayment,
 }: FinanceExpenseModalProps) {
   const [isCreatingVendor, setIsCreatingVendor] = useState(false);
   const [showOptionalDetails, setShowOptionalDetails] = useState(mode === "edit");
-  const updateForm = (updates: Partial<ExpenseForm>) => onFormChange({ ...form, ...updates });
+  const [createStep, setCreateStep] = useState<1 | 2>(1);
+  const [stepErrors, setStepErrors] = useState<Partial<Record<keyof ExpenseForm, string>>>({});
+  const [paymentDateError, setPaymentDateError] = useState("");
+  const updateForm = (updates: Partial<ExpenseForm>) => {
+    setStepErrors((current) => {
+      const next = { ...current };
+      Object.keys(updates).forEach((field) => delete next[field as keyof ExpenseForm]);
+      return next;
+    });
+    onFormChange({ ...form, ...updates });
+  };
   const errorClassName = "border-red-500 bg-red-50 focus:ring-red-500 focus-visible:ring-red-500";
   const isCreateMode = mode === "create";
+  const visibleErrors = isCreateMode && createStep === 1 ? { ...fieldErrors, ...stepErrors } : fieldErrors;
   const renderFieldError = (field: keyof ExpenseForm) =>
-    fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
+    visibleErrors[field] ? <p className="text-xs font-medium text-red-600">{visibleErrors[field]}</p> : null;
   const selectedInventoryItem = inventoryItems.find((item) => item.id === form.inventoryItemId);
   const linkedQuantity = Number(form.inventoryQuantity) || 0;
   const savedInventoryItemId = String(originalInventoryItemId || "").trim();
@@ -141,7 +154,36 @@ export function FinanceExpenseModal({
       setIsCreatingVendor(false);
       setShowOptionalDetails(mode === "edit");
     }
+    setCreateStep(1);
+    setStepErrors({});
+    setPaymentDateError("");
   }, [open, mode]);
+
+  const continueToPayment = () => {
+    const errors: Partial<Record<keyof ExpenseForm, string>> = {};
+    if (!form.category) errors.category = "Choose a category.";
+    if (!form.date) errors.date = "Choose a date.";
+    if (!form.description.trim()) errors.description = "Enter a description.";
+    if ((Number(form.price) || 0) <= 0) errors.price = "Enter a total price greater than zero.";
+    if (form.inventoryItemId && (Number(form.inventoryQuantity) || 0) <= 0) errors.inventoryQuantity = "Enter a stock quantity greater than zero.";
+    setStepErrors(errors);
+    const firstInvalidField = Object.keys(errors)[0];
+    if (firstInvalidField) {
+      requestAnimationFrame(() => document.getElementById(`expense-${firstInvalidField === "inventoryItemId" ? "stock-item" : firstInvalidField === "inventoryQuantity" ? "stock-quantity" : firstInvalidField}`)?.focus());
+      return;
+    }
+    setCreateStep(2);
+  };
+
+  const saveWithInitialPayment = () => {
+    if (initialPayment.amount > 0 && !initialPayment.paymentDate) {
+      setPaymentDateError("Choose a payment date.");
+      requestAnimationFrame(() => document.getElementById("expense-initial-payment-date")?.focus());
+      return;
+    }
+    setPaymentDateError("");
+    onSave();
+  };
 
   const allVendorOptions = useMemo(() => {
     const vendors = new Map<string, string>();
@@ -222,7 +264,10 @@ export function FinanceExpenseModal({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={(nextOpen) => {
+        if (!nextOpen && isSaving) return;
+        onOpenChange(nextOpen);
+      }}>
         <DialogContent
           showCloseButton={false}
           className="!fixed !bottom-0 !left-0 !top-auto !flex h-auto max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(58rem,calc(100vw-2rem))] sm:max-w-4xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem] sm:border sm:border-slate-200"
@@ -240,7 +285,7 @@ export function FinanceExpenseModal({
                   </DialogTitle>
                   <DialogDescription className="mt-1 text-sm font-medium leading-5 text-slate-500">
                     {isCreateMode
-                      ? "Record the bill and purchase details. You can add an optional first payment below."
+                      ? createStep === 1 ? "Enter the bill details, then choose whether to record a payment." : "Review the expense and optionally record its first payment."
                       : "Update the bill details. Existing payments are managed from the expense ledger."}
                   </DialogDescription>
                 </div>
@@ -252,6 +297,7 @@ export function FinanceExpenseModal({
                   size="icon"
                   className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                   onClick={() => onOpenChange(false)}
+                  disabled={isSaving}
                   aria-label="Close expense modal"
                 >
                   <X className="h-5 w-5" />
@@ -259,6 +305,22 @@ export function FinanceExpenseModal({
               </div>
             </div>
           </DialogHeader>
+
+          {isCreateMode ? <div className="shrink-0 border-b border-slate-100 bg-white px-5 py-4 sm:px-7">
+            <div className="mx-auto flex max-w-3xl items-center" aria-label={`Step ${createStep} of 2`}>
+              {[{ step: 1, label: "Expense details" }, { step: 2, label: "Payment" }].map((item, index) => {
+                const active = createStep === item.step;
+                const complete = createStep > item.step;
+                return <div key={item.step} className={cn("flex items-center", index === 0 && "flex-1")}>
+                  <div className="flex items-center gap-2.5" aria-current={active ? "step" : undefined}>
+                    <span className={cn("flex h-8 w-8 items-center justify-center rounded-full text-sm font-black transition-colors", active ? "bg-blue-600 text-white shadow-md shadow-blue-100" : complete ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400")}>{complete ? <Check className="h-4 w-4" /> : item.step}</span>
+                    <span className={cn("text-sm font-black", active ? "text-slate-950" : complete ? "text-emerald-700" : "text-slate-400")}>{item.label}</span>
+                  </div>
+                  {index === 0 ? <div className={cn("mx-4 h-0.5 flex-1 rounded-full", complete ? "bg-emerald-400" : "bg-slate-200")} /> : null}
+                </div>;
+              })}
+            </div>
+          </div> : null}
 
           <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-7 sm:py-7">
             <div className="mx-auto max-w-3xl space-y-6">
@@ -299,7 +361,7 @@ export function FinanceExpenseModal({
                 </dl>
               </section> : null}
 
-              <section className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              {(!isCreateMode || createStep === 1) ? <section className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <div className="mb-5"><h3 className="text-xl font-black tracking-tight text-slate-950">Expense Details</h3><p className="mt-1 text-sm font-medium text-slate-500">Enter the bill details. Payments have their own dated ledger records.</p></div>
             <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
@@ -309,8 +371,8 @@ export function FinanceExpenseModal({
                 <Select value={form.category} onValueChange={(value) => updateForm({ category: value })}>
                   <SelectTrigger
                     id="expense-category"
-                    className={cn("h-11 border-slate-200 bg-white", fieldErrors.category && errorClassName)}
-                    aria-invalid={Boolean(fieldErrors.category)}
+                    className={cn("h-11 border-slate-200 bg-white", visibleErrors.category && errorClassName)}
+                    aria-invalid={Boolean(visibleErrors.category)}
                   >
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
@@ -333,8 +395,8 @@ export function FinanceExpenseModal({
                   id="expense-date"
                   type="date"
                   value={form.date}
-                  className={cn("h-14 rounded-2xl border-slate-200 bg-white px-4 text-base font-bold shadow-sm focus-visible:ring-blue-500", fieldErrors.date && errorClassName)}
-                  aria-invalid={Boolean(fieldErrors.date)}
+                  className={cn("h-14 rounded-2xl border-slate-200 bg-white px-4 text-base font-bold shadow-sm focus-visible:ring-blue-500", visibleErrors.date && errorClassName)}
+                  aria-invalid={Boolean(visibleErrors.date)}
                   onChange={(event) => updateForm({ date: event.target.value })}
                 />
                 {renderFieldError("date")}
@@ -348,8 +410,8 @@ export function FinanceExpenseModal({
                   id="expense-description"
                   placeholder="e.g., Crown prep lab fee"
                   value={form.description}
-                  className={cn("h-11 border-slate-200 bg-white", fieldErrors.description && errorClassName)}
-                  aria-invalid={Boolean(fieldErrors.description)}
+                  className={cn("h-11 border-slate-200 bg-white", visibleErrors.description && errorClassName)}
+                  aria-invalid={Boolean(visibleErrors.description)}
                   onChange={(event) => updateForm({ description: event.target.value })}
                 />
                 {renderFieldError("description")}
@@ -359,7 +421,7 @@ export function FinanceExpenseModal({
                 <Label htmlFor="expense-price" className="text-xs font-bold uppercase tracking-wide text-slate-500">
                   Total Price ({"\u20b1"})
                 </Label>
-                <div className="relative"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-slate-700">{"\u20b1"}</span><Input id="expense-price" type="number" min="0" value={form.price} className={cn("h-16 rounded-2xl border-slate-200 bg-white pl-9 text-2xl font-black shadow-sm focus-visible:ring-blue-500", fieldErrors.price && errorClassName)} aria-invalid={Boolean(fieldErrors.price)} onChange={(event) => updatePrice(Number(event.target.value))} /></div>
+                <div className="relative"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-slate-700">{"\u20b1"}</span><Input id="expense-price" type="number" min="0" value={form.price} className={cn("h-16 rounded-2xl border-slate-200 bg-white pl-9 text-2xl font-black shadow-sm focus-visible:ring-blue-500", visibleErrors.price && errorClassName)} aria-invalid={Boolean(visibleErrors.price)} onChange={(event) => updatePrice(Number(event.target.value))} /></div>
                 <p className="text-xs text-slate-500">Full cost of the item or expense.</p>
                 {renderFieldError("price")}
               </div>
@@ -467,8 +529,8 @@ export function FinanceExpenseModal({
                         <Select value={form.inventoryItemId || "none"} onValueChange={selectInventoryItem}>
                           <SelectTrigger
                             id="expense-stock-item"
-                            className={cn("h-11 border-slate-200 bg-white", fieldErrors.inventoryItemId && errorClassName)}
-                            aria-invalid={Boolean(fieldErrors.inventoryItemId)}
+                            className={cn("h-11 border-slate-200 bg-white", visibleErrors.inventoryItemId && errorClassName)}
+                            aria-invalid={Boolean(visibleErrors.inventoryItemId)}
                           >
                             <SelectValue placeholder="No stock item" />
                           </SelectTrigger>
@@ -494,8 +556,8 @@ export function FinanceExpenseModal({
                           min="0"
                           disabled={!selectedInventoryItem}
                           value={form.inventoryQuantity}
-                          className={cn("h-11 border-slate-200 bg-white", fieldErrors.inventoryQuantity && errorClassName)}
-                          aria-invalid={Boolean(fieldErrors.inventoryQuantity)}
+                          className={cn("h-11 border-slate-200 bg-white", visibleErrors.inventoryQuantity && errorClassName)}
+                          aria-invalid={Boolean(visibleErrors.inventoryQuantity)}
                           onChange={(event) => updateInventoryQuantity(Number(event.target.value))}
                         />
                         {renderFieldError("inventoryQuantity")}
@@ -544,36 +606,38 @@ export function FinanceExpenseModal({
                   </button>
                 </div>}
             </div>
+              </section> : null}
+              {isCreateMode && createStep === 2 ? <>
+              <section className="rounded-[1.5rem] border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Expense ready to create</p><h3 className="mt-1 text-xl font-black text-slate-950">{form.description || "New expense"}</h3><p className="mt-1 text-sm font-semibold text-slate-500">{form.category || "Uncategorized"} · {form.date}</p></div><div className="text-right"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Total price</p><p className="mt-1 text-2xl font-black text-slate-950">{formatExpenseCurrency(totalPrice)}</p></div></div>
               </section>
-              {isCreateMode ? <section className="rounded-[1.5rem] border border-emerald-100 bg-emerald-50/35 p-5 shadow-sm sm:p-6">
+              <section className="rounded-[1.5rem] border border-emerald-100 bg-emerald-50/35 p-5 shadow-sm sm:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-xl font-black tracking-tight text-slate-950">Initial Payment <span className="text-sm font-bold text-slate-400">(optional)</span></h3><p className="mt-1 text-sm font-medium text-slate-500">Create the bill and its first dated payment together. Leave the amount at zero to add payments later.</p></div><span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 ring-1 ring-emerald-100">Payment ledger</span></div>
-                <div className="mt-5 grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="expense-initial-payment" className="text-xs font-bold uppercase tracking-wide text-slate-500">Amount Paid Now (₱)</Label><Input id="expense-initial-payment" type="number" min="0" value={initialPayment.amount || ""} placeholder="0" className="h-12 rounded-xl border-emerald-100 bg-white text-lg font-black" onChange={(event) => onInitialPaymentChange?.({ ...initialPayment, amount: Math.max(0, Number(event.target.value) || 0) })} /></div><div className="space-y-2"><Label htmlFor="expense-initial-payment-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">Payment Date</Label><Input id="expense-initial-payment-date" type="date" value={initialPayment.paymentDate} className="h-12 rounded-xl border-emerald-100 bg-white font-bold" disabled={initialPayment.amount <= 0} onChange={(event) => onInitialPaymentChange?.({ ...initialPayment, paymentDate: event.target.value })} /></div>
+                <div className="mt-5 grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="expense-initial-payment" className="text-xs font-bold uppercase tracking-wide text-slate-500">Amount Paid Now (₱)</Label><Input id="expense-initial-payment" type="number" min="0" value={initialPayment.amount || ""} placeholder="0" className="h-12 rounded-xl border-emerald-100 bg-white text-lg font-black" onChange={(event) => onInitialPaymentChange?.({ ...initialPayment, amount: Math.max(0, Number(event.target.value) || 0) })} /></div><div className="space-y-2"><Label htmlFor="expense-initial-payment-date" className="text-xs font-bold uppercase tracking-wide text-slate-500">Payment Date</Label><Input id="expense-initial-payment-date" type="date" value={initialPayment.paymentDate} className={cn("h-12 rounded-xl border-emerald-100 bg-white font-bold", paymentDateError && errorClassName)} aria-invalid={Boolean(paymentDateError)} aria-describedby={paymentDateError ? "expense-initial-payment-date-error" : undefined} disabled={initialPayment.amount <= 0} onChange={(event) => { setPaymentDateError(""); onInitialPaymentChange?.({ ...initialPayment, paymentDate: event.target.value }); }} />{paymentDateError ? <p id="expense-initial-payment-date-error" className="text-xs font-medium text-red-600">{paymentDateError}</p> : null}</div>
                   <div className="space-y-2"><Label htmlFor="expense-initial-payment-method" className="text-xs font-bold uppercase tracking-wide text-slate-500">Payment Method</Label><Select value={initialPayment.method} disabled={initialPayment.amount <= 0} onValueChange={(method) => onInitialPaymentChange?.({ ...initialPayment, method })}><SelectTrigger id="expense-initial-payment-method" className="h-12 rounded-xl border-emerald-100 bg-white"><SelectValue /></SelectTrigger><SelectContent>{PAYMENT_METHOD_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label htmlFor="expense-initial-payment-reference" className="text-xs font-bold uppercase tracking-wide text-slate-500">Reference ID <span className="normal-case">(optional)</span></Label><Input id="expense-initial-payment-reference" value={initialPayment.transactionId} disabled={initialPayment.amount <= 0} placeholder="Receipt or transfer ID" className="h-12 rounded-xl border-emerald-100 bg-white" onChange={(event) => onInitialPaymentChange?.({ ...initialPayment, transactionId: event.target.value })} /></div></div>
                 <div className="mt-4 space-y-2"><Label htmlFor="expense-initial-payment-notes" className="text-xs font-bold uppercase tracking-wide text-slate-500">Payment Notes <span className="normal-case">(optional)</span></Label><Textarea id="expense-initial-payment-notes" value={initialPayment.notes} disabled={initialPayment.amount <= 0} placeholder="Optional payment details" className="min-h-20 rounded-xl border-emerald-100 bg-white" onChange={(event) => onInitialPaymentChange?.({ ...initialPayment, notes: event.target.value })} /></div>
-              </section> : null}
+              </section></> : null}
             </div>
           </div>
 
           <DialogFooter className="shrink-0 !flex flex-col-reverse gap-3 border-t border-slate-100 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] sm:!flex-row sm:justify-end sm:px-7 sm:pb-5">
-            <Button variant="outline" className="h-12 w-full rounded-full font-bold sm:w-auto sm:min-w-36" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            {isCreateMode && onSaveAndAddPayment ? (
+            {isCreateMode && createStep === 2 ? <Button variant="outline" className="h-12 w-full rounded-full font-bold sm:w-auto sm:min-w-32" onClick={() => setCreateStep(1)} disabled={isSaving}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button> : <Button variant="outline" className="h-12 w-full rounded-full font-bold sm:w-auto sm:min-w-36" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancel</Button>}
+            {isCreateMode && createStep === 2 ? (
               <Button
                 variant="outline"
-                className="h-12 w-full rounded-full border-blue-200 font-black text-blue-700 hover:bg-blue-50 sm:w-auto sm:min-w-48"
-                onClick={onSaveAndAddPayment}
+                className="h-12 w-full rounded-full border-slate-200 font-black text-slate-700 hover:bg-slate-50 sm:w-auto sm:min-w-48"
+                onClick={onSaveWithoutPayment}
                 disabled={isSaving}
               >
-                Save &amp; Add Payment
+                Create Without Payment
               </Button>
             ) : null}
             <Button
               className="h-12 w-full rounded-full bg-blue-600 font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700 sm:w-auto sm:min-w-48"
-              onClick={onSave}
-              disabled={isSaving}
+              onClick={isCreateMode && createStep === 1 ? continueToPayment : isCreateMode ? saveWithInitialPayment : onSave}
+              disabled={isSaving || (isCreateMode && createStep === 2 && initialPayment.amount <= 0)}
             >
-              {isSaving ? "Saving..." : isCreateMode ? "Add Expense" : "Save Changes"}
+              {isSaving ? "Saving..." : isCreateMode ? createStep === 1 ? "Continue to Payment" : "Create Expense & Record Payment" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

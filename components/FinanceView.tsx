@@ -1547,14 +1547,14 @@ export function FinanceView() {
     setExpenseToDelete(expense);
   };
 
-  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number, addPaymentAfterSave = false) => {
+  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number, addPaymentAfterSave = false, skipInitialPayment = false) => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
     if (!expenseForm.date) requiredErrors.date = "Choose a date.";
     if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
     const price = Math.max(0, Number(expenseForm.price) || 0);
     const totalPaid = expenseModalMode === "edit" && selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0;
-    const initialPaymentAmount = expenseModalMode === "create" ? Math.max(0, Number(expenseInitialPayment.amount) || 0) : 0;
+    const initialPaymentAmount = expenseModalMode === "create" && !skipInitialPayment ? Math.max(0, Number(expenseInitialPayment.amount) || 0) : 0;
     if (price <= 0) requiredErrors.price = "Enter a total price greater than zero.";
 
     if (Object.keys(requiredErrors).length > 0) {
@@ -4264,6 +4264,7 @@ export function FinanceView() {
         onFormChange={handleExpenseFormChange}
         onInitialPaymentChange={setExpenseInitialPayment}
         onSave={() => void handleSaveExpense()}
+        onSaveWithoutPayment={() => void handleSaveExpense(false, undefined, false, true)}
         onSaveAndAddPayment={() => void handleSaveExpense(false, undefined, true)}
       />
       <ExpenseHistoryView
