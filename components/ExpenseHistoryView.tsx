@@ -93,6 +93,36 @@ const normalizeNumber = (value: unknown) => (Number.isFinite(Number(value)) ? St
 const normalizeDate = (value: unknown) => (value ? String(value).slice(0, 10) : "");
 const stateBadgeClass = (historical: boolean, deleted: boolean, status?: string) => (historical ? "border-amber-200 bg-amber-50 text-amber-700" : deleted ? "border-red-200 bg-red-50 text-red-700" : String(status).toLowerCase() === "paid" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-violet-200 bg-violet-50 text-violet-700");
 
+const timestamp = (value?: unknown) => {
+  const parsed = value ? new Date(String(value)).getTime() : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Rebuild a child payment exactly as it existed at the selected parent audit event. */
+const paymentAsOf = (payment: ExpensePayment, cutoffAt?: string): ExpensePayment | null => {
+  if (!cutoffAt) return payment;
+  const cutoff = timestamp(cutoffAt);
+  const eligibleLogs = [...(payment.logs || [])]
+    .filter((log) => timestamp(log.changedAt) <= cutoff)
+    .sort((a, b) => timestamp(a.changedAt) - timestamp(b.changedAt));
+  if (eligibleLogs.length) {
+    const state = eligibleLogs[eligibleLogs.length - 1].newState;
+    if (!state || Object.keys(state).length === 0) return null;
+    return { ...payment, ...state, logs: payment.logs } as ExpensePayment;
+  }
+  if (payment.logs?.length) {
+    const earliest = [...payment.logs].sort((a, b) => timestamp(a.changedAt) - timestamp(b.changedAt))[0];
+    if (String(earliest.changeType).toLowerCase() === "create" || timestamp(payment.createdAt) > cutoff) return null;
+    const stateBeforeFirstStoredChange = earliest.previousState;
+    return stateBeforeFirstStoredChange && Object.keys(stateBeforeFirstStoredChange).length
+      ? ({ ...payment, ...stateBeforeFirstStoredChange, logs: payment.logs } as ExpensePayment)
+      : null;
+  }
+  // Older imported rows can lack a creation log. Their persisted creation
+  // timestamp is still valid event chronology; paymentDate deliberately is not.
+  return timestamp(payment.createdAt) <= cutoff ? payment : null;
+};
+
 const PreviousLabel = ({ value }: { value?: string }) =>
   value ? (
     <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]">
@@ -181,7 +211,21 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
   useEffect(() => setAuditExpanded(false), [displayedSnapshot?._historyLogId]);
 
   const isHistorical = Boolean(displayedSnapshot?._isHistorical);
-  const historyLog = useMemo(() => (isHistorical ? historyLogs.find((log) => log.id === displayedSnapshot?._historyLogId) : undefined), [displayedSnapshot?._historyLogId, historyLogs, isHistorical]);
+  const historyLog = useMemo(() => {
+    if (!isHistorical) return undefined;
+    const persisted = historyLogs.find((log) => log.id === displayedSnapshot?._historyLogId);
+    if (!persisted) return undefined;
+    // The history list may intentionally group expense creation with its initial
+    // payment. Use the exact entry state carried into the snapshot so Detailed
+    // Audit History describes that same combined event instead of falling back
+    // to the narrower raw expense-create row.
+    return {
+      ...persisted,
+      action: String(displayedSnapshot?._historyAction || persisted.action),
+      previousState: displayedSnapshot?._historyPreviousState || persisted.previousState,
+      newState: displayedSnapshot?._historyNewState || persisted.newState,
+    };
+  }, [displayedSnapshot?._historyAction, displayedSnapshot?._historyLogId, displayedSnapshot?._historyNewState, displayedSnapshot?._historyPreviousState, historyLogs, isHistorical]);
   const inventoryNames = useMemo(() => Object.fromEntries(inventoryItems.map((item) => [String(item.id), item.item])), [inventoryItems]);
   const changes = historyLog ? getFinanceHistoryChanges("expense", historyLog, { inventoryNames }) : [];
   const changeByKey = new Map(changes.map((change) => [change.key, change]));
@@ -235,31 +279,51 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
   const priceLabel = labelFor(displayedSnapshot, "price");
   const amountLabel = labelFor(displayedSnapshot, "amount");
   const balanceLabel = labelFor(displayedSnapshot, "balance");
-  const activePayments = payments.filter((payment) => !payment.deleted).sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
+  const paymentCutoffAt = isHistorical ? String(displayedSnapshot?._historyPaymentCutoffAt || displayedSnapshot?._historyChangedAt || "") : undefined;
+  const snapshotPayments = useMemo(
+    () => payments.map((payment) => paymentAsOf(payment, paymentCutoffAt)).filter((payment): payment is ExpensePayment => Boolean(payment)),
+    [paymentCutoffAt, payments],
+  );
+  const activePayments = snapshotPayments.filter((payment) => !payment.deleted).sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt));
   const latestPayment = activePayments[0];
-  const ledgerPayments = useMemo(() => [...payments].sort((a, b) => String(b.paymentDate || b.date || b.createdAt || "").localeCompare(String(a.paymentDate || a.date || a.createdAt || ""))), [payments]);
+  const ledgerPayments = useMemo(() => [...snapshotPayments].sort((a, b) => timestamp(b.updatedAt || b.createdAt) - timestamp(a.updatedAt || a.createdAt)), [snapshotPayments]);
+  const focusedPaymentId = isHistorical ? String(displayedSnapshot?._historyFocusedPaymentId || "") : requestedPaymentId;
   useEffect(() => {
     if (!open || paymentsLoading) return;
     setSelectedPaymentId((currentId) => {
       // A focused ID is an opening hint only. Once staff select another ledger
       // row, retain that choice through data refreshes while it still exists.
       if (currentId && ledgerPayments.some((payment) => payment.id === currentId)) return currentId;
-      if (requestedPaymentId && ledgerPayments.some((payment) => payment.id === requestedPaymentId)) return requestedPaymentId;
+      if (focusedPaymentId && ledgerPayments.some((payment) => payment.id === focusedPaymentId)) return focusedPaymentId;
       return ledgerPayments[0]?.id || "";
     });
-  }, [ledgerPayments, open, paymentsLoading, requestedPaymentId]);
+  }, [focusedPaymentId, ledgerPayments, open, paymentsLoading]);
   const selectedPayment = ledgerPayments.find((payment) => payment.id === selectedPaymentId) || ledgerPayments[0] || null;
+  const currentSelectedPayment = selectedPayment ? payments.find((payment) => String(payment.id) === String(selectedPayment.id)) : null;
+  const paymentWarningFor = (key: keyof ExpensePayment, normalizer = normalizeText) => {
+    if (!isHistorical || !selectedPayment || !currentSelectedPayment) return null;
+    const label = key === "amount" ? "selected payment amount" : key === "method" ? "selected payment method" : key === "paymentDate" ? "selected payment date" : "selected payment state";
+    const snapshotValue = key === "deleted" ? Boolean(selectedPayment.deleted) : selectedPayment[key];
+    const currentValue = key === "deleted" ? Boolean(currentSelectedPayment.deleted) : currentSelectedPayment[key];
+    const display = (value: unknown) => key === "amount" ? pesoFormatter.format(Number(value) || 0) : key === "method" ? formatOptionLabel(String(value || ""), PAYMENT_METHOD_OPTIONS) : key === "paymentDate" ? formatDate(value) : value ? "Deleted" : "Active";
+    return createCurrentFieldChange(label, snapshotValue, currentValue, display(snapshotValue), display(currentValue), normalizer);
+  };
+  const currentActivePaymentCount = payments.filter((payment) => !payment.deleted).length;
+  const paymentCountWarning = isHistorical
+    ? createCurrentFieldChange("payment count", activePayments.length, currentActivePaymentCount, `${activePayments.length} active`, `${currentActivePaymentCount} active`, normalizeNumber)
+    : null;
   const selectedPaymentBalance = useMemo(() => {
     if (!selectedPayment) return Math.max(0, Number(displayedSnapshot?.balance) || 0);
-    const chronological = payments.filter((payment) => !payment.deleted).sort((a, b) => String(a.paymentDate || a.date || a.createdAt || "").localeCompare(String(b.paymentDate || b.date || b.createdAt || "")));
+    const chronological = snapshotPayments.filter((payment) => !payment.deleted).sort((a, b) => timestamp(a.createdAt) - timestamp(b.createdAt));
     const selectedIndex = chronological.findIndex((payment) => String(payment.id) === String(selectedPayment.id));
     const throughSelected = (selectedIndex < 0 ? [] : chronological.slice(0, selectedIndex + 1)).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-    return Math.max(0, (Number(currentExpense?.price ?? currentExpense?.amount) || 0) - throughSelected);
-  }, [currentExpense?.amount, currentExpense?.price, payments, selectedPayment]);
+    return Math.max(0, (Number(displayedSnapshot?.price ?? displayedSnapshot?.amount) || 0) - throughSelected);
+  }, [displayedSnapshot?.amount, displayedSnapshot?.price, selectedPayment, snapshotPayments]);
 
   const showHistoricalSnapshot = (snapshot: ExpenseHistoricalSnapshot) => {
     if (displayedSnapshot) setBackStack((stack) => [...stack.slice(-4), displayedSnapshot]);
     setDisplayedSnapshot(snapshot);
+    setSelectedPaymentId(String(snapshot._historyFocusedPaymentId || ""));
   };
   const goBack = () =>
     setBackStack((stack) => {
@@ -352,8 +416,8 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                 <div className="sm:col-span-3 flex flex-wrap items-start gap-2">
                   <SummaryBadge value={labelFor(displayedSnapshot, "category")} previous={previousFor("category")} currentChange={warningFor("category")} />
                   <SummaryBadge value={statusLabel} previous={previousFor("status")} currentChange={warningFor("status")} className={displayedSnapshot.deleted ? "bg-red-500/20 text-red-200" : String(displayedSnapshot.status).toLowerCase() === "paid" ? "bg-emerald-400/15 text-emerald-200" : "bg-amber-400/15 text-amber-200"} />
-                  <SummaryBadge value={`${activePayments.length} payment${activePayments.length === 1 ? "" : "s"}`} />
-                  <SummaryBadge value={latestPayment ? `Latest ${pesoFormatter.format(latestPayment.amount)} · ${formatOptionLabel(latestPayment.method, PAYMENT_METHOD_OPTIONS)} · ${formatDate(latestPayment.date)}` : "No payments recorded"} />
+                  <SummaryBadge value={`${activePayments.length} payment${activePayments.length === 1 ? "" : "s"}`} currentChange={paymentCountWarning} />
+                  <SummaryBadge value={latestPayment ? `Latest ${pesoFormatter.format(latestPayment.amount)} · ${formatOptionLabel(latestPayment.method, PAYMENT_METHOD_OPTIONS)} · ${formatDate(latestPayment.paymentDate || latestPayment.date)}` : "No payments recorded"} />
                   <SummaryBadge value={displayedSnapshot.recurring ? "Recurring" : "One-time"} previous={previousFor("recurring")} currentChange={warningFor("recurring")} />
                 </div>
               </div>
@@ -378,8 +442,8 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
             <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-black text-slate-950">{isHistorical ? "Current payment ledger" : "Payment ledger"}</h3>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">{isHistorical ? "Payments shown are from the current expense record, not this historical snapshot." : `${payments.filter((payment) => !payment.deleted).length} active payment${payments.filter((payment) => !payment.deleted).length === 1 ? "" : "s"}`}</p>
+                  <h3 className="text-lg font-black text-slate-950">{isHistorical ? "Payment ledger at this snapshot" : "Payment ledger"}</h3>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{isHistorical ? `Only payment activity saved by ${formatTimestamp(paymentCutoffAt)} is shown. Later activity is hidden.` : `${payments.filter((payment) => !payment.deleted).length} active payment${payments.filter((payment) => !payment.deleted).length === 1 ? "" : "s"}`}</p>
                 </div>
                 {!isHistorical && !displayedSnapshot.deleted && onAddPayment ? (
                   <Button size="sm" onClick={() => onAddPayment(currentExpense || displayedSnapshot)} className="rounded-xl bg-violet-600 font-black hover:bg-violet-700">
@@ -395,18 +459,18 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                       <History className="h-4 w-4 text-violet-600" />
                       <span className="text-xs font-black uppercase tracking-[0.14em] text-slate-600">Selected payment</span>
                     </div>
-                    <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${selectedPayment.deleted ? "bg-red-100 text-red-700" : "bg-white text-emerald-700 ring-1 ring-emerald-100"}`}>{selectedPayment.deleted ? "Deleted payment" : "Current ledger item"}</span>
+                    <div className="flex items-center gap-1.5"><span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${selectedPayment.deleted ? "bg-red-100 text-red-700" : "bg-white text-emerald-700 ring-1 ring-emerald-100"}`}>{selectedPayment.deleted ? "Deleted at this snapshot" : isHistorical ? "Active at this snapshot" : "Current ledger item"}</span><CurrentChangeIndicator change={paymentWarningFor("deleted")} /></div>
                   </div>
                   <div className="grid gap-4 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                    <div className={`flex h-16 w-20 items-center justify-center rounded-2xl bg-white text-sm font-black shadow-sm ring-1 ${selectedPayment.deleted ? "text-red-700 ring-red-100" : "text-emerald-700 ring-emerald-100"}`}>{formatOptionLabel(selectedPayment.method, PAYMENT_METHOD_OPTIONS)}</div>
+                    <div className={`flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-2xl bg-white text-sm font-black shadow-sm ring-1 ${selectedPayment.deleted ? "text-red-700 ring-red-100" : "text-emerald-700 ring-emerald-100"}`}><span>{formatOptionLabel(selectedPayment.method, PAYMENT_METHOD_OPTIONS)}</span><CurrentChangeIndicator change={paymentWarningFor("method")} /></div>
                     <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-3">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Amount</p>
-                        <p className={`mt-1 text-xl font-black ${selectedPayment.deleted ? "text-red-700" : "text-emerald-700"}`}>{pesoFormatter.format(Number(selectedPayment.amount) || 0)}</p>
+                        <div className="mt-1 flex items-center gap-1.5"><p className={`text-xl font-black ${selectedPayment.deleted ? "text-red-700" : "text-emerald-700"}`}>{pesoFormatter.format(Number(selectedPayment.amount) || 0)}</p><CurrentChangeIndicator change={paymentWarningFor("amount", normalizeNumber)} /></div>
                       </div>
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Payment date</p>
-                        <p className="mt-1 text-sm font-black text-slate-900">{formatDate(selectedPayment.paymentDate || selectedPayment.date)}</p>
+                        <div className="mt-1 flex items-center gap-1.5"><p className="text-sm font-black text-slate-900">{formatDate(selectedPayment.paymentDate || selectedPayment.date)}</p><CurrentChangeIndicator change={paymentWarningFor("paymentDate", normalizeDate)} /></div>
                       </div>
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Reference</p>
@@ -452,7 +516,7 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                       <div
                         className="h-full bg-emerald-500"
                         style={{
-                          width: `${Math.min(100, Math.max(0, (((Number(currentExpense?.price ?? currentExpense?.amount) || 0) - selectedPaymentBalance) / Math.max(1, Number(currentExpense?.price ?? currentExpense?.amount) || 1)) * 100))}%`,
+                          width: `${Math.min(100, Math.max(0, (((Number(displayedSnapshot?.price ?? displayedSnapshot?.amount) || 0) - selectedPaymentBalance) / Math.max(1, Number(displayedSnapshot?.price ?? displayedSnapshot?.amount) || 1)) * 100))}%`,
                         }}
                       />
                     </div>
@@ -463,8 +527,8 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                 <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white py-8 text-center text-sm font-semibold text-slate-500">Loading payments...</div>
               ) : paymentsError ? (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{paymentsError}</div>
-              ) : payments.length === 0 ? (
-                <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white py-8 text-center text-sm font-semibold text-slate-500">No payments recorded yet.</div>
+              ) : ledgerPayments.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white py-8 text-center text-sm font-semibold text-slate-500">{isHistorical ? "No payments existed at this snapshot." : "No payments recorded yet."}</div>
               ) : (
                 (() => {
                   const otherPayments = ledgerPayments.filter((payment) => String(payment.id) !== String(selectedPayment?.id || ""));

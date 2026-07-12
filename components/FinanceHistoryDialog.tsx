@@ -23,6 +23,7 @@ export type FinanceHistoryLog = {
   amount?: number;
   synthetic?: boolean;
   groupedInitialPayment?: boolean;
+  groupedPaymentChangedAt?: string;
 };
 
 export type ExpenseHistoricalSnapshot = Record<string, any> & {
@@ -79,6 +80,8 @@ export const createExpenseSnapshotFromLog = (log: FinanceHistoryLog): ExpenseHis
     _historyActorRole: log.changedByRole,
     _historyPreviousState: log.previousState || {},
     _historyNewState: log.newState || {},
+    _historyFocusedPaymentId: log.newState?.paymentId || log.previousState?.paymentId || "",
+    _historyPaymentCutoffAt: log.groupedPaymentChangedAt || log.changedAt,
   };
 };
 
@@ -115,6 +118,7 @@ export const getExpenseHistoryEntries = (logs: FinanceHistoryLog[]) => {
         amount: Number(initialPayment.newState?.paymentAmount ?? initialPayment.amount) || 0,
         summary: "Expense created",
         groupedInitialPayment: true,
+        groupedPaymentChangedAt: initialPayment.changedAt,
       };
     })
     .filter((entry) => !mergedPaymentIds.has(entry.id));

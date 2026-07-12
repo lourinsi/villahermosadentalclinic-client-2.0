@@ -37,6 +37,13 @@ export type ExpensePayment = {
   createdAt?: string;
   updatedAt?: string;
   changedByName?: string;
+  logs?: Array<{
+    id: string;
+    changeType: string;
+    previousState?: Record<string, any>;
+    newState?: Record<string, any>;
+    changedAt?: string;
+  }>;
 };
 
 type FinanceExpensePaymentModalProps = {
