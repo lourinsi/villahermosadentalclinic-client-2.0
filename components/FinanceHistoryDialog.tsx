@@ -1,9 +1,10 @@
 "use client";
 
 import { Clock, Eye, History, Loader2, TriangleAlert, X } from "lucide-react";
-import { CurrencyText } from "./CurrencyAmount";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { EXPENSE_CATEGORY_OPTIONS, EXPENSE_STATUS_OPTIONS, PAYMENT_METHOD_OPTIONS, formatOptionLabel } from "./financeModalOptions";
+import { HistoryBadgePill, type HistoryBadge } from "./historyPresentation";
+import { formatPaymentMethod } from "./paymentPresentation";
 
 export type FinanceHistoryEntityType = "expense" | "inventory" | "payroll";
 
@@ -145,7 +146,7 @@ export const getExpenseHistoryEntries = (logs: FinanceHistoryLog[]) => {
 };
 
 const FIELD_ORDER: Record<FinanceHistoryEntityType, string[]> = {
-  expense: ["date", "category", "description", "price", "amount", "totalPaid", "balance", "vendor", "paymentId", "paymentAmount", "paymentMethod", "paymentDate", "paymentReference", "paymentNotes", "paymentState", "status", "recurring", "inventoryItemId", "inventoryQuantity", "deleted", "deletedAt"],
+  expense: ["date", "category", "description", "price", "totalPaid", "balance", "vendor", "paymentId", "paymentAmount", "paymentMethod", "paymentDate", "paymentReference", "paymentNotes", "paymentState", "status", "recurring", "inventoryItemId", "inventoryQuantity", "deleted", "deletedAt"],
   inventory: ["item", "quantity", "unit", "costPerUnit", "totalValue", "supplier", "lastOrdered"],
   payroll: ["name", "staffName", "role", "type", "baseSalary", "staffBaseSalary", "amount", "bonus", "managedAdjustment", "total", "date", "paymentDate", "status", "month", "notes", "repaymentSchedule"],
 };
@@ -156,7 +157,7 @@ const FIELD_LABELS: Record<string, string> = {
   totalValue: "Total value",
   lastOrdered: "Last ordered",
   price: "Total price",
-  amount: "Amount paid",
+  amount: "Total paid",
   totalPaid: "Total paid",
   balance: "Balance",
   paymentId: "Payment record",
@@ -252,9 +253,20 @@ export const getFinanceHistoryChanges = (entityType: FinanceHistoryEntityType, l
     hidden.add("deletedAt");
   }
   const keys = Array.from(new Set([...FIELD_ORDER[entityType], ...Object.keys(previous), ...Object.keys(next)]));
-  const creation = log.action.includes("create") || Object.keys(previous).length === 0;
+  // `payment_create` is an update to an existing expense projection, not an
+  // expense-creation snapshot. Treating every action containing "create" as
+  // a creation made later payment logs repeat the original "Not set → …"
+  // fields instead of comparing that payment event's own stored states.
+  const action = String(log.action || "").trim().toLowerCase();
+  const creation = action === "create" || Object.keys(previous).length === 0;
   return keys
-    .filter((key) => !hidden.has(key) && (creation ? hasMeaningfulValue(next[key]) : valuesChanged(previous[key], next[key])))
+    .filter((key) => {
+      if (hidden.has(key)) return false;
+      // Detailed expenses keep `amount` as a backwards-compatible projection
+      // of `totalPaid`. Showing both creates two identical audit rows.
+      if (entityType === "expense" && key === "amount" && (hasMeaningfulValue(previous.totalPaid) || hasMeaningfulValue(next.totalPaid))) return false;
+      return creation ? hasMeaningfulValue(next[key]) : valuesChanged(previous[key], next[key]);
+    })
     .map((key) => ({
       key,
       label: formatLabel(key),
@@ -280,18 +292,75 @@ const getActionLabel = (action: string) => ACTION_LABELS[action] || formatLabel(
 const getActionBadgeClass = (action: string) => (action.includes("delete") ? "border-red-200 bg-red-50 text-red-700" : action.includes("restore") || ["pay", "process"].includes(action) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : action.includes("create") ? "border-violet-200 bg-violet-50 text-violet-700" : "border-amber-200 bg-amber-50 text-amber-700");
 const getEntityLabel = (entityType: FinanceHistoryEntityType) => (entityType === "expense" ? "Expense" : entityType === "inventory" ? "Inventory" : "Payroll");
 
+const getExpensePaymentAdjustment = (log: FinanceHistoryLog) => {
+  if (String(log.action || "").toLowerCase() !== "payment_update") return null;
+  const before = Number(log.previousState?.paymentAmount);
+  const after = Number(log.newState?.paymentAmount);
+  return Number.isFinite(before) && Number.isFinite(after) && before !== after ? { before, after } : null;
+};
+
+const getExpenseHistoryBadges = (log: FinanceHistoryLog): HistoryBadge[] => {
+  const action = String(log.action || "").toLowerCase();
+  const adjustment = getExpensePaymentAdjustment(log);
+  const paymentAmount = Number(log.newState?.paymentAmount ?? log.previousState?.paymentAmount ?? log.amount);
+  const status = String(log.newState?.status || "").toLowerCase();
+  const badges: HistoryBadge[] = [];
+
+  if (["partial", "paid", "overpaid"].includes(status)) {
+    badges.push({ label: formatOptionLabel(status, EXPENSE_STATUS_OPTIONS), tone: "payment" });
+  }
+  if (action === "payment_update" && adjustment) {
+    return [
+      ...badges,
+      { label: "Adjusted", tone: "adjustment" },
+      { label: `${formatCurrency(adjustment.before)} → ${formatCurrency(adjustment.after)}`, tone: "amount" },
+    ];
+  }
+  if (action === "payment_create" || log.groupedInitialPayment) badges.push({ label: "Payment recorded", tone: "recorded" });
+  else if (action === "payment_delete") badges.push({ label: "Payment deleted", tone: "deleted" });
+  else if (action === "payment_restore") badges.push({ label: "Payment restored", tone: "restored" });
+  else badges.push({ label: getActionLabel(action), tone: action === "create" ? "violet" : "adjustment" });
+
+  if (Number.isFinite(paymentAmount) && paymentAmount !== 0) {
+    badges.push({ label: formatCurrency(Math.abs(paymentAmount)), tone: "amount" });
+  }
+  return badges;
+};
+
+const getExpensePaymentNarrative = (log: FinanceHistoryLog) => {
+  const action = String(log.action || "").toLowerCase();
+  const adjustment = getExpensePaymentAdjustment(log);
+  const method = log.newState?.paymentMethod ?? log.newState?.method ?? log.previousState?.paymentMethod ?? log.previousState?.method;
+  const paymentDate = log.newState?.paymentDate ?? log.newState?.date ?? log.previousState?.paymentDate ?? log.previousState?.date;
+  if (adjustment) {
+    const delta = adjustment.after - adjustment.before;
+    const paymentContext = [
+      method ? formatPaymentMethod(method) : "",
+      paymentDate ? formatHistoryDate(paymentDate) : "",
+    ].filter(Boolean).join(" · ");
+    return `Payment adjusted from ${formatCurrency(adjustment.before)} to ${formatCurrency(adjustment.after)} (${delta >= 0 ? "+" : ""}${formatCurrency(delta)}).${paymentContext ? ` ${paymentContext}` : ""}`;
+  }
+  if (action === "payment_create" || log.groupedInitialPayment) {
+    return `${log.groupedInitialPayment ? "Initial payment" : "Payment recorded"}${method ? ` · ${formatPaymentMethod(method)}` : ""}${paymentDate ? ` · ${formatHistoryDate(paymentDate)}` : ""}`;
+  }
+  if (action === "payment_delete") return "Payment removed from this expense ledger.";
+  if (action === "payment_restore") return "Payment restored to this expense ledger.";
+  return "";
+};
+
 /** Expense history is intentionally summary-only; field-level changes belong to the snapshot view. */
 const getExpenseHistorySummary = (log: FinanceHistoryLog) => {
-  const explicitSummary = String(log.summary || "").trim();
-  if (explicitSummary) return explicitSummary;
-
   const action = String(log.action || "")
     .trim()
     .toLowerCase();
+  // Server notes include an internal payment ID for traceability. Reception
+  // history should use an operational label, never expose that identifier.
   if (action === "payment_create") return "Payment recorded";
-  if (action === "payment_update") return "Payment updated";
+  if (action === "payment_update") return getExpensePaymentAdjustment(log) ? "Payment adjusted" : "Payment updated";
   if (action === "payment_delete") return "Payment deleted";
   if (action === "payment_restore") return "Payment restored";
+  const explicitSummary = String(log.summary || "").trim();
+  if (explicitSummary) return explicitSummary;
   if (action.includes("create")) return "Expense created";
   if (action.includes("update")) return "Expense updated";
   if (action.includes("pay")) return "Expense paid";
@@ -346,31 +415,19 @@ export function FinanceHistoryDialog({ open, onOpenChange, entityType, title, de
           ) : (
             sortedLogs.map((log, index) => {
               const actor = log.changedByName || log.changedBy;
-              const isPaymentEvent = String(log.action).toLowerCase().startsWith("payment_") || log.groupedInitialPayment;
-              const rawAmount = isPaymentEvent ? (log.newState?.paymentAmount ?? log.previousState?.paymentAmount ?? log.amount) : undefined;
-              const amount = Number(rawAmount);
-              const hasAmount = entityType === "expense" && rawAmount !== undefined && rawAmount !== null && Number.isFinite(amount);
 
               if (entityType === "expense") {
+                const badges = getExpenseHistoryBadges(log);
+                const paymentNarrative = getExpensePaymentNarrative(log);
                 return (
                   <article key={log.id || `${log.action}-${log.changedAt}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="min-w-0 truncate text-sm font-black text-slate-950">{getExpenseHistorySummary(log)}</p>
-                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getActionBadgeClass(log.action)}`}>{getActionLabel(log.action)}</span>
-                          {log.groupedInitialPayment ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-tight text-emerald-700">Payment recorded</span> : null}
-                          {hasAmount ? (
-                            <span className="rounded-full border border-emerald-100 bg-white px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                              <CurrencyText value={formatCurrency(amount)} />
-                            </span>
-                          ) : null}
+                          {badges.map((badge) => <HistoryBadgePill key={`${badge.tone}-${badge.label}`} badge={badge} />)}
                         </div>
-                        {log.groupedInitialPayment ? (
-                          <p className="mt-2 text-xs font-bold text-slate-600">
-                            Initial payment · {formatOptionLabel(String(log.newState?.paymentMethod || "cash"), PAYMENT_METHOD_OPTIONS)} · {formatHistoryDate(log.newState?.paymentDate)}
-                          </p>
-                        ) : null}
+                        {paymentNarrative ? <p className="mt-2 text-xs font-bold text-slate-600">{paymentNarrative}</p> : null}
                         <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                           <Clock className="h-3 w-3" />
                           <span>{formatTimestamp(log.changedAt)}</span>

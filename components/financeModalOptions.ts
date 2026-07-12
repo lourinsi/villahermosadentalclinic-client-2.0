@@ -1,5 +1,15 @@
 "use client";
 
+// Kept as a compatibility re-export while finance callers migrate. The
+// definition itself is shared with appointment payments.
+export {
+  PAYMENT_METHOD_OPTIONS,
+  formatPaymentMethod,
+  getPaymentMethodOption,
+  normalizePaymentMethod,
+} from "./paymentPresentation";
+import { formatPaymentMethod, PAYMENT_METHOD_OPTIONS } from "./paymentPresentation";
+
 export type ExpenseForm = {
   category: string;
   description: string;
@@ -66,15 +76,6 @@ export const EXPENSE_CATEGORY_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-export const PAYMENT_METHOD_OPTIONS = [
-  { value: "cash", label: "Cash" },
-  { value: "bank_transfer", label: "Bank Transfer" },
-  { value: "credit_card", label: "Card" },
-  { value: "gcash", label: "GCash" },
-  { value: "check", label: "Check" },
-  { value: "ach", label: "ACH Transfer" },
-];
-
 export const EXPENSE_STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
   { value: "partial", label: "Partially paid" },
@@ -95,7 +96,7 @@ export const normalizeFinanceValue = (value?: string) =>
 
 export const resolveOptionValue = (
   value: string | undefined,
-  options: { value: string; label: string }[]
+  options: readonly { value: string; label: string }[]
 ) => {
   const normalized = normalizeFinanceValue(value);
   const match = options.find(
@@ -126,8 +127,9 @@ export const resolveInventoryUnitValue = (value: string | undefined) => {
 
 export const formatOptionLabel = (
   value: string | undefined,
-  options: { value: string; label: string }[]
+  options: readonly { value: string; label: string }[]
 ) => {
+  if (options === PAYMENT_METHOD_OPTIONS) return formatPaymentMethod(value);
   const normalized = normalizeFinanceValue(value);
   const match = options.find(
     (option) =>

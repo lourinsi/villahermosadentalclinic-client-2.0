@@ -7,7 +7,8 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import type { ExpensePayment } from "./FinanceExpensePaymentModal";
 import { CurrencyText } from "./CurrencyAmount";
 import { FinanceHistoryDialog, getFinanceHistoryChanges, type ExpenseHistoricalSnapshot, type FinanceHistoryLog } from "./FinanceHistoryDialog";
-import { EXPENSE_CATEGORY_OPTIONS, EXPENSE_STATUS_OPTIONS, PAYMENT_METHOD_OPTIONS, formatOptionLabel } from "./financeModalOptions";
+import { EXPENSE_CATEGORY_OPTIONS, EXPENSE_STATUS_OPTIONS, formatOptionLabel } from "./financeModalOptions";
+import { formatPaymentMethod } from "./paymentPresentation";
 import { CurrentChangeIndicator, DetailedAuditHistory, createCurrentFieldChange, type CurrentFieldChange } from "./HistorySnapshotUI";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
@@ -123,11 +124,11 @@ const paymentAsOf = (payment: ExpensePayment, cutoffAt?: string): ExpensePayment
   return timestamp(payment.createdAt) <= cutoff ? payment : null;
 };
 
-const PreviousLabel = ({ value }: { value?: string }) =>
+const PreviousLabel = ({ value, prefix = "Was", accent = false }: { value?: string; prefix?: string; accent?: boolean }) =>
   value ? (
-    <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]">
+    <p className={`mt-1 flex items-center gap-1 truncate text-[10px] font-bold sm:text-[11px] ${accent ? "text-emerald-600" : "text-slate-400"}`}>
       <History className="h-3 w-3 shrink-0" />
-      Was {value}
+      {prefix} {value}
     </p>
   ) : null;
 const SummaryBadge = ({ value, previous, currentChange, className = "bg-white/10 text-white" }: { value: string; previous?: string; currentChange?: CurrentFieldChange | null; className?: string }) => (
@@ -244,7 +245,7 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
     if (key === "date" || key === "paymentDate") return formatDate(record[key]);
     if (key === "category") return record.category ? formatOptionLabel(record.category, EXPENSE_CATEGORY_OPTIONS) : "Not set";
     if (key === "status") return record.deleted ? "Deleted" : record.status ? formatOptionLabel(record.status, EXPENSE_STATUS_OPTIONS) : "Not set";
-    if (key === "paymentMethod") return record.paymentMethod ? formatOptionLabel(record.paymentMethod, PAYMENT_METHOD_OPTIONS) : "Not set";
+    if (key === "paymentMethod") return record.paymentMethod ? formatPaymentMethod(record.paymentMethod) : "Not set";
     if (key === "recurring") return hasOwnValue(record, key) ? (record.recurring ? "Yes" : "No") : "Not set";
     if (key === "inventoryItemId") return record.inventoryItemId ? inventoryNames[String(record.inventoryItemId)] || "Linked inventory item" : "Not set";
     if (key === "inventoryQuantity") return record.inventoryItemId ? `${Number(record.inventoryQuantity) || 0}${(record === currentExpense ? currentInventory : inventory)?.unit ? ` ${(record === currentExpense ? currentInventory : inventory)?.unit}` : ""}` : "Not set";
@@ -252,7 +253,6 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
   };
   const fieldNames: Record<string, string> = {
     price: "total price",
-    amount: "amount paid",
     totalPaid: "total paid",
     balance: "balance",
     status: "payment status",
@@ -271,13 +271,13 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
   };
   const previousFor = (key: string) => {
     if (!isHistorical) return undefined;
-    const value = changeByKey.get(key)?.before;
+    const value = (key === "totalPaid" ? changeByKey.get("totalPaid")?.before ?? changeByKey.get("amount")?.before : changeByKey.get(key)?.before);
     if (key === "recurring") return value === "Yes" ? "Recurring" : value === "No" ? "One-time" : value;
     return value;
   };
   const statusLabel = labelFor(displayedSnapshot, "status");
   const priceLabel = labelFor(displayedSnapshot, "price");
-  const amountLabel = labelFor(displayedSnapshot, "amount");
+  const totalPaidLabel = labelFor(displayedSnapshot, "totalPaid");
   const balanceLabel = labelFor(displayedSnapshot, "balance");
   const paymentCutoffAt = isHistorical ? String(displayedSnapshot?._historyPaymentCutoffAt || displayedSnapshot?._historyChangedAt || "") : undefined;
   const snapshotPayments = useMemo(
@@ -299,13 +299,22 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
     });
   }, [focusedPaymentId, ledgerPayments, open, paymentsLoading]);
   const selectedPayment = ledgerPayments.find((payment) => payment.id === selectedPaymentId) || ledgerPayments[0] || null;
+  const selectedPaymentPreviousAmount = useMemo(() => {
+    if (!isHistorical || !historyLog || String(historyLog.action || "").toLowerCase() !== "payment_update" || !selectedPayment) return undefined;
+    const previousPaymentId = String(historyLog.previousState?.paymentId || "");
+    const nextPaymentId = String(historyLog.newState?.paymentId || "");
+    if ((previousPaymentId && previousPaymentId !== String(selectedPayment.id)) || (nextPaymentId && nextPaymentId !== String(selectedPayment.id))) return undefined;
+    const before = Number(historyLog.previousState?.paymentAmount);
+    const after = Number(historyLog.newState?.paymentAmount);
+    return Number.isFinite(before) && Number.isFinite(after) && before !== after ? pesoFormatter.format(before) : undefined;
+  }, [historyLog, isHistorical, selectedPayment]);
   const currentSelectedPayment = selectedPayment ? payments.find((payment) => String(payment.id) === String(selectedPayment.id)) : null;
   const paymentWarningFor = (key: keyof ExpensePayment, normalizer = normalizeText) => {
     if (!isHistorical || !selectedPayment || !currentSelectedPayment) return null;
     const label = key === "amount" ? "selected payment amount" : key === "method" ? "selected payment method" : key === "paymentDate" ? "selected payment date" : "selected payment state";
     const snapshotValue = key === "deleted" ? Boolean(selectedPayment.deleted) : selectedPayment[key];
     const currentValue = key === "deleted" ? Boolean(currentSelectedPayment.deleted) : currentSelectedPayment[key];
-    const display = (value: unknown) => key === "amount" ? pesoFormatter.format(Number(value) || 0) : key === "method" ? formatOptionLabel(String(value || ""), PAYMENT_METHOD_OPTIONS) : key === "paymentDate" ? formatDate(value) : value ? "Deleted" : "Active";
+    const display = (value: unknown) => key === "amount" ? pesoFormatter.format(Number(value) || 0) : key === "method" ? formatPaymentMethod(value) : key === "paymentDate" ? formatDate(value) : value ? "Deleted" : "Active";
     return createCurrentFieldChange(label, snapshotValue, currentValue, display(snapshotValue), display(currentValue), normalizer);
   };
   const currentActivePaymentCount = payments.filter((payment) => !payment.deleted).length;
@@ -406,12 +415,12 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                   <PreviousLabel value={previousFor("price")} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Amount paid</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Total paid</p>
                   <div className="mt-1 flex items-center gap-2">
-                    <CurrencyText value={amountLabel} className="block text-2xl font-black tracking-tight text-emerald-300 sm:text-3xl" />
-                    <CurrentChangeIndicator change={warningFor("amount", normalizeNumber)} />
+                    <CurrencyText value={totalPaidLabel} className="block text-2xl font-black tracking-tight text-emerald-300 sm:text-3xl" />
+                    <CurrentChangeIndicator change={warningFor("totalPaid", normalizeNumber)} />
                   </div>
-                  <PreviousLabel value={previousFor("amount")} />
+                  <PreviousLabel value={previousFor("totalPaid")} />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Remaining balance</p>
@@ -425,7 +434,7 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                   <SummaryBadge value={labelFor(displayedSnapshot, "category")} previous={previousFor("category")} currentChange={warningFor("category")} />
                   <SummaryBadge value={statusLabel} previous={previousFor("status")} currentChange={warningFor("status")} className={displayedSnapshot.deleted ? "bg-red-500/20 text-red-200" : String(displayedSnapshot.status).toLowerCase() === "paid" ? "bg-emerald-400/15 text-emerald-200" : "bg-amber-400/15 text-amber-200"} />
                   <SummaryBadge value={`${activePayments.length} payment${activePayments.length === 1 ? "" : "s"}`} currentChange={paymentCountWarning} />
-                  <SummaryBadge value={latestPayment ? `Latest ${pesoFormatter.format(latestPayment.amount)} · ${formatOptionLabel(latestPayment.method, PAYMENT_METHOD_OPTIONS)} · ${formatDate(latestPayment.paymentDate || latestPayment.date)}` : "No payments recorded"} />
+                  <SummaryBadge value={latestPayment ? `Latest ${pesoFormatter.format(latestPayment.amount)} · ${formatPaymentMethod(latestPayment.method)} · ${formatDate(latestPayment.paymentDate || latestPayment.date)}` : "No payments recorded"} />
                   <SummaryBadge value={displayedSnapshot.recurring ? "Recurring" : "One-time"} previous={previousFor("recurring")} currentChange={warningFor("recurring")} />
                 </div>
               </div>
@@ -470,11 +479,12 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                     <div className="flex items-center gap-1.5"><span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${selectedPayment.deleted ? "bg-red-100 text-red-700" : "bg-white text-emerald-700 ring-1 ring-emerald-100"}`}>{selectedPayment.deleted ? "Deleted at this snapshot" : isHistorical ? "Active at this snapshot" : "Current ledger item"}</span><CurrentChangeIndicator change={paymentWarningFor("deleted")} /></div>
                   </div>
                   <div className="grid gap-4 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                    <div className={`flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-2xl bg-white text-sm font-black shadow-sm ring-1 ${selectedPayment.deleted ? "text-red-700 ring-red-100" : "text-emerald-700 ring-emerald-100"}`}><span>{formatOptionLabel(selectedPayment.method, PAYMENT_METHOD_OPTIONS)}</span><CurrentChangeIndicator change={paymentWarningFor("method")} /></div>
+                    <div className={`flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-2xl bg-white text-sm font-black shadow-sm ring-1 ${selectedPayment.deleted ? "text-red-700 ring-red-100" : "text-emerald-700 ring-emerald-100"}`}><span>{formatPaymentMethod(selectedPayment.method)}</span><CurrentChangeIndicator change={paymentWarningFor("method")} /></div>
                     <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-3">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Amount</p>
                         <div className="mt-1 flex items-center gap-1.5"><p className={`text-xl font-black ${selectedPayment.deleted ? "text-red-700" : "text-emerald-700"}`}>{pesoFormatter.format(Number(selectedPayment.amount) || 0)}</p><CurrentChangeIndicator change={paymentWarningFor("amount", normalizeNumber)} /></div>
+                        <PreviousLabel value={selectedPaymentPreviousAmount} prefix="from" accent />
                       </div>
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Payment date</p>
@@ -569,7 +579,7 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
                                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${payment.deleted ? "border-red-200 bg-red-50 text-red-700" : payment.legacy ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{payment.deleted ? "Deleted" : payment.legacy ? "Legacy" : payment.id === ledgerPayments[0]?.id ? "Latest" : "Payment"}</span>
                               </div>
                               <p className="mt-1 text-sm font-bold text-slate-700">
-                                {formatOptionLabel(payment.method, PAYMENT_METHOD_OPTIONS)} · {formatDate(payment.paymentDate || payment.date)}
+                                {formatPaymentMethod(payment.method)} · {formatDate(payment.paymentDate || payment.date)}
                               </p>
                               {payment.transactionId ? <p className="mt-1 text-xs font-semibold text-slate-500">Reference: {payment.transactionId}</p> : null}
                               {payment.notes ? <p className="mt-2 text-sm text-slate-600">{payment.notes}</p> : null}

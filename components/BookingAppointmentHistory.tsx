@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Clock, Eye, History, X } from "lucide-react";
-import { CurrencyText } from "./CurrencyAmount";
+import { HistoryBadgePill, type HistoryBadge } from "./historyPresentation";
 import {
   formatBookingHistoryStatusLabel,
   formatBookingPaymentAdjustmentAmountLabel,
@@ -20,11 +20,6 @@ import {
 type BookingHistoryLog = any & {
   logType: "appointment" | "payment";
   changedAt: string;
-};
-
-type HistoryBadge = {
-  label: string;
-  tone: "appointment" | "payment" | "amount" | "adjustment";
 };
 
 interface BookingAppointmentHistoryProps {
@@ -252,13 +247,6 @@ const getHistoryBadges = (log: BookingHistoryLog): HistoryBadge[] => {
   }
 
   return badges;
-};
-
-const getHistoryBadgeClass = (tone: HistoryBadge["tone"]) => {
-  if (tone === "payment") return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (tone === "amount") return "bg-green-100 text-green-700 border-green-200";
-  if (tone === "adjustment") return "bg-amber-100 text-amber-700 border-amber-200";
-  return "bg-blue-100 text-blue-700 border-blue-200";
 };
 
 const getHistoryTitle = (log: BookingHistoryLog) => {
@@ -559,12 +547,7 @@ export default function BookingAppointmentHistory({
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="min-w-0 truncate text-sm font-black text-gray-900">{getHistoryTitle(log)}</p>
                           {badges.map((badge) => (
-                            <span
-                              key={`${badge.tone}-${badge.label}`}
-                              className={`max-w-[8rem] truncate rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-tight sm:px-2.5 sm:py-1 ${getHistoryBadgeClass(badge.tone)}`}
-                            >
-                              <CurrencyText value={badge.label} />
-                            </span>
+                            <HistoryBadgePill key={`${badge.tone}-${badge.label}`} badge={badge} className="max-w-[8rem]" />
                           ))}
                         </div>
                         <p className="mt-1 text-xs font-semibold text-gray-500">{getHistoryDetail(log, userRole)}</p>

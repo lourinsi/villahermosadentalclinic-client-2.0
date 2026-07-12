@@ -21,6 +21,7 @@ import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { CurrencyText } from "./CurrencyAmount";
+import { PAYMENT_METHOD_OPTIONS, formatPaymentMethod, normalizePaymentMethod } from "./paymentPresentation";
 
 type PaymentModalMemory = {
   selectedAppointment: string | null;
@@ -39,11 +40,17 @@ type PaymentMethodCardOption = {
   shadow?: string;
 };
 
-const DEFAULT_PAYMENT_METHOD_OPTIONS: PaymentMethodCardOption[] = [
-  { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
-  { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5" />, color: "bg-violet-600", shadow: "shadow-violet-100" },
-  { id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4" />, color: "bg-slate-700", shadow: "shadow-slate-100" },
-];
+const DEFAULT_PAYMENT_METHOD_OPTIONS: PaymentMethodCardOption[] = PAYMENT_METHOD_OPTIONS.map((method) => ({
+  id: method.value,
+  label: method.label,
+  icon: method.value === "gcash" ? "GC" : method.value === "credit_card" ? <CreditCard className="h-5 w-5" /> : method.value === "cash" ? <Banknote className="h-4 w-4" /> : method.label.slice(0, 2).toUpperCase(),
+  color: method.value === "gcash" ? "bg-blue-600" : method.value === "credit_card" ? "bg-violet-600" : method.value === "cash" ? "bg-slate-700" : "bg-emerald-600",
+  shadow: method.value === "credit_card" ? "shadow-violet-100" : method.value === "cash" ? "shadow-slate-100" : "shadow-emerald-100",
+}));
+
+/** Canonical card options for any appointment-payment entry point. */
+export const getCanonicalPaymentMethodCardOptions = (): PaymentMethodCardOption[] =>
+  DEFAULT_PAYMENT_METHOD_OPTIONS.map((option) => ({ ...option }));
 
 type BookingPaymentPageProps = {
   title?: string;
@@ -120,14 +127,15 @@ export function BookingPaymentPage({
   const effectivePaymentDateInputRef = paymentDateInputRef ?? internalPaymentDateInputRef;
   const paymentMethods = useMemo(() => {
     const baseOptions = methodOptions?.length ? methodOptions : DEFAULT_PAYMENT_METHOD_OPTIONS;
-    const hasCurrentMethod = baseOptions.some((option) => option.id === paymentMethod);
+    const normalizedCurrentMethod = normalizePaymentMethod(paymentMethod);
+    const hasCurrentMethod = baseOptions.some((option) => normalizePaymentMethod(option.id) === normalizedCurrentMethod);
     if (!paymentMethod || hasCurrentMethod) return baseOptions;
 
     return [
       ...baseOptions,
       {
         id: paymentMethod,
-        label: paymentMethod,
+        label: formatPaymentMethod(paymentMethod),
         icon: paymentMethod.slice(0, 2).toUpperCase(),
         color: "bg-emerald-600",
         shadow: "shadow-emerald-100",
@@ -308,14 +316,15 @@ export function BookingPaymentPage({
         <div className="space-y-4 pt-6">
           <p className="text-base font-semibold text-gray-900">Payment Method</p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3 sm:gap-4">
-            {paymentMethods.map((pm) => (
-              <button
+            {paymentMethods.map((pm) => {
+              const isSelected = normalizePaymentMethod(paymentMethod) === normalizePaymentMethod(pm.id);
+              return <button
                 key={pm.id}
                 type="button"
-                aria-pressed={paymentMethod === pm.id}
+                aria-pressed={isSelected}
                 onClick={() => onPaymentMethodChange(pm.id)}
                 className={`relative flex min-h-[5.25rem] items-center gap-4 rounded-2xl border-2 px-4 pr-12 text-left transition-all group sm:gap-5 sm:px-5 ${
-                  paymentMethod === pm.id
+                  isSelected
                     ? `border-blue-600 bg-white text-blue-700 shadow-lg ${pm.shadow || "shadow-blue-100"}`
                     : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
                 }`}
@@ -325,12 +334,12 @@ export function BookingPaymentPage({
                 </div>
                 <span className="text-base font-black text-gray-900">{pm.label}</span>
                 <div className={`absolute right-5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-2 ${
-                  paymentMethod === pm.id ? "border-blue-600 text-blue-600" : "border-gray-200 text-transparent"
+                  isSelected ? "border-blue-600 text-blue-600" : "border-gray-200 text-transparent"
                 }`}>
                   <Check className="h-5 w-5" />
                 </div>
-              </button>
-            ))}
+              </button>;
+            })}
           </div>
         </div>
 

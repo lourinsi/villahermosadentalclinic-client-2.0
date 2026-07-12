@@ -76,7 +76,7 @@ import useSharedBookingLogic, {
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
-import { BookingPaymentPage } from "./PaymentModal";
+import { BookingPaymentPage, getCanonicalPaymentMethodCardOptions } from "./PaymentModal";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectPatientModal } from "./SelectPatientModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
@@ -3861,11 +3861,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     paymentDateInputRef={paymentDateInputRef}
                     onOpenPaymentDatePicker={openPaymentDatePicker}
                     paymentDateHelp={formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
-                    methodOptions={[
-                      { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
-                      { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-violet-600", shadow: "shadow-violet-100" },
-                      ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
-                    ]}
+                    methodOptions={getCanonicalPaymentMethodCardOptions()}
                   />
                   <div className="hidden">
                   <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
