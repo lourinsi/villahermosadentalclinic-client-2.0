@@ -252,12 +252,16 @@ export const getFinanceHistoryChanges = (entityType: FinanceHistoryEntityType, l
     hidden.add("deleted");
     hidden.add("deletedAt");
   }
+  // Skip paymentAmount for payment_update; it's already shown in badges/narrative as a transition.
+  const action = String(log.action || "").trim().toLowerCase();
+  if (entityType === "expense" && action === "payment_update") {
+    hidden.add("paymentAmount");
+  }
   const keys = Array.from(new Set([...FIELD_ORDER[entityType], ...Object.keys(previous), ...Object.keys(next)]));
   // `payment_create` is an update to an existing expense projection, not an
   // expense-creation snapshot. Treating every action containing "create" as
   // a creation made later payment logs repeat the original "Not set → …"
   // fields instead of comparing that payment event's own stored states.
-  const action = String(log.action || "").trim().toLowerCase();
   const creation = action === "create" || Object.keys(previous).length === 0;
   return keys
     .filter((key) => {
@@ -293,10 +297,28 @@ const getActionBadgeClass = (action: string) => (action.includes("delete") ? "bo
 const getEntityLabel = (entityType: FinanceHistoryEntityType) => (entityType === "expense" ? "Expense" : entityType === "inventory" ? "Inventory" : "Payroll");
 
 const getExpensePaymentAdjustment = (log: FinanceHistoryLog) => {
-  if (String(log.action || "").toLowerCase() !== "payment_update") return null;
-  const before = Number(log.previousState?.paymentAmount);
-  const after = Number(log.newState?.paymentAmount);
-  return Number.isFinite(before) && Number.isFinite(after) && before !== after ? { before, after } : null;
+  const action = String(log.action || "").trim().toLowerCase();
+  if (action !== "payment_update") return null;
+  
+  // Try to detect payment amount change from multiple possible field locations
+  const previousAmount = Number(
+    log.previousState?.paymentAmount ?? 
+    log.previousState?.amount ?? 
+    log.previousState?.paymentDetails?.amount ?? 
+    NaN
+  );
+  const newAmount = Number(
+    log.newState?.paymentAmount ?? 
+    log.newState?.amount ?? 
+    log.newState?.paymentDetails?.amount ?? 
+    NaN
+  );
+  
+  // Only consider it an adjustment if both amounts are valid and different
+  if (!Number.isFinite(previousAmount) || !Number.isFinite(newAmount)) return null;
+  if (previousAmount === newAmount) return null;
+  
+  return { before: previousAmount, after: newAmount };
 };
 
 const getExpenseHistoryBadges = (log: FinanceHistoryLog): HistoryBadge[] => {
@@ -306,9 +328,12 @@ const getExpenseHistoryBadges = (log: FinanceHistoryLog): HistoryBadge[] => {
   const status = String(log.newState?.status || "").toLowerCase();
   const badges: HistoryBadge[] = [];
 
+  // Add payment status badge if relevant
   if (["partial", "paid", "overpaid"].includes(status)) {
     badges.push({ label: formatOptionLabel(status, EXPENSE_STATUS_OPTIONS), tone: "payment" });
   }
+
+  // For payment updates, show the transition (don't show as separate amount)
   if (action === "payment_update" && adjustment) {
     return [
       ...badges,
@@ -316,14 +341,26 @@ const getExpenseHistoryBadges = (log: FinanceHistoryLog): HistoryBadge[] => {
       { label: `${formatCurrency(adjustment.before)} → ${formatCurrency(adjustment.after)}`, tone: "amount" },
     ];
   }
-  if (action === "payment_create" || log.groupedInitialPayment) badges.push({ label: "Payment recorded", tone: "recorded" });
-  else if (action === "payment_delete") badges.push({ label: "Payment deleted", tone: "deleted" });
-  else if (action === "payment_restore") badges.push({ label: "Payment restored", tone: "restored" });
-  else badges.push({ label: getActionLabel(action), tone: action === "create" ? "violet" : "adjustment" });
 
-  if (Number.isFinite(paymentAmount) && paymentAmount !== 0) {
+  // For payment creates, show "Payment recorded" + amount
+  if (action === "payment_create" || log.groupedInitialPayment) {
+    badges.push({ label: "Payment recorded", tone: "recorded" });
+  } else if (action === "payment_delete") {
+    badges.push({ label: "Payment deleted", tone: "deleted" });
+  } else if (action === "payment_restore") {
+    badges.push({ label: "Payment restored", tone: "restored" });
+  } else if (action === "payment_update") {
+    // Fallback for payment_update without detected adjustment (shouldn't happen but safeguard)
+    badges.push({ label: "Payment updated", tone: "adjustment" });
+  } else {
+    badges.push({ label: getActionLabel(action), tone: action === "create" ? "violet" : "adjustment" });
+  }
+
+  // Add amount badge only for creates/deletes/restores, not for updates (which show transition instead)
+  if (action !== "payment_update" && Number.isFinite(paymentAmount) && paymentAmount !== 0) {
     badges.push({ label: formatCurrency(Math.abs(paymentAmount)), tone: "amount" });
   }
+  
   return badges;
 };
 
@@ -332,6 +369,7 @@ const getExpensePaymentNarrative = (log: FinanceHistoryLog) => {
   const adjustment = getExpensePaymentAdjustment(log);
   const method = log.newState?.paymentMethod ?? log.newState?.method ?? log.previousState?.paymentMethod ?? log.previousState?.method;
   const paymentDate = log.newState?.paymentDate ?? log.newState?.date ?? log.previousState?.paymentDate ?? log.previousState?.date;
+  
   if (adjustment) {
     const delta = adjustment.after - adjustment.before;
     const paymentContext = [
@@ -340,11 +378,19 @@ const getExpensePaymentNarrative = (log: FinanceHistoryLog) => {
     ].filter(Boolean).join(" · ");
     return `Payment adjusted from ${formatCurrency(adjustment.before)} to ${formatCurrency(adjustment.after)} (${delta >= 0 ? "+" : ""}${formatCurrency(delta)}).${paymentContext ? ` ${paymentContext}` : ""}`;
   }
+  
   if (action === "payment_create" || log.groupedInitialPayment) {
     return `${log.groupedInitialPayment ? "Initial payment" : "Payment recorded"}${method ? ` · ${formatPaymentMethod(method)}` : ""}${paymentDate ? ` · ${formatHistoryDate(paymentDate)}` : ""}`;
   }
-  if (action === "payment_delete") return "Payment removed from this expense ledger.";
-  if (action === "payment_restore") return "Payment restored to this expense ledger.";
+  
+  if (action === "payment_delete") {
+    return "Payment removed from this expense ledger.";
+  }
+  
+  if (action === "payment_restore") {
+    return "Payment restored to this expense ledger.";
+  }
+  
   return "";
 };
 

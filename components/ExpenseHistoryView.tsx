@@ -304,8 +304,19 @@ export default function ExpenseHistoryView({ open, onOpenChange, currentExpense,
     const previousPaymentId = String(historyLog.previousState?.paymentId || "");
     const nextPaymentId = String(historyLog.newState?.paymentId || "");
     if ((previousPaymentId && previousPaymentId !== String(selectedPayment.id)) || (nextPaymentId && nextPaymentId !== String(selectedPayment.id))) return undefined;
-    const before = Number(historyLog.previousState?.paymentAmount);
-    const after = Number(historyLog.newState?.paymentAmount);
+    // Try multiple locations for payment amount to ensure we catch the transition
+    const before = Number(
+      historyLog.previousState?.paymentAmount ?? 
+      historyLog.previousState?.amount ?? 
+      historyLog.previousState?.paymentDetails?.amount ?? 
+      NaN
+    );
+    const after = Number(
+      historyLog.newState?.paymentAmount ?? 
+      historyLog.newState?.amount ?? 
+      historyLog.newState?.paymentDetails?.amount ?? 
+      NaN
+    );
     return Number.isFinite(before) && Number.isFinite(after) && before !== after ? pesoFormatter.format(before) : undefined;
   }, [historyLog, isHistorical, selectedPayment]);
   const currentSelectedPayment = selectedPayment ? payments.find((payment) => String(payment.id) === String(selectedPayment.id)) : null;
