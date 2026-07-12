@@ -668,6 +668,19 @@ const isDeletedExpenseTransaction = (
   transaction.source === "expense" &&
   (isDeletedExpenseRecord(linkedExpense) || Boolean(transaction.deleted) || Boolean(transaction.deletedAt));
 
+const isDeletedAppointmentTransaction = (transaction: RecentTransaction) => {
+  const snapshot = transaction.appointmentSnapshot && typeof transaction.appointmentSnapshot === "object"
+    ? (transaction.appointmentSnapshot as Record<string, unknown>)
+    : {};
+
+  return Boolean(
+    transaction.appointmentDeleted ||
+    transaction.appointmentDeletedAt ||
+    snapshot.deleted ||
+    snapshot.deletedAt
+  );
+};
+
 const getFinanceSnapshot = (transaction: RecentTransaction) =>
   transaction.appointmentSnapshot && typeof transaction.appointmentSnapshot === "object"
     ? transaction.appointmentSnapshot
@@ -921,11 +934,13 @@ export function FinanceView() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
   const [timePeriodFilter, setTimePeriodFilter] = useState("all");
+  const [transactionTimePeriodFilter, setTransactionTimePeriodFilter] = useState("all");
   const [transactionTypeFilter, setTransactionTypeFilter] = useState("all");
   const [transactionSearchFilter, setTransactionSearchFilter] = useState("");
   const [transactionLedgerMode, setTransactionLedgerMode] = useState<TransactionLedgerMode>("all");
   const [transactionDateSortDirection, setTransactionDateSortDirection] = useState<SortDirection>("desc");
   const [showDeletedTransactions, setShowDeletedTransactions] = useState(false);
+  const [showDeletedExpenses, setShowDeletedExpenses] = useState(false);
   const [metricPeriod, setMetricPeriod] = useState<FinanceMetricPeriod>("day");
   
   // State for fetched data
@@ -1146,6 +1161,7 @@ export function FinanceView() {
         ...(expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).map((payment) => payment.method),
       ].map(normalizeFilterValue).filter(Boolean);
 
+      if (!showDeletedExpenses && isDeletedExpenseRecord(expense)) return false;
       if (statusFilter !== "all" && status !== statusFilter) return false;
       if (paymentMethodFilter !== "all" && !ledgerMethods.includes(selectedMethod)) return false;
 
@@ -1166,7 +1182,7 @@ export function FinanceView() {
 
       return String(right.id || right.description).localeCompare(String(left.id || left.description));
     });
-  }, [detailedExpenses, endDate, expensePaymentsByExpense, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
+  }, [detailedExpenses, endDate, expensePaymentsByExpense, paymentMethodFilter, showDeletedExpenses, startDate, statusFilter, timePeriodFilter]);
 
   const detailedExpenseById = useMemo(
     () => new Map(detailedExpenses.map((expense) => [String(expense.id), expense])),
@@ -1195,13 +1211,16 @@ export function FinanceView() {
         const appointmentType = getFinanceAppointmentType(transaction);
         const isAppointmentPayment = isFinanceAppointmentPaymentTransaction(transaction);
 
+        const transactionPeriodRange = getPeriodRange(transactionTimePeriodFilter);
+        const transactionRangeStart = transactionTimePeriodFilter === "custom" ? startDate : transactionPeriodRange?.start || startDate;
+        const transactionRangeEnd = transactionTimePeriodFilter === "custom" ? endDate : transactionPeriodRange?.end || endDate;
+
         if (isPaymentLogLikeTransaction(transaction)) return false;
-        if (!showDeletedTransactions && isSoftDeletedPaymentTransaction(transaction)) return false;
-        if (!showDeletedTransactions && isDeletedExpense) return false;
+        if (!showDeletedTransactions && (isSoftDeletedPaymentTransaction(transaction) || isDeletedAppointmentTransaction(transaction) || isDeletedExpense)) return false;
         if (transactionLedgerMode !== "all" && !isAppointmentPayment) return false;
         if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
-        if (startDate && reportingDate < startDate) return false;
-        if (endDate && reportingDate > endDate) return false;
+        if (transactionRangeStart && reportingDate < transactionRangeStart) return false;
+        if (transactionRangeEnd && reportingDate > transactionRangeEnd) return false;
 
         if (search) {
           const searchText = [
@@ -1256,6 +1275,7 @@ export function FinanceView() {
     transactionDateSortDirection,
     transactionLedgerMode,
     transactionSearchFilter,
+    transactionTimePeriodFilter,
     transactionTypeFilter,
   ]);
 
@@ -1282,6 +1302,7 @@ export function FinanceView() {
     transactionLedgerMode !== "all" ||
     transactionTypeFilter !== "all" ||
     showDeletedTransactions ||
+    transactionTimePeriodFilter !== "all" ||
     Boolean(startDate) ||
     Boolean(endDate);
 
@@ -1290,6 +1311,7 @@ export function FinanceView() {
     setTransactionLedgerMode("all");
     setTransactionTypeFilter("all");
     setShowDeletedTransactions(false);
+    setTransactionTimePeriodFilter("all");
     setStartDate("");
     setEndDate("");
   };
@@ -2487,7 +2509,7 @@ export function FinanceView() {
 
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
     (transaction.type === "income" || isExpensePaymentTransaction(transaction)) &&
-    Number(transaction.amount || 0) > 0 &&
+    Math.abs(Number(transaction.amount || 0)) > 0 &&
     !isPaymentLogLikeTransaction(transaction) &&
     (
       isExpensePaymentTransaction(transaction) ||
@@ -3297,10 +3319,12 @@ export function FinanceView() {
                       <SelectItem value="custom">Custom Range</SelectItem>
                     </SelectContent>
                   </Select>
-                  <div className="flex items-center space-x-2">
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
+                  {timePeriodFilter === "custom" ? (
+                    <div className="flex items-center space-x-2">
+                      <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                      <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                    </div>
+                  ) : null}
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Status" />
@@ -3330,6 +3354,24 @@ export function FinanceView() {
                   <Button variant="outline" size="icon" onClick={() => fetchData()} title="Refresh finance data">
                     <Filter className="h-4 w-4" />
                   </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" className="h-10 rounded-lg border-slate-200 px-3 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700">
+                        <Filter className="mr-2 h-4 w-4" />
+                        {showDeletedExpenses ? "Showing deleted" : "Hiding deleted"}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-60">
+                      <DropdownMenuLabel>Expense options</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={showDeletedExpenses}
+                        onCheckedChange={(checked) => setShowDeletedExpenses(checked === true)}
+                      >
+                        {showDeletedExpenses ? "Hide deleted expenses" : "Show deleted expenses"}
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Expense view">
                     <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("history")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "history" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><HistoryIcon className="mr-1.5 h-3.5 w-3.5" />History</Button>
                     <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("list")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><List className="mr-1.5 h-3.5 w-3.5" />List</Button>
@@ -3801,26 +3843,45 @@ export function FinanceView() {
                       <SelectItem value="doctors">Doctors</SelectItem>
                     </SelectContent>
                   </Select>
-                  <div className="relative min-w-0">
-                    <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
-                      aria-label="Start date"
-                    />
-                  </div>
-                  <div className="relative min-w-0">
-                    <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
-                      aria-label="End date"
-                    />
-                  </div>
+                  <Select value={transactionTimePeriodFilter} onValueChange={setTransactionTimePeriodFilter}>
+                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                      <SelectValue placeholder="Date Filter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="yesterday">Yesterday</SelectItem>
+                      <SelectItem value="this_week">This Week</SelectItem>
+                      <SelectItem value="last_week">Last Week</SelectItem>
+                      <SelectItem value="this_month">This Month</SelectItem>
+                      <SelectItem value="last_month">Last Month</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {transactionTimePeriodFilter === "custom" ? (
+                    <>
+                      <div className="relative min-w-0">
+                        <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
+                          aria-label="Start date"
+                        />
+                      </div>
+                      <div className="relative min-w-0">
+                        <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          className="h-12 rounded-lg border-slate-200 bg-white pl-10 text-sm font-semibold text-slate-700 shadow-none"
+                          aria-label="End date"
+                        />
+                      </div>
+                    </>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -3865,7 +3926,7 @@ export function FinanceView() {
                         checked={showDeletedTransactions}
                         onCheckedChange={(checked) => setShowDeletedTransactions(checked === true)}
                       >
-                        {showDeletedTransactions ? "Hide deleted payments and expenses" : "Show deleted payments and expenses"}
+                        {showDeletedTransactions ? "Hide deleted appointments, payments and expenses" : "Show deleted appointments, payments and expenses"}
                       </DropdownMenuCheckboxItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -4038,6 +4099,8 @@ export function FinanceView() {
                       const isDeletedExpense = isDeletedExpenseTransaction(transaction, expenseForTransaction);
                       const isDeletedTransaction = isDeletedPayment || isDeletedExpense;
                       const restorablePaymentId = getRestorablePaymentId(transaction);
+                      const showExpenseActionButtons = transaction.type === "expense" && expenseForTransaction && !isDeletedExpense && !isExpensePaymentTransaction(transaction);
+                      const showPaymentActionButtons = shouldShowPaymentEdit && !isDeletedPayment && canEditPayment;
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
@@ -4152,28 +4215,28 @@ export function FinanceView() {
                                     <span className="sr-only">View transaction details</span>
                                   </Button>
                                   {shouldShowPaymentEdit && !isDeletedPayment && (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 ${canEditPayment ? "" : "opacity-60"}`}
-                                      title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
-                                      onClick={() => handleEditPaymentTransaction(transaction)}
-                                    >
-                                      <Edit className="h-5 w-5" />
-                                      <span className="sr-only">Edit Payment</span>
-                                    </Button>
-                                  )}
-                                  {shouldShowPaymentEdit && !isDeletedPayment && (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className={`h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700 ${canEditPayment ? "" : "opacity-60"}`}
-                                      title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(transaction)}
-                                      onClick={() => handleRequestDeletePaymentTransaction(transaction)}
-                                    >
-                                      <Trash2 className="h-5 w-5" />
-                                      <span className="sr-only">Delete Payment</span>
-                                    </Button>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-10 w-10 rounded-lg border-violet-100 bg-white text-violet-700 shadow-sm hover:bg-violet-50 ${canEditPayment ? "" : "opacity-60"}`}
+                                        title={canEditPayment ? "Edit payment" : getPaymentEditUnavailableMessage(transaction)}
+                                        onClick={() => handleEditPaymentTransaction(transaction)}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                        <span className="sr-only">Edit Payment</span>
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={`h-10 w-10 rounded-lg border-red-100 bg-white text-red-600 shadow-sm hover:bg-red-50 ${canEditPayment ? "" : "opacity-60"}`}
+                                        title={canEditPayment ? "Delete payment" : getPaymentEditUnavailableMessage(transaction)}
+                                        onClick={() => handleRequestDeletePaymentTransaction(transaction)}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="sr-only">Delete Payment</span>
+                                      </Button>
+                                    </div>
                                   )}
                                   {shouldShowPaymentEdit && isActualDeletedPayment && restorablePaymentId && (
                                     <Button
@@ -4186,7 +4249,7 @@ export function FinanceView() {
                                       Restore
                                     </Button>
                                   )}
-                                  {transaction.type === "expense" && expenseForTransaction && !isDeletedExpense ? (
+                                  {showExpenseActionButtons ? (
                                     <>
                                       <Button
                                         variant="outline"
@@ -4212,7 +4275,7 @@ export function FinanceView() {
                                       ) : null}
                                     </>
                                   ) : null}
-                                  {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id ? (
+                                  {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id && !isExpensePaymentTransaction(transaction) ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
