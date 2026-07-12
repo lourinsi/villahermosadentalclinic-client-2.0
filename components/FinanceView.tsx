@@ -5,14 +5,17 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { getPaymentStatusOptionWithColors, normalizePaymentStatus } from "@/lib/status-colors";
 import { formatWordyDate } from "@/lib/utils";
 import AppointmentHistoryView from "./AppointmentHistoryView";
-import ConfirmDialog from "./ConfirmDialog";
+import DeleteExpenseDialog from "./DeleteExpenseDialog";
+import DeletePaymentDialog from "./DeletePaymentDialog";
+import { CurrencyText } from "./CurrencyAmount";
+import { MetricCardGrid, type MetricCardDefinition } from "./MetricCardGrid";
 import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 
 import { toast } from "sonner";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -21,10 +24,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Input } from "./ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
-import { FinanceExpensePaymentModal } from "./FinanceExpensePaymentModal";
+import { FinanceExpenseModal, type FinanceExpenseModalMode, type InitialExpensePayment } from "./FinanceExpenseModal";
+import ExpenseHistoryView from "./ExpenseHistoryView";
+import { FinanceExpensePaymentModal, type ExpensePayment } from "./FinanceExpensePaymentModal";
+import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { FinanceInventoryChangeReviewModal, type InventoryChange } from "./FinanceInventoryChangeReviewModal";
 import { FinanceInventoryModal, type FinanceInventoryModalMode } from "./FinanceInventoryModal";
 import { FinanceInventoryReorderModal } from "./FinanceInventoryReorderModal";
@@ -61,10 +75,7 @@ import {
   type ReorderForm,
 } from "./financeModalOptions";
 import { 
-  DollarSign, 
   TrendingUp, 
-  TrendingDown, 
-  Package, 
   Download,
   FileText,
   ArrowUpRight,
@@ -87,6 +98,9 @@ import {
   ChevronUp,
   Clock,
   Menu,
+  MoreHorizontal,
+  List,
+  History as HistoryIcon,
   Search,
   ShieldCheck,
   Trash2
@@ -385,7 +399,10 @@ export interface DetailedExpense {
   date: string;
   category: string;
   description: string;
+  price?: number;
   amount: number;
+  totalPaid?: number;
+  balance?: number;
   vendor: string;
   paymentMethod: string;
   paymentDate?: string;
@@ -398,7 +415,27 @@ export interface DetailedExpense {
   inventoryItemId?: string;
   inventoryQuantity?: number;
   notes?: string;
+  paymentCount?: number;
+  latestPayment?: ExpensePayment;
+  payments?: ExpensePayment[];
+  paymentMethods?: string[];
 }
+
+const getExpenseTotalPrice = (expense: Pick<DetailedExpense, "price" | "amount">) =>
+  Math.max(0, Number(expense.price ?? expense.amount) || 0);
+
+const getExpenseTotalPaid = (expense: Pick<DetailedExpense, "amount" | "totalPaid" | "status">) => {
+  if (expense.totalPaid !== undefined && expense.totalPaid !== null) return Math.max(0, Number(expense.totalPaid) || 0);
+  return ["paid", "partial", "overpaid"].includes(normalizeFilterValue(expense.status)) ? Math.max(0, Number(expense.amount) || 0) : 0;
+};
+
+const getExpenseBalance = (expense: Pick<DetailedExpense, "price" | "amount" | "totalPaid" | "balance" | "status">) =>
+  expense.balance !== undefined && expense.balance !== null
+    ? Number(expense.balance) || 0
+    : getExpenseTotalPrice(expense) - getExpenseTotalPaid(expense);
+
+const getExpensePaymentStatus = (price: number, totalPaid: number) =>
+  totalPaid > price + 0.01 ? "overpaid" : totalPaid >= price - 0.01 && price > 0 ? "paid" : totalPaid > 0 ? "partial" : "pending";
 
 export interface InventoryItem {
   id: string; // Changed from number for consistency
@@ -561,6 +598,8 @@ export interface RecentTransaction {
   patientName?: string;
   paymentId?: string;
   paymentRecordId?: string;
+  expenseId?: string;
+  expensePaymentId?: string;
   currentAppointmentBalance?: number;
   currentAppointmentTotalPaid?: number;
   currentAppointmentPrice?: number;
@@ -617,6 +656,17 @@ const getFinanceTransactionSortDate = (
 
   return getTransactionReportingDate(transaction);
 };
+
+const isDeletedExpenseRecord = (expense?: DetailedExpense | null) =>
+  Boolean(expense?.deleted) || Boolean(expense?.deletedAt);
+
+const isDeletedExpenseTransaction = (
+  transaction: RecentTransaction,
+  linkedExpense?: DetailedExpense | null
+) =>
+  transaction.type === "expense" &&
+  transaction.source === "expense" &&
+  (isDeletedExpenseRecord(linkedExpense) || Boolean(transaction.deleted) || Boolean(transaction.deletedAt));
 
 const getFinanceSnapshot = (transaction: RecentTransaction) =>
   transaction.appointmentSnapshot && typeof transaction.appointmentSnapshot === "object"
@@ -783,21 +833,67 @@ const getFinancePaymentStatusDisplay = (transaction: RecentTransaction) => {
 const isCountableIncomeTransaction = (transaction: RecentTransaction) =>
   transaction.type === "income" && !isSoftDeletedPaymentTransaction(transaction);
 
+type ExpenseTimelinePaymentHistoryProps = {
+  expense: DetailedExpense;
+  payments: ExpensePayment[];
+  canManage: boolean;
+  onCreate: () => void;
+  onView: (payment: ExpensePayment) => void;
+  onEdit: (payment: ExpensePayment) => void;
+  onDelete: (payment: ExpensePayment) => void;
+  onRestore: (payment: ExpensePayment) => void;
+};
+
+const ExpenseTimelinePaymentHistory = ({ expense, payments, canManage, onCreate, onView, onEdit, onDelete, onRestore }: ExpenseTimelinePaymentHistoryProps) => {
+  const rows = [...payments].sort((left, right) => String(right.paymentDate || right.date || right.createdAt || "").localeCompare(String(left.paymentDate || left.date || left.createdAt || "")));
+  return (
+    <section className="mt-5 border-t border-slate-100 pt-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2"><Wallet className="h-4 w-4 text-violet-600" /><h5 className="text-sm font-black text-slate-950">Payment History</h5><span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">{rows.length}</span></div>
+        {!expense.deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-violet-200 text-xs font-black text-violet-700 hover:bg-violet-50" onClick={onCreate}><Plus className="mr-1.5 h-3.5 w-3.5" />Record payment</Button> : null}
+      </div>
+      {rows.length === 0 ? <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">No payments recorded for this expense.</div> : <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="hidden grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid"><span>Payment method</span><span>Amount</span><span>Date</span><span>Reference no.</span><span className="text-right">Actions</span></div>
+        <div className="divide-y divide-slate-100">{rows.map((payment) => { const deleted = Boolean(payment.deleted); const method = formatOptionLabel(payment.method, PAYMENT_METHOD_OPTIONS); const date = payment.paymentDate || payment.date; return <div key={payment.id} className={`grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] md:items-center ${deleted ? "bg-slate-50 text-slate-400" : "bg-white"}`}>
+          <div className="flex min-w-0 items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${deleted ? "bg-slate-100 text-slate-400" : "bg-violet-50 text-violet-700"}`}><CreditCard className="h-4 w-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`truncate font-black ${deleted ? "text-slate-500" : "text-slate-900"}`}>{method}</span><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${deleted ? "bg-slate-200 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>{deleted ? "Deleted" : "Payment"}</span></div>{payment.notes ? <p className="mt-0.5 line-clamp-1 text-xs font-medium text-slate-500">{payment.notes}</p> : null}</div></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span><span className={`font-black ${deleted ? "text-slate-500" : "text-emerald-600"}`}>{formatCurrency(payment.amount)}</span></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span><span className="font-bold text-slate-700">{formatFinanceDate(date)}</span></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span><span className="font-mono text-xs font-bold text-slate-600">{payment.transactionId ? `Ref: ${payment.transactionId}` : "—"}</span></div>
+          <div className="flex items-center justify-end gap-1.5"><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onView(payment)} title="View payment"><Eye className="h-3.5 w-3.5" /></Button>{canManage ? deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-emerald-200 px-2 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-50" onClick={() => onRestore(payment)}><RotateCcw className="mr-1 h-3.5 w-3.5" />Restore</Button> : <><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onEdit(payment)} title="Edit payment"><Edit className="h-3.5 w-3.5" /></Button><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-red-100 text-red-600 hover:bg-red-50" onClick={() => onDelete(payment)} title="Delete payment"><Trash2 className="h-3.5 w-3.5" /></Button></> : null}</div>
+        </div>; })}</div>
+      </div>}
+    </section>
+  );
+};
+
 export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { openEditPaymentModal } = usePaymentModal();
   const normalizedEffectiveRole = normalizeFilterValue(effectiveRole);
   const canManageExpenseStatus = normalizedEffectiveRole === "admin";
-  const canSeeDeletedPayments = normalizedEffectiveRole === "admin" || normalizedEffectiveRole === "doctor";
+  const canDeleteExpenses = normalizedEffectiveRole === "admin" || normalizedEffectiveRole === "receptionist";
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
+  const [expenseSnapshot, setExpenseSnapshot] = useState<DetailedExpense | null>(null);
+  const [expenseSnapshotPaymentId, setExpenseSnapshotPaymentId] = useState("");
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
+  const [expenseInitialPayment, setExpenseInitialPayment] = useState<InitialExpensePayment>({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<RecentTransaction | null>(null);
   const [expensePaymentMethod, setExpensePaymentMethod] = useState("cash");
+  const [expensePaymentAmount, setExpensePaymentAmount] = useState(0);
+  const [expensePaymentDate, setExpensePaymentDate] = useState(todayDate());
+  const [expensePaymentMode, setExpensePaymentMode] = useState<"create" | "edit">("create");
+  const [selectedExpensePayment, setSelectedExpensePayment] = useState<ExpensePayment | null>(null);
+  const [expensePaymentTransactionId, setExpensePaymentTransactionId] = useState("");
+  const [expensePaymentNotes, setExpensePaymentNotes] = useState("");
+  const [expenseViewMode, setExpenseViewMode] = useState<"history" | "list">("history");
+  const [expenseOverpaymentAction, setExpenseOverpaymentAction] = useState<"save" | "payment" | null>(null);
+  const [expenseOverpaymentAdjustedPrice, setExpenseOverpaymentAdjustedPrice] = useState("");
+  const [expenseOverpaymentLoadingAction, setExpenseOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);
   const [inventoryModalMode, setInventoryModalMode] = useState<FinanceInventoryModalMode | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItem | null>(null);
   const [inventoryForm, setInventoryForm] = useState(createEmptyInventoryItem);
@@ -829,24 +925,29 @@ export function FinanceView() {
   const [transactionSearchFilter, setTransactionSearchFilter] = useState("");
   const [transactionLedgerMode, setTransactionLedgerMode] = useState<TransactionLedgerMode>("all");
   const [transactionDateSortDirection, setTransactionDateSortDirection] = useState<SortDirection>("desc");
+  const [showDeletedTransactions, setShowDeletedTransactions] = useState(false);
   const [metricPeriod, setMetricPeriod] = useState<FinanceMetricPeriod>("day");
   
   // State for fetched data
   const [revenueData, setRevenueData] = useState<RevenueEntry[]>([]);
   const [expenseBreakdown, setExpenseBreakdown] = useState<ExpenseBreakdownEntry[]>([]);
   const [detailedExpenses, setDetailedExpenses] = useState<DetailedExpense[]>([]);
+  const [expensePaymentsByExpense, setExpensePaymentsByExpense] = useState<Record<string, ExpensePayment[]>>({});
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [patientImages, setPatientImages] = useState<Record<string, string | undefined>>({});
   const [financeHistoryLogs, setFinanceHistoryLogs] = useState<FinanceHistoryLog[]>([]);
   const [isFinanceHistoryLoading, setIsFinanceHistoryLoading] = useState(false);
+  const [financeHistoryError, setFinanceHistoryError] = useState<string | null>(null);
+  const financeHistoryRequestRef = useRef(0);
   const [financeRefreshKey, setFinanceRefreshKey] = useState(0);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
   const [isSavingExpensePayment, setIsSavingExpensePayment] = useState(false);
   const [isDeletingExpense, setIsDeletingExpense] = useState(false);
+  const [isRestoringExpense, setIsRestoringExpense] = useState(false);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
   const [isSavingInventory, setIsSavingInventory] = useState(false);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
@@ -867,7 +968,8 @@ export function FinanceView() {
   const fetchData = async (payrollMonth = selectedPayrollMonth) => {
     setIsLoading(true);
     try {
-      const recentTransactionsPath = `/api/finance/recent-transactions?limit=500${canSeeDeletedPayments ? "&includeDeleted=true" : ""}`;
+      const recentTransactionsPath = "/api/finance/recent-transactions?limit=500&includeDeleted=true";
+      const detailedExpensesPath = `/api/finance/detailed-expenses${canDeleteExpenses ? "?includeDeleted=true" : ""}`;
       const payrollDataRequest = PAYROLL_DISABLED
         ? Promise.resolve([] as PayrollEntry[])
         : fetchApiData<PayrollEntry[]>(`/api/finance/payroll?month=${encodeURIComponent(payrollMonth)}`, "payroll data");
@@ -881,7 +983,7 @@ export function FinanceView() {
       ] = await Promise.all([
         fetchApiData<RevenueEntry[]>("/api/finance/revenue", "revenue data"),
         fetchApiData<ExpenseBreakdownEntry[]>("/api/finance/expense-breakdown", "expense breakdown"),
-        fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
+        fetchApiData<DetailedExpense[]>(detailedExpensesPath, "detailed expenses"),
         fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
         payrollDataRequest,
         fetchApiData<RecentTransaction[]>(recentTransactionsPath, "recent transactions"),
@@ -947,16 +1049,19 @@ export function FinanceView() {
     entityType: FinanceHistoryEntityType,
     options: { entityId?: string; context?: string } = {}
   ) => {
+    const requestId = ++financeHistoryRequestRef.current;
     if (!options.entityId && entityType !== "payroll") {
       setFinanceHistoryLogs([]);
       setIsFinanceHistoryLoading(false);
+      setFinanceHistoryError(null);
       return;
     }
 
     setIsFinanceHistoryLoading(true);
+    setFinanceHistoryError(null);
     try {
       const params = new URLSearchParams();
-      params.set("limit", "150");
+      if (entityType !== "expense") params.set("limit", "150");
       if (options.context) params.set("context", options.context);
 
       const path = options.entityId
@@ -967,11 +1072,13 @@ export function FinanceView() {
         `${path}${query ? `?${query}` : ""}`,
         `${entityType} history`
       );
-      setFinanceHistoryLogs(logs || []);
+      if (requestId === financeHistoryRequestRef.current) setFinanceHistoryLogs(logs || []);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load finance history";
+      if (requestId !== financeHistoryRequestRef.current) return;
       const routeUnavailable = /route not found|404/i.test(message);
       setFinanceHistoryLogs([]);
+      setFinanceHistoryError(message);
       if (routeUnavailable) {
         console.warn("Finance history route is not available from the current backend.");
       } else {
@@ -979,18 +1086,20 @@ export function FinanceView() {
         toast.error(message);
       }
     } finally {
-      setIsFinanceHistoryLoading(false);
+      if (requestId === financeHistoryRequestRef.current) setIsFinanceHistoryLoading(false);
     }
   };
 
   const resetFinanceHistory = () => {
+    financeHistoryRequestRef.current += 1;
     setFinanceHistoryLogs([]);
     setIsFinanceHistoryLoading(false);
+    setFinanceHistoryError(null);
   };
 
   useEffect(() => {
     fetchData();
-  }, [canSeeDeletedPayments, financeRefreshKey]);
+  }, [canDeleteExpenses, financeRefreshKey]);
 
   useEffect(() => {
     const handleFinanceRefresh = () => setFinanceRefreshKey((key) => key + 1);
@@ -1005,15 +1114,40 @@ export function FinanceView() {
     };
   }, []);
 
+  const activeDetailedExpenses = useMemo(
+    () => detailedExpenses.filter((expense) => !expense.deleted),
+    [detailedExpenses]
+  );
+
+  useEffect(() => {
+    let active = true;
+    const loadPaymentLedgers = async () => {
+      const rows = await Promise.all(detailedExpenses.map(async (expense) => {
+        try {
+          const payments = await fetchApiData<ExpensePayment[]>(`/api/finance/detailed-expenses/${encodeURIComponent(expense.id)}/payments${canDeleteExpenses ? "?includeDeleted=true" : ""}`, "expense payments");
+          return [expense.id, payments || []] as const;
+        } catch { return [expense.id, []] as const; }
+      }));
+      if (active) setExpensePaymentsByExpense(Object.fromEntries(rows));
+    };
+    if (detailedExpenses.length) void loadPaymentLedgers(); else setExpensePaymentsByExpense({});
+    const refresh = () => void loadPaymentLedgers();
+    window.addEventListener("expense-payments:updated", refresh);
+    return () => { active = false; window.removeEventListener("expense-payments:updated", refresh); };
+  }, [canDeleteExpenses, detailedExpenses]);
+
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);
     return detailedExpenses.filter((expense) => {
       const status = normalizeFilterValue(expense.status);
-      const method = normalizeFilterValue(expense.paymentMethod);
       const selectedMethod = normalizeFilterValue(paymentMethodFilter);
+      const ledgerMethods = [
+        ...(expense.paymentMethods || []),
+        ...(expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).map((payment) => payment.method),
+      ].map(normalizeFilterValue).filter(Boolean);
 
       if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (paymentMethodFilter !== "all" && (status !== "paid" || method !== selectedMethod)) return false;
+      if (paymentMethodFilter !== "all" && !ledgerMethods.includes(selectedMethod)) return false;
 
       const rangeStart = timePeriodFilter === "custom" ? startDate : periodRange?.start || startDate;
       const rangeEnd = timePeriodFilter === "custom" ? endDate : periodRange?.end || endDate;
@@ -1022,8 +1156,17 @@ export function FinanceView() {
       if (rangeEnd && expense.date > rangeEnd) return false;
 
       return true;
+    }).sort((left, right) => {
+      const leftDeleted = isDeletedExpenseRecord(left);
+      const rightDeleted = isDeletedExpenseRecord(right);
+      if (leftDeleted !== rightDeleted) return leftDeleted ? 1 : -1;
+
+      const dateDiff = getFinanceDateTimestamp(getExpenseReportingDate(right)) - getFinanceDateTimestamp(getExpenseReportingDate(left));
+      if (dateDiff !== 0) return dateDiff;
+
+      return String(right.id || right.description).localeCompare(String(left.id || left.description));
     });
-  }, [detailedExpenses, endDate, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
+  }, [detailedExpenses, endDate, expensePaymentsByExpense, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
 
   const detailedExpenseById = useMemo(
     () => new Map(detailedExpenses.map((expense) => [String(expense.id), expense])),
@@ -1044,6 +1187,7 @@ export function FinanceView() {
           transaction.type === "expense" || transaction.source === "expense"
             ? detailedExpenseById.get(String(transaction.id || ""))
             : undefined;
+        const isDeletedExpense = isDeletedExpenseTransaction(transaction, linkedExpense);
         const reportingDate = getFinanceTransactionSortDate(transaction, linkedExpense);
         const patientIdentity = getFinancePatientIdentity(transaction);
         const doctorName = getFinanceDoctorName(transaction);
@@ -1052,7 +1196,8 @@ export function FinanceView() {
         const isAppointmentPayment = isFinanceAppointmentPaymentTransaction(transaction);
 
         if (isPaymentLogLikeTransaction(transaction)) return false;
-        if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(transaction)) return false;
+        if (!showDeletedTransactions && isSoftDeletedPaymentTransaction(transaction)) return false;
+        if (!showDeletedTransactions && isDeletedExpense) return false;
         if (transactionLedgerMode !== "all" && !isAppointmentPayment) return false;
         if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
         if (startDate && reportingDate < startDate) return false;
@@ -1103,10 +1248,10 @@ export function FinanceView() {
         return transactionDateSortDirection === "asc" ? keyDiff : -keyDiff;
       })
   ), [
-    canSeeDeletedPayments,
     detailedExpenseById,
     endDate,
     recentTransactions,
+    showDeletedTransactions,
     startDate,
     transactionDateSortDirection,
     transactionLedgerMode,
@@ -1136,6 +1281,7 @@ export function FinanceView() {
     Boolean(transactionSearchFilter.trim()) ||
     transactionLedgerMode !== "all" ||
     transactionTypeFilter !== "all" ||
+    showDeletedTransactions ||
     Boolean(startDate) ||
     Boolean(endDate);
 
@@ -1143,6 +1289,7 @@ export function FinanceView() {
     setTransactionSearchFilter("");
     setTransactionLedgerMode("all");
     setTransactionTypeFilter("all");
+    setShowDeletedTransactions(false);
     setStartDate("");
     setEndDate("");
   };
@@ -1280,11 +1427,11 @@ export function FinanceView() {
       .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0)
   ), [metricPeriodRange, recentTransactions]);
   const metricExpenses = useMemo(() => (
-    detailedExpenses
-      .filter((expense) => normalizeFilterValue(expense.status) === "paid")
+    activeDetailedExpenses
+      .filter((expense) => normalizeFilterValue(expense.status) !== "cancelled")
       .filter((expense) => isDateWithinRange(getExpenseReportingDate(expense), metricPeriodRange))
-      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
-  ), [detailedExpenses, metricPeriodRange]);
+      .reduce((sum, expense) => sum + getExpenseTotalPaid(expense), 0)
+  ), [activeDetailedExpenses, metricPeriodRange]);
   const metricProfit = metricRevenue - metricExpenses;
   const metricMargin = metricRevenue > 0 ? (metricProfit / metricRevenue) * 100 : 0;
 
@@ -1299,7 +1446,7 @@ export function FinanceView() {
 
   const expenseVendorOptions = useMemo(() => {
     const vendors = new Map<string, string>();
-    [...detailedExpenses.map((expense) => expense.vendor), ...inventoryData.map((item) => item.supplier)]
+    [...activeDetailedExpenses.map((expense) => expense.vendor), ...inventoryData.map((item) => item.supplier)]
       .map((vendor) => String(vendor || "").trim())
       .filter(Boolean)
       .forEach((vendor) => {
@@ -1310,7 +1457,7 @@ export function FinanceView() {
       });
 
     return Array.from(vendors.values()).sort((left, right) => left.localeCompare(right));
-  }, [detailedExpenses, inventoryData]);
+  }, [activeDetailedExpenses, inventoryData]);
 
   const payrollMonthOptions = useMemo(() => getPayrollMonthOptions(), []);
   const payrollStats = useMemo(() => {
@@ -1346,42 +1493,91 @@ export function FinanceView() {
     setSelectedExpense(expense || null);
     setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
     setExpenseFieldErrors({});
-    resetFinanceHistory();
-    if (mode === "edit" && expense?.id) {
-      void loadFinanceHistory("expense", { entityId: expense.id });
-    }
+    setExpenseInitialPayment({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
     setExpenseModalMode(mode);
+  };
+
+  const openExpenseSnapshot = (expense: DetailedExpense, paymentId = "") => {
+    setExpenseSnapshot(expense);
+    setExpenseSnapshotPaymentId(paymentId);
+    resetFinanceHistory();
+    void loadFinanceHistory("expense", { entityId: expense.id });
+  };
+
+  const editExpenseFromSnapshot = (expense: DetailedExpense) => {
+    const liveExpense = detailedExpenses.find((item) => item.id === expense.id) || expenseSnapshot;
+    if (!liveExpense) return;
+    setExpenseSnapshot(null);
+    setExpenseSnapshotPaymentId("");
+    openExpenseModal("edit", liveExpense);
   };
 
   const closeExpenseModal = () => {
     setExpenseModalMode(null);
     setSelectedExpense(null);
     setExpenseForm(createEmptyExpense());
+    setExpenseInitialPayment({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
     setExpenseFieldErrors({});
     resetFinanceHistory();
   };
 
   const openExpensePaymentModal = (expense: DetailedExpense) => {
     setExpenseToPay(expense);
+    setExpensePaymentMode("create");
+    setSelectedExpensePayment(null);
     setExpensePaymentMethod(resolveOptionValue(expense.paymentMethod, PAYMENT_METHOD_OPTIONS) || "cash");
+    setExpensePaymentAmount(0);
+    setExpensePaymentDate(todayDate());
+    setExpensePaymentTransactionId("");
+    setExpensePaymentNotes("");
+  };
+
+  const openExpensePaymentEditModal = (expense: DetailedExpense, payment: ExpensePayment) => {
+    setExpenseToPay(expense);
+    setExpensePaymentMode("edit");
+    setSelectedExpensePayment(payment);
+    setExpensePaymentMethod(resolveOptionValue(payment.method, PAYMENT_METHOD_OPTIONS) || "cash");
+    setExpensePaymentAmount(Number(payment.amount) || 0);
+    setExpensePaymentDate(String(payment.paymentDate || payment.date || "").slice(0, 10) || todayDate());
+    setExpensePaymentTransactionId(payment.transactionId || "");
+    setExpensePaymentNotes(payment.notes || "");
   };
 
   const openExpenseDeleteDialog = (expense: DetailedExpense) => {
     setExpenseToDelete(expense);
   };
 
-  const handleSaveExpense = async () => {
+  const handleSaveExpense = async (confirmedOverpayment = false, adjustedPrice?: number, addPaymentAfterSave = false, skipInitialPayment = false) => {
     const requiredErrors: ExpenseFieldErrors = {};
     if (!expenseForm.category) requiredErrors.category = "Choose a category.";
     if (!expenseForm.date) requiredErrors.date = "Choose a date.";
     if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
-    if (Number(expenseForm.amount) <= 0) requiredErrors.amount = "Enter an amount greater than zero.";
+    const price = Math.max(0, Number(expenseForm.price) || 0);
+    const totalPaid = expenseModalMode === "edit" && selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0;
+    const initialPaymentAmount = expenseModalMode === "create" && !skipInitialPayment ? Math.max(0, Number(expenseInitialPayment.amount) || 0) : 0;
+    if (price <= 0) requiredErrors.price = "Enter a total price greater than zero.";
 
     if (Object.keys(requiredErrors).length > 0) {
       setExpenseFieldErrors(requiredErrors);
       toast.error("Please complete the required expense fields");
       return;
     }
+
+    if (initialPaymentAmount > 0 && !expenseInitialPayment.paymentDate) {
+      toast.error("Choose the initial payment date");
+      return;
+    }
+
+    const paymentToCompare = totalPaid || initialPaymentAmount;
+    if (paymentToCompare > price + 0.01 && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(paymentToCompare));
+      setExpenseOverpaymentAction("save");
+      return;
+    }
+
+    const effectivePrice = adjustedPrice !== undefined && Number.isFinite(adjustedPrice) && adjustedPrice >= 0
+      ? adjustedPrice
+      : price;
 
     if (expenseForm.inventoryItemId && Number(expenseForm.inventoryQuantity) <= 0) {
       setExpenseFieldErrors({ inventoryQuantity: "Enter a stock quantity greater than zero." });
@@ -1400,7 +1596,18 @@ export function FinanceView() {
     setIsSavingExpense(true);
     try {
       const isEditingExpense = expenseModalMode === "edit" && selectedExpense;
-      await fetchApiData<DetailedExpense>(
+      const expensePayload = isEditingExpense
+        ? {
+            ...expenseForm,
+            price: effectivePrice,
+          }
+        : {
+            ...expenseForm,
+            price: effectivePrice,
+            status: "pending",
+          };
+
+      const savedExpense = await fetchApiData<DetailedExpense>(
         isEditingExpense
           ? `/api/finance/detailed-expenses/${encodeURIComponent(selectedExpense.id)}`
           : "/api/finance/detailed-expenses",
@@ -1408,9 +1615,8 @@ export function FinanceView() {
         {
           method: isEditingExpense ? "PUT" : "POST",
           body: JSON.stringify({
-            ...expenseForm,
-            amount: Number(expenseForm.amount),
-            ...(!isEditingExpense && !canManageExpenseStatus && { status: "pending" }),
+            ...expensePayload,
+            price: Number(expensePayload.price),
           }),
         }
       );
@@ -1418,6 +1624,36 @@ export function FinanceView() {
       toast.success(isEditingExpense ? "Expense updated" : "Expense added");
       closeExpenseModal();
       await fetchData();
+      let expenseAfterCreate = savedExpense;
+      if (!isEditingExpense && initialPaymentAmount > 0 && savedExpense) {
+        try {
+          const paymentResult = await fetchApiData<{ payment: ExpensePayment; expense: DetailedExpense }>(
+            `/api/finance/detailed-expenses/${encodeURIComponent(savedExpense.id)}/payments`,
+            "initial expense payment",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                amount: initialPaymentAmount,
+                method: expenseInitialPayment.method || "cash",
+                paymentDate: expenseInitialPayment.paymentDate,
+                transactionId: expenseInitialPayment.transactionId.trim() || undefined,
+                notes: expenseInitialPayment.notes.trim() || undefined,
+                origin: "initial_expense_creation",
+                overpaymentPolicy: adjustedPrice !== undefined ? "increase_expense_price" : "allow",
+                ...(adjustedPrice !== undefined ? { adjustedPrice: effectivePrice } : {}),
+              }),
+            }
+          );
+          expenseAfterCreate = paymentResult?.expense || savedExpense;
+          window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: savedExpense.id } }));
+          window.dispatchEvent(new CustomEvent("expenses:updated"));
+          await fetchData();
+          toast.success("Initial payment recorded");
+        } catch (paymentError) {
+          toast.error(`Expense added, but the initial payment could not be recorded: ${paymentError instanceof Error ? paymentError.message : "Unknown error"}`);
+        }
+      }
+      if (!isEditingExpense && addPaymentAfterSave && expenseAfterCreate) openExpensePaymentModal(expenseAfterCreate);
     } catch (error) {
       console.error("Error saving expense:", error);
       toast.error(error instanceof Error ? error.message : "Failed to save expense");
@@ -1426,26 +1662,109 @@ export function FinanceView() {
     }
   };
 
-  const handlePayExpense = async () => {
+  const handlePayExpense = async (confirmedOverpayment = false, adjustedPrice?: number) => {
     if (!expenseToPay) return;
+
+    const price = getExpenseTotalPrice(expenseToPay);
+    const totalPaid = getExpenseTotalPaid(expenseToPay);
+    const balance = getExpenseBalance(expenseToPay);
+    if (expensePaymentAmount <= 0) {
+      toast.error("Enter a payment amount greater than zero");
+      return;
+    }
+    if (!expensePaymentDate) {
+      toast.error("Choose the payment date");
+      return;
+    }
+
+    const originalPaymentAmount = expensePaymentMode === "edit" ? Number(selectedExpensePayment?.amount) || 0 : 0;
+    const projectedTotalPaid = totalPaid - originalPaymentAmount + expensePaymentAmount;
+    if (projectedTotalPaid > price + 0.01 && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(projectedTotalPaid));
+      setExpenseOverpaymentAction("payment");
+      return;
+    }
+
+    const effectivePrice = adjustedPrice !== undefined && Number.isFinite(adjustedPrice) && adjustedPrice >= 0
+      ? adjustedPrice
+      : price;
+    const newTotalPaid = totalPaid - originalPaymentAmount + expensePaymentAmount;
 
     setIsSavingExpensePayment(true);
     try {
-      await fetchApiData<DetailedExpense>(`/api/finance/detailed-expenses/${encodeURIComponent(expenseToPay.id)}/pay`, "expense payment", {
-        method: "POST",
+      await fetchApiData<{ payment: ExpensePayment; expense: DetailedExpense }>(
+        expensePaymentMode === "edit" && selectedExpensePayment
+          ? `/api/finance/expense-payments/${encodeURIComponent(selectedExpensePayment.id)}`
+          : `/api/finance/detailed-expenses/${encodeURIComponent(expenseToPay.id)}/payments`,
+        "expense payment",
+        {
+        method: expensePaymentMode === "edit" ? "PUT" : "POST",
         body: JSON.stringify({
-          paymentMethod: expensePaymentMethod,
+          method: expensePaymentMethod,
+          paymentDate: expensePaymentDate,
+          amount: expensePaymentAmount,
+          transactionId: expensePaymentTransactionId.trim() || undefined,
+          notes: expensePaymentNotes.trim() || undefined,
+          overpaymentPolicy: adjustedPrice !== undefined ? "increase_expense_price" : "allow",
+          ...(adjustedPrice !== undefined ? { adjustedPrice: effectivePrice } : {}),
         }),
       });
 
-      toast.success("Expense marked as paid");
+      toast.success(newTotalPaid > effectivePrice ? "Expense overpayment recorded" : newTotalPaid >= effectivePrice ? "Expense marked as paid" : "Expense payment recorded");
       setExpenseToPay(null);
+      setExpensePaymentAmount(0);
+      setExpensePaymentDate(todayDate());
+      setSelectedExpensePayment(null);
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expenseToPay.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      window.dispatchEvent(new CustomEvent("finance:updated"));
       await fetchData();
     } catch (error) {
       console.error("Error paying expense:", error);
       toast.error(error instanceof Error ? error.message : "Failed to mark expense paid");
     } finally {
       setIsSavingExpensePayment(false);
+    }
+  };
+
+  const handleDeleteExpensePayment = async (expense: DetailedExpense, payment: ExpensePayment) => {
+    if (!window.confirm(`Delete the ${formatCurrency(payment.amount)} payment dated ${formatFinanceDate(payment.paymentDate || payment.date)}?`)) return;
+    try {
+      await fetchApiData(`/api/finance/expense-payments/${encodeURIComponent(payment.id)}`, "expense payment deletion", { method: "DELETE" });
+      toast.success("Expense payment deleted");
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expense.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      await fetchData();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to delete payment"); }
+  };
+
+  const handleRestoreExpensePayment = async (expense: DetailedExpense, payment: ExpensePayment) => {
+    try {
+      await fetchApiData(`/api/finance/expense-payments/${encodeURIComponent(payment.id)}/restore`, "expense payment restoration", { method: "POST" });
+      toast.success("Expense payment restored");
+      window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: expense.id } }));
+      window.dispatchEvent(new CustomEvent("expenses:updated"));
+      await fetchData();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to restore payment"); }
+  };
+
+  const handleExpenseOverpaymentDecision = async (shouldAdjustPrice: boolean) => {
+    if (!expenseOverpaymentAction) return;
+
+    const parsedAdjustedPrice = Number(expenseOverpaymentAdjustedPrice);
+    const adjustedPrice = shouldAdjustPrice && Number.isFinite(parsedAdjustedPrice) && parsedAdjustedPrice >= 0
+      ? parsedAdjustedPrice
+      : undefined;
+    setExpenseOverpaymentLoadingAction(shouldAdjustPrice ? "adjust" : "keep");
+    try {
+      if (expenseOverpaymentAction === "save") {
+        await handleSaveExpense(true, adjustedPrice);
+      } else {
+        await handlePayExpense(true, adjustedPrice);
+      }
+      setExpenseOverpaymentAction(null);
+    } finally {
+      setExpenseOverpaymentLoadingAction(null);
     }
   };
 
@@ -1471,6 +1790,30 @@ export function FinanceView() {
     }
   };
 
+  const handleRestoreExpense = async (expense: DetailedExpense) => {
+    if (!expense?.id) {
+      toast.error("Could not find the expense to restore");
+      return;
+    }
+
+    setIsRestoringExpense(true);
+    try {
+      await fetchApiData<DetailedExpense>(
+        `/api/finance/detailed-expenses/${encodeURIComponent(expense.id)}/restore`,
+        "expense restoration",
+        { method: "POST" }
+      );
+
+      toast.success("Expense restored");
+      await fetchData();
+    } catch (error) {
+      console.error("Error restoring expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to restore expense");
+    } finally {
+      setIsRestoringExpense(false);
+    }
+  };
+
   const handleExportReport = () => {
     downloadCsv(
       `finance-report-${dateKey(new Date())}.csv`,
@@ -1483,13 +1826,16 @@ export function FinanceView() {
           Expenses: row.expenses,
           Profit: row.profit,
         })),
-        ...detailedExpenses.map((expense) => ({
+        ...activeDetailedExpenses.map((expense) => ({
           Section: "Expense",
           Date: formatFinanceDate(expense.date),
           "Created At": expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "",
           Description: expense.description,
-          Amount: expense.amount,
-          Expenses: expense.amount,
+          "Total Price": getExpenseTotalPrice(expense),
+          "Amount Paid": getExpenseTotalPaid(expense),
+          Balance: getExpenseBalance(expense),
+          Amount: getExpenseTotalPaid(expense),
+          Expenses: getExpenseTotalPaid(expense),
           Profit: "",
         })),
         ...(PAYROLL_DISABLED ? [] : payrollData.map((employee) => ({
@@ -2130,14 +2476,21 @@ export function FinanceView() {
     getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
     getAppointmentIdFromDescription(transaction.description);
 
+  const isExpensePaymentTransaction = (transaction: RecentTransaction) =>
+    transaction.source === "expense-payment" || Boolean(transaction.expensePaymentId);
+
+  const getExpensePaymentTransactionId = (transaction: RecentTransaction) =>
+    String(transaction.expensePaymentId || transaction.paymentId || transaction.paymentRecordId || transaction.id || "").trim();
+
   const isEditablePaymentTransaction = (transaction: RecentTransaction) =>
-    !isSoftDeletedPaymentTransaction(transaction) && Boolean(getEditablePaymentId(transaction));
+    !isSoftDeletedPaymentTransaction(transaction) && Boolean(isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : getEditablePaymentId(transaction));
 
   const isPaymentTransactionRow = (transaction: RecentTransaction) =>
-    transaction.type === "income" &&
+    (transaction.type === "income" || isExpensePaymentTransaction(transaction)) &&
     Number(transaction.amount || 0) > 0 &&
     !isPaymentLogLikeTransaction(transaction) &&
     (
+      isExpensePaymentTransaction(transaction) ||
       transaction.source === "payment" ||
       Boolean(getTransactionAppointmentId(transaction)) ||
       /payment/i.test(`${transaction.description || ""} ${transaction.method || ""}`)
@@ -2159,6 +2512,7 @@ export function FinanceView() {
 
   const getRestorablePaymentId = (transaction: RecentTransaction) => {
     if (isPaymentLogLikeTransaction(transaction)) return "";
+    if (isExpensePaymentTransaction(transaction)) return getExpensePaymentTransactionId(transaction);
 
     const explicitPaymentId = transaction.paymentId || transaction.paymentRecordId;
     if (explicitPaymentId) return String(explicitPaymentId).trim();
@@ -2189,7 +2543,20 @@ export function FinanceView() {
     return "Could not find the payment record to edit.";
   };
 
-  const handleEditPaymentTransaction = (transaction: RecentTransaction) => {
+  const handleEditPaymentTransaction = async (transaction: RecentTransaction) => {
+    if (isExpensePaymentTransaction(transaction)) {
+      const paymentId = getExpensePaymentTransactionId(transaction);
+      if (!paymentId) { toast.error("Could not find the linked expense payment."); return; }
+      try {
+        const [expense, paymentRecord] = await Promise.all([
+          resolveExpensePaymentParent(transaction),
+          fetchApiData<ExpensePayment>(`/api/finance/expense-payments/${encodeURIComponent(paymentId)}`, "expense payment"),
+        ]);
+        if (!expense) { toast.error("Could not find the expense linked to this payment."); return; }
+        openExpensePaymentEditModal(expense, paymentRecord || { id: paymentId, expenseId: expense.id, amount: Math.abs(Number(transaction.amount) || 0), method: transaction.method || "cash", date: transaction.paymentDate || transaction.date, transactionId: transaction.transactionId });
+      } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to load expense payment"); }
+      return;
+    }
     const paymentId = getEditablePaymentId(transaction);
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(transaction));
@@ -2207,7 +2574,7 @@ export function FinanceView() {
   };
 
   const handleRequestDeletePaymentTransaction = (transaction: RecentTransaction) => {
-    const paymentId = getEditablePaymentId(transaction);
+    const paymentId = isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : getEditablePaymentId(transaction);
 
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(transaction));
@@ -2220,7 +2587,8 @@ export function FinanceView() {
   const handleDeletePaymentTransaction = async () => {
     if (!paymentToDelete) return;
 
-    const paymentId = getEditablePaymentId(paymentToDelete);
+    const isExpensePayment = isExpensePaymentTransaction(paymentToDelete);
+    const paymentId = isExpensePayment ? getExpensePaymentTransactionId(paymentToDelete) : getEditablePaymentId(paymentToDelete);
     if (!paymentId) {
       toast.error(getPaymentEditUnavailableMessage(paymentToDelete));
       setPaymentToDelete(null);
@@ -2230,12 +2598,13 @@ export function FinanceView() {
     setIsDeletingPayment(true);
     try {
       await fetchApiData<null>(
-        `/api/payments/${encodeURIComponent(paymentId)}`,
+        isExpensePayment ? `/api/finance/expense-payments/${encodeURIComponent(paymentId)}` : `/api/payments/${encodeURIComponent(paymentId)}`,
         "payment deletion",
         { method: "DELETE" }
       );
 
       toast.success("Payment deleted");
+      if (isExpensePayment) window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: paymentToDelete.expenseId } }));
       setPaymentToDelete(null);
       await fetchData();
     } catch (error) {
@@ -2247,12 +2616,8 @@ export function FinanceView() {
   };
 
   const handleRestorePaymentTransaction = async (transaction: RecentTransaction) => {
-    if (!canManageExpenseStatus) {
-      toast.error("Only admins can restore deleted payments");
-      return;
-    }
-
-    const paymentId = getRestorablePaymentId(transaction);
+    const isExpensePayment = isExpensePaymentTransaction(transaction);
+    const paymentId = isExpensePayment ? getExpensePaymentTransactionId(transaction) : getRestorablePaymentId(transaction);
     if (!paymentId) {
       toast.error("Could not find the payment record to restore.");
       return;
@@ -2260,12 +2625,13 @@ export function FinanceView() {
 
     try {
       await fetchApiData(
-        `/api/payments/${encodeURIComponent(paymentId)}/restore`,
+        isExpensePayment ? `/api/finance/expense-payments/${encodeURIComponent(paymentId)}/restore` : `/api/payments/${encodeURIComponent(paymentId)}/restore`,
         "payment restoration",
         { method: "POST" }
       );
 
       toast.success("Payment restored");
+      if (isExpensePayment) window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: transaction.expenseId } }));
       await fetchData();
     } catch (error) {
       console.error("Error restoring payment:", error);
@@ -2277,17 +2643,16 @@ export function FinanceView() {
     transaction: RecentTransaction,
     expenses: DetailedExpense[] = detailedExpenses
   ) => {
-    if (transaction.type !== "expense") return null;
+    if (transaction.type !== "expense" && !isExpensePaymentTransaction(transaction)) return null;
 
     const transactionExpenseId =
-      transaction.source === "expense"
-        ? String(transaction.id || transaction.transactionId || "").trim()
-        : "";
+      String(transaction.expenseId || (transaction.source === "expense" ? transaction.id || transaction.transactionId : "") || "").trim();
     const directMatch = transactionExpenseId
       ? expenses.find((expense) => String(expense.id) === transactionExpenseId)
       : null;
 
     if (directMatch) return directMatch;
+    if (isExpensePaymentTransaction(transaction)) return null;
 
     const transactionAmount = Math.abs(Number(transaction.amount) || 0);
     const transactionDescription = normalizeFilterValue(transaction.description);
@@ -2306,16 +2671,34 @@ export function FinanceView() {
     );
   };
 
-  const handleViewTransaction = async (transaction: RecentTransaction) => {
-    if (transaction.type === "expense") {
-      let expense = findExpenseForTransaction(transaction);
+  const resolveExpensePaymentParent = async (transaction: RecentTransaction) => {
+    if (!isExpensePaymentTransaction(transaction)) return findExpenseForTransaction(transaction);
+    const direct = findExpenseForTransaction(transaction);
+    if (direct) return direct;
+    const paymentId = getExpensePaymentTransactionId(transaction);
+    if (!paymentId) return null;
+    const payment = await fetchApiData<ExpensePayment>(`/api/finance/expense-payments/${encodeURIComponent(paymentId)}`, "expense payment");
+    const expenseId = String(payment?.expenseId || "").trim();
+    if (!expenseId) return null;
+    const cached = detailedExpenses.find((expense) => String(expense.id) === expenseId);
+    if (cached) return cached;
+    const refreshed = await fetchApiData<DetailedExpense[]>(`/api/finance/detailed-expenses${canDeleteExpenses ? "?includeDeleted=true" : ""}`, "detailed expenses");
+    if (refreshed) setDetailedExpenses(refreshed);
+    return refreshed?.find((expense) => String(expense.id) === expenseId) || null;
+  };
 
-      if (!expense && transaction.source === "expense") {
+  const handleViewTransaction = async (transaction: RecentTransaction) => {
+    if (transaction.type === "expense" || isExpensePaymentTransaction(transaction)) {
+      let expense = isExpensePaymentTransaction(transaction) ? await resolveExpensePaymentParent(transaction) : findExpenseForTransaction(transaction);
+
+      if (!expense && (transaction.source === "expense" || isExpensePaymentTransaction(transaction))) {
         setLoadingAppointmentId(transaction.id);
         try {
-          const refreshedExpenses = await fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses");
+          const detailedExpensesPath = `/api/finance/detailed-expenses${canDeleteExpenses ? "?includeDeleted=true" : ""}`;
+          const refreshedExpenses = await fetchApiData<DetailedExpense[]>(detailedExpensesPath, "detailed expenses");
           setDetailedExpenses(refreshedExpenses || []);
           expense = findExpenseForTransaction(transaction, refreshedExpenses || []);
+          if (!expense && isExpensePaymentTransaction(transaction)) expense = await resolveExpensePaymentParent(transaction);
         } catch (error) {
           console.error("Error loading expense details:", error);
           toast.error(error instanceof Error ? error.message : "Failed to load expense details");
@@ -2327,7 +2710,10 @@ export function FinanceView() {
       }
 
       if (expense) {
-        openExpenseModal("edit", expense);
+        openExpenseSnapshot(
+          expense,
+          isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : ""
+        );
         return;
       }
 
@@ -2384,7 +2770,7 @@ export function FinanceView() {
     setLoadingAppointmentId(loadingKey);
     try {
       if (!appointmentId && !transactionToView.appointmentSnapshot) {
-        const recentTransactionsPath = `/api/finance/recent-transactions?limit=500${canSeeDeletedPayments ? "&includeDeleted=true" : ""}`;
+        const recentTransactionsPath = "/api/finance/recent-transactions?limit=500&includeDeleted=true";
         const refreshedTransactions = await fetchApiData<RecentTransaction[]>(recentTransactionsPath, "recent transactions");
         const refreshedRows = (refreshedTransactions || []).filter((item) => !isPaymentLogLikeTransaction(item));
         setRecentTransactions(refreshedRows);
@@ -2592,7 +2978,9 @@ export function FinanceView() {
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
                       <div className="text-right">
-                        <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>{formatCurrency(Math.abs(payment.amount))}</div>
+                        <div className={`text-xl font-black ${isDeletedPayment ? "text-gray-600" : "text-emerald-600"}`}>
+                          <CurrencyText value={formatCurrency(Math.abs(payment.amount))} />
+                        </div>
                         <PaymentTransactionStatusBadge
                           display={paymentStatusDisplay}
                           className="mt-1 px-2.5 py-0.5 text-xs"
@@ -2633,7 +3021,7 @@ export function FinanceView() {
                             <span className="sr-only">Delete Payment</span>
                           </Button>
                         </>
-                      ) : canManageExpenseStatus && isActualDeletedPayment && restorablePaymentId ? (
+                      ) : isActualDeletedPayment && restorablePaymentId ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -2707,61 +3095,46 @@ export function FinanceView() {
       </div>
 
       {/* Key Financial Metrics */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Revenue</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-              <DollarSign className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricRevenue)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Expenses</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500">
-              <TrendingDown className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricExpenses)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">{metricPeriodRange.title} Net Profit</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-              <TrendingUp className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">{formatCurrency(metricProfit)}</div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-gray-100 bg-white shadow-md shadow-gray-200/40">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 p-4 pb-2 md:p-6 md:pb-2">
-            <CardTitle className="text-base font-bold text-slate-500 md:text-sm">Profit Margin</CardTitle>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
-              <Package className="h-6 w-6" />
-            </span>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 md:p-6 md:pt-0">
-            <div className="text-4xl font-black tracking-tight text-slate-950 md:text-2xl md:font-bold">
-              {metricMargin.toFixed(1)}%
-            </div>
-            <div className="mt-2 text-lg font-medium text-slate-500 md:text-xs">{metricPeriodRange.label}</div>
-          </CardContent>
-        </Card>
-      </div>
+      <MetricCardGrid
+        metrics={[
+          {
+            id: "revenue",
+            title: `${metricPeriodRange.title} Revenue`,
+            value: formatCurrency(metricRevenue),
+            helper: metricPeriodRange.label,
+            icon: Wallet,
+            iconClass: "bg-emerald-50 text-emerald-600",
+            pillClass: "bg-emerald-50 text-emerald-700",
+          },
+          {
+            id: "expenses",
+            title: `${metricPeriodRange.title} Expenses`,
+            value: formatCurrency(metricExpenses),
+            helper: metricPeriodRange.label,
+            icon: ArrowDownRight,
+            iconClass: "bg-rose-50 text-rose-600",
+            pillClass: "bg-rose-50 text-rose-700",
+          },
+          {
+            id: "net-profit",
+            title: `${metricPeriodRange.title} Net Profit`,
+            value: formatCurrency(metricProfit),
+            helper: metricPeriodRange.label,
+            icon: TrendingUp,
+            iconClass: "bg-blue-50 text-blue-600",
+            pillClass: "bg-blue-50 text-blue-700",
+          },
+          {
+            id: "profit-margin",
+            title: "Profit Margin",
+            value: `${metricMargin.toFixed(1)}%`,
+            helper: metricPeriodRange.label,
+            icon: ArrowUpRight,
+            iconClass: "bg-violet-50 text-violet-600",
+            pillClass: "bg-violet-50 text-violet-700",
+          },
+        ] satisfies MetricCardDefinition[]}
+      />
 
       <Tabs defaultValue="overview" className="space-y-6" onValueChange={() => fetchData()}>
         <TabsList className="grid h-auto w-full grid-cols-4 gap-2 overflow-x-auto rounded-none border-b border-gray-100 bg-transparent p-0">
@@ -2957,6 +3330,10 @@ export function FinanceView() {
                   <Button variant="outline" size="icon" onClick={() => fetchData()} title="Refresh finance data">
                     <Filter className="h-4 w-4" />
                   </Button>
+                  <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Expense view">
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("history")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "history" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><HistoryIcon className="mr-1.5 h-3.5 w-3.5" />History</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setExpenseViewMode("list")} className={`h-8 rounded-lg px-3 text-xs font-black ${expenseViewMode === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><List className="mr-1.5 h-3.5 w-3.5" />List</Button>
+                  </div>
                   <Button onClick={() => openExpenseModal("create")}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Manual Expense
@@ -2974,7 +3351,24 @@ export function FinanceView() {
                 </div>
               ) : (
                 <>
-                  <Table>
+                  {expenseViewMode === "history" ? (
+                    filteredDetailedExpenses.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 py-14 text-center text-sm font-semibold text-slate-500">No detailed expenses found.</div>
+                    ) : (
+                      <div className="relative space-y-5 pl-7 sm:pl-11">
+                        <div className="absolute bottom-8 left-[13px] top-8 border-l-2 border-dashed border-violet-100 sm:left-[17px]" />
+                        {filteredDetailedExpenses.map((expense) => {
+                          const totalPrice = getExpenseTotalPrice(expense); const totalPaid = getExpenseTotalPaid(expense); const balance = getExpenseBalance(expense); const deleted = isDeletedExpenseRecord(expense); const dateParts = getFinanceTimelineDateParts(expense.date); const normalizedStatus = normalizeFilterValue(expense.status); const paymentRows = (expensePaymentsByExpense[expense.id] || expense.payments || []).sort((a, b) => String(b.paymentDate || b.date || b.createdAt || "").localeCompare(String(a.paymentDate || a.date || a.createdAt || ""))); const paymentCount = paymentRows.filter((payment) => !payment.deleted).length || expense.paymentCount || 0;
+                          return <article key={expense.id} className="relative"><span className={`absolute -left-[1.55rem] top-9 h-4 w-4 rounded-full border-4 border-white shadow sm:-left-[2.15rem] ${deleted ? "bg-slate-400" : normalizedStatus === "paid" ? "bg-emerald-500" : "bg-violet-600"}`} /><div className={`rounded-2xl border p-4 shadow-sm transition hover:border-violet-200 hover:shadow-md sm:p-5 ${deleted ? "border-red-100 bg-red-50/40" : "border-slate-200 bg-white"}`}>
+                            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 gap-4"><div className="hidden w-20 shrink-0 border-r border-slate-100 pr-4 text-center sm:block"><div className="text-xs font-black tracking-widest text-violet-600">{dateParts.month}</div><div className="text-3xl font-black text-slate-950">{dateParts.day}</div><div className="text-xs font-bold text-slate-400">{dateParts.year}</div></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h4 className="truncate text-lg font-black text-slate-950">{expense.description}</h4><Badge className={deleted ? deletedPaymentBadgeClass : normalizedStatus === "paid" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{deleted ? "Deleted" : formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}</Badge></div><p className="mt-1 text-sm font-semibold text-slate-500">{formatOptionLabel(expense.category, EXPENSE_CATEGORY_OPTIONS)}{expense.vendor ? <>{" · "}{expense.vendor}</> : null}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-bold text-slate-500"><span>{formatFinanceDate(expense.date)}</span><span>{paymentCount} payment{paymentCount === 1 ? "" : "s"}</span>{expense.inventoryItemId ? <span className="text-violet-700">Inventory linked</span> : null}</div></div></div>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid grid-cols-3 gap-4 sm:min-w-[330px]"><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Price</p><p className="mt-1 font-black text-slate-950">{formatCurrency(totalPrice)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Paid</p><p className="mt-1 font-black text-emerald-600">{formatCurrency(totalPaid)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Balance</p><p className={`mt-1 font-black ${balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>{formatCurrency(balance)}</p></div></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => openExpenseSnapshot(expense)}><Eye className="mr-1 h-3.5 w-3.5" />View</Button>{!deleted ? <Button size="sm" onClick={() => openExpensePaymentModal(expense)} className="bg-violet-600 hover:bg-violet-700"><Plus className="mr-1 h-3.5 w-3.5" />Payment</Button> : null}<DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="h-9 w-9" aria-label="More expense actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{deleted ? <DropdownMenuItem onClick={() => handleRestoreExpense(expense)}><RotateCcw className="mr-2 h-4 w-4" />Restore expense</DropdownMenuItem> : <><DropdownMenuItem onClick={() => openExpenseModal("edit", expense)}><Edit className="mr-2 h-4 w-4" />Edit expense</DropdownMenuItem>{canDeleteExpenses ? <DropdownMenuItem onClick={() => openExpenseDeleteDialog(expense)} className="text-red-700"><Trash2 className="mr-2 h-4 w-4" />Delete expense</DropdownMenuItem> : null}</>}</DropdownMenuContent></DropdownMenu></div></div></div>
+                            <ExpenseTimelinePaymentHistory expense={expense} payments={paymentRows} canManage={canDeleteExpenses} onCreate={() => openExpensePaymentModal(expense)} onView={(payment) => openExpenseSnapshot(expense, payment.id)} onEdit={(payment) => openExpensePaymentEditModal(expense, payment)} onDelete={(payment) => void handleDeleteExpensePayment(expense, payment)} onRestore={(payment) => void handleRestoreExpensePayment(expense, payment)} />
+                          </div></article>;
+                        })}
+                      </div>
+                    )
+                  ) : null}
+                  <Table className={expenseViewMode === "list" ? "" : "hidden"}>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
@@ -2982,8 +3376,10 @@ export function FinanceView() {
                         <TableHead>Category</TableHead>
                         <TableHead>Description</TableHead>
                         <TableHead>Vendor</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Paid With</TableHead>
+                        <TableHead>Total Price</TableHead>
+                        <TableHead>Amount Paid</TableHead>
+                        <TableHead>Balance</TableHead>
+                        <TableHead>Payments</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -2991,15 +3387,19 @@ export function FinanceView() {
                     <TableBody>
                       {filteredDetailedExpenses.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                             No detailed expenses found.
                           </TableCell>
                         </TableRow>
                       ) : (
                         filteredDetailedExpenses.map((expense) => {
                           const expenseStatus = normalizeFilterValue(expense.status);
+                          const totalPrice = getExpenseTotalPrice(expense);
+                          const totalPaid = getExpenseTotalPaid(expense);
+                          const balance = getExpenseBalance(expense);
+                          const isDeletedExpense = isDeletedExpenseRecord(expense);
                           return (
-                            <TableRow key={expense.id}>
+                            <TableRow key={expense.id} className={isDeletedExpense ? deletedPaymentRowClass : undefined}>
                               <TableCell>{formatFinanceDate(expense.date)}</TableCell>
                               <TableCell className="text-sm text-muted-foreground">
                                 {expense.createdAt ? formatTransactionTimestamp(expense.createdAt) : "-"}
@@ -3009,44 +3409,63 @@ export function FinanceView() {
                               </TableCell>
                               <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
                               <TableCell>{expense.vendor || "-"}</TableCell>
-                              <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {expenseStatus === "paid"
-                                  ? formatOptionLabel(expense.paymentMethod, PAYMENT_METHOD_OPTIONS)
-                                  : "-"}
-                              </TableCell>
+                              <TableCell className="font-medium">{formatCurrency(totalPrice)}</TableCell>
+                              <TableCell className="font-medium text-emerald-700">{formatCurrency(totalPaid)}</TableCell>
+                              <TableCell className="font-medium text-amber-700">{formatCurrency(balance)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{(() => { const rows = (expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).sort((a, b) => String(b.date).localeCompare(String(a.date))); const count = rows.length || expense.paymentCount || 0; const latest = rows[0] || expense.latestPayment; return count > 0 ? <div><div className="font-bold text-slate-700">{count} payment{count === 1 ? "" : "s"}</div>{latest ? <div className="mt-0.5 text-xs">Latest: {formatOptionLabel(latest.method, PAYMENT_METHOD_OPTIONS)} · {formatFinanceDate(latest.date)}</div> : null}</div> : "No payments"; })()}</TableCell>
                               <TableCell>
                                 <Badge className={
-                                  expenseStatus === "paid"
-                                    ? "bg-green-100 text-green-800"
-                                    : expenseStatus === "cancelled"
-                                      ? "bg-gray-100 text-gray-700"
-                                      : "bg-yellow-100 text-yellow-800"
+                                  isDeletedExpense
+                                    ? deletedPaymentBadgeClass
+                                    : expenseStatus === "paid"
+                                      ? "bg-green-100 text-green-800"
+                                      : expenseStatus === "cancelled"
+                                        ? "bg-gray-100 text-gray-700"
+                                        : "bg-yellow-100 text-yellow-800"
                                 }>
-                                  {formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}
+                                  {isDeletedExpense ? "Deleted" : formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}
                                 </Badge>
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-wrap gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => openExpenseModal("edit", expense)}>
-                                    <Edit className="h-3 w-3 mr-1" />
-                                    Edit
+                                  <Button variant="outline" size="sm" onClick={() => openExpenseSnapshot(expense)}>
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    View
                                   </Button>
-                                  {expenseStatus === "pending" && (
-                                    <Button size="sm" onClick={() => openExpensePaymentModal(expense)}>
-                                      Pay
-                                    </Button>
-                                  )}
-                                  {canManageExpenseStatus && (
+                                  {isDeletedExpense ? (
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                                      onClick={() => openExpenseDeleteDialog(expense)}
+                                      className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                                      disabled={isRestoringExpense}
+                                      onClick={() => handleRestoreExpense(expense)}
                                     >
-                                      <Trash2 className="h-3 w-3 mr-1" />
-                                      Delete
+                                      <RotateCcw className="h-3 w-3 mr-1" />
+                                      Restore
                                     </Button>
+                                  ) : (
+                                    <>
+                                      <Button variant="outline" size="sm" onClick={() => openExpenseModal("edit", expense)}>
+                                        <Edit className="h-3 w-3 mr-1" />
+                                        Edit
+                                      </Button>
+                                      {expenseStatus !== "paid" && balance > 0 && (
+                                        <Button size="sm" onClick={() => openExpensePaymentModal(expense)}>
+                                          Pay
+                                        </Button>
+                                      )}
+                                      {canDeleteExpenses && (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                          onClick={() => openExpenseDeleteDialog(expense)}
+                                        >
+                                          <Trash2 className="h-3 w-3 mr-1" />
+                                          Delete
+                                        </Button>
+                                      )}
+                                    </>
                                   )}
                                 </div>
                               </TableCell>
@@ -3360,7 +3779,7 @@ export function FinanceView() {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1.4fr)_minmax(12rem,1fr)_minmax(10rem,0.9fr)_minmax(10rem,0.9fr)_auto_auto]">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1.4fr)_minmax(12rem,1fr)_minmax(10rem,0.9fr)_minmax(10rem,0.9fr)_auto_auto_auto]">
                   <div className="relative min-w-0">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <Input
@@ -3426,53 +3845,86 @@ export function FinanceView() {
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Clear Filters
                   </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-12 w-12 rounded-lg border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                        aria-label="Transaction options"
+                        title="Transaction options"
+                      >
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-60">
+                      <DropdownMenuLabel>Transaction options</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={showDeletedTransactions}
+                        onCheckedChange={(checked) => setShowDeletedTransactions(checked === true)}
+                      >
+                        {showDeletedTransactions ? "Hide deleted payments and expenses" : "Show deleted payments and expenses"}
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </CardHeader>
 
             <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                      <Wallet className="h-7 w-7" />
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
+                      <Wallet className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Income</p>
-                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
-                        {formatCurrency(transactionSummary.income)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Total Income</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-emerald-600">
+                          <CurrencyText value={formatCurrency(transactionSummary.income)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Income</span>
+                      </div>
                     </div>
                   </div>
-                  <CheckCircle2 className="h-8 w-8 shrink-0 text-emerald-600" />
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                      <AlertTriangle className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
+                      <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Expenses</p>
-                      <p className="mt-1 truncate text-2xl font-black text-red-600">
-                        {formatCurrency(transactionSummary.expenses)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Total Expenses</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-red-600">
+                          <CurrencyText value={formatCurrency(transactionSummary.expenses)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Expenses</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-                      <FileText className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
+                      <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Net Total</p>
-                      <p className={`mt-1 truncate text-2xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>
-                        {formatCurrency(transactionSummary.net)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Net Total</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className={`max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black ${transactionSummary.net >= 0 ? "text-slate-950" : "text-red-600"}`}>
+                          <CurrencyText value={formatCurrency(transactionSummary.net)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Net</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
               </div>
 
@@ -3575,22 +4027,30 @@ export function FinanceView() {
                       const transactionDateLabel = formatFinanceDate(transactionReportingDate);
                       const transactionDateParts = getFinanceTimelineDateParts(transactionReportingDate || transaction.date);
                       const canViewExpense =
-                        transaction.type === "expense" &&
-                        (Boolean(expenseForTransaction) || transaction.source === "expense");
+                        (transaction.type === "expense" || isExpensePaymentTransaction(transaction)) &&
+                        (Boolean(expenseForTransaction) || transaction.source === "expense" || isExpensePaymentTransaction(transaction));
                       const canViewAppointmentSnapshot = Boolean(appointmentId || transaction.appointmentSnapshot);
                       const canEditPayment = isEditablePaymentTransaction(transaction);
                       const shouldShowPaymentEdit = isPaymentTransactionRow(transaction);
                       const paymentStatusDisplay = shouldShowPaymentEdit ? getFinancePaymentStatusDisplay(transaction) : null;
                       const isDeletedPayment = isSoftDeletedPaymentTransaction(transaction);
                       const isActualDeletedPayment = isActualDeletedPaymentTransaction(transaction);
+                      const isDeletedExpense = isDeletedExpenseTransaction(transaction, expenseForTransaction);
+                      const isDeletedTransaction = isDeletedPayment || isDeletedExpense;
                       const restorablePaymentId = getRestorablePaymentId(transaction);
                       const savedAtLabel = hasTimeComponent(transaction.logDate)
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
-                      const statusLabel = transaction.type === "income"
+                      const statusLabel = isDeletedExpense
+                        ? "Deleted expense"
+                        : transaction.type === "income"
                         ? paymentStatusDisplay?.label || "Paid"
                         : formatOptionLabel(expenseForTransaction?.status || transaction.type, EXPENSE_STATUS_OPTIONS);
-                      const timelineStatusDisplay = paymentStatusDisplay || {
+                      const timelineStatusDisplay = isDeletedExpense ? {
+                        label: "Deleted expense",
+                        status: "deleted",
+                        className: deletedPaymentBadgeClass,
+                      } : paymentStatusDisplay || {
                         label: statusLabel,
                         status: transaction.type === "income" ? "paid" : transaction.type,
                         className: transaction.type === "income"
@@ -3612,8 +4072,8 @@ export function FinanceView() {
 
                       return (
                         <div key={transaction.id} className="relative">
-                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedPayment ? "bg-gray-400 shadow-gray-100" : transaction.type === "income" ? "bg-violet-600 shadow-violet-200" : "bg-red-500 shadow-red-100"}`} />
-                          <div className={`rounded-lg border border-slate-200 p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedPayment ? deletedPaymentRowClass : "bg-white"}`}>
+                          <span className={`absolute -left-[2rem] top-11 h-4 w-4 rounded-full border-4 border-white shadow-md sm:-left-[3rem] ${isDeletedTransaction ? "bg-gray-400 shadow-gray-100" : transaction.type === "income" ? "bg-violet-600 shadow-violet-200" : "bg-red-500 shadow-red-100"}`} />
+                          <div className={`rounded-lg border border-slate-200 p-4 shadow-md shadow-slate-200/60 transition-colors hover:border-violet-200 sm:p-5 ${isDeletedTransaction ? deletedPaymentRowClass : "bg-white"}`}>
                             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                               <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                                 <div className="flex shrink-0 items-center gap-4 sm:w-40 sm:border-r sm:border-slate-200 sm:pr-6">
@@ -3626,7 +4086,7 @@ export function FinanceView() {
                                   </div>
                                 </div>
                                 <div className="min-w-0">
-                                  <h4 className={`truncate text-lg font-black ${isDeletedPayment ? "text-gray-700" : "text-slate-950"}`}>{transaction.description}</h4>
+                                  <h4 className={`truncate text-lg font-black ${isDeletedTransaction ? "text-gray-700" : "text-slate-950"}`}>{transaction.description}</h4>
                                   <p className="mt-1 truncate text-base font-medium text-slate-500">
                                     {transaction.type === "income" ? "Income transaction" : "Expense transaction"}
                                   </p>
@@ -3663,13 +4123,13 @@ export function FinanceView() {
 
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
-                                  <div className={`text-2xl font-black ${isDeletedPayment ? "text-gray-600" : transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
-                                    {amountPrefix}{formatCurrency(Math.abs(transaction.amount))}
+                                  <div className={`text-2xl font-black ${isDeletedTransaction ? "text-gray-600" : transaction.type === "income" ? "text-emerald-600" : "text-red-600"}`}>
+                                    <CurrencyText value={`${amountPrefix}${formatCurrency(Math.abs(transaction.amount))}`} />
                                   </div>
                                   <div className="mt-2">
                                     <PaymentTransactionStatusBadge
                                       display={timelineStatusDisplay}
-                                      showIcon={Boolean(paymentStatusDisplay || transaction.type === "income")}
+                                      showIcon={Boolean(paymentStatusDisplay || transaction.type === "income" || isDeletedExpense)}
                                     />
                                   </div>
                                 </div>
@@ -3715,7 +4175,7 @@ export function FinanceView() {
                                       <span className="sr-only">Delete Payment</span>
                                     </Button>
                                   )}
-                                  {shouldShowPaymentEdit && isActualDeletedPayment && canManageExpenseStatus && restorablePaymentId && (
+                                  {shouldShowPaymentEdit && isActualDeletedPayment && restorablePaymentId && (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
@@ -3726,6 +4186,44 @@ export function FinanceView() {
                                       Restore
                                     </Button>
                                   )}
+                                  {transaction.type === "expense" && expenseForTransaction && !isDeletedExpense ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-12 w-12 rounded-lg border-slate-200 bg-white text-slate-700 shadow-md shadow-slate-200/60 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                        title="Edit expense"
+                                        onClick={() => openExpenseModal("edit", expenseForTransaction)}
+                                      >
+                                        <Edit className="h-5 w-5" />
+                                        <span className="sr-only">Edit Expense</span>
+                                      </Button>
+                                      {canDeleteExpenses ? (
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-12 w-12 rounded-lg border-slate-200 bg-white text-red-600 shadow-md shadow-slate-200/60 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                          title="Delete expense"
+                                          onClick={() => openExpenseDeleteDialog(expenseForTransaction)}
+                                        >
+                                          <Trash2 className="h-5 w-5" />
+                                          <span className="sr-only">Delete Expense</span>
+                                        </Button>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+                                  {canDeleteExpenses && isDeletedExpense && expenseForTransaction?.id ? (
+                                    <Button
+                                      variant="outline"
+                                      className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
+                                      title="Restore expense"
+                                      disabled={isRestoringExpense}
+                                      onClick={() => handleRestoreExpense(expenseForTransaction)}
+                                    >
+                                      <RotateCcw className="mr-2 h-5 w-5" />
+                                      Restore
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </div>
                             </div>
@@ -3756,43 +4254,109 @@ export function FinanceView() {
         vendorOptions={expenseVendorOptions}
         canManageStatus={canManageExpenseStatus}
         fieldErrors={expenseFieldErrors}
-        historyLogs={financeHistoryLogs}
-        isHistoryLoading={isFinanceHistoryLoading}
         originalInventoryItemId={selectedExpense?.inventoryItemId}
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
+        totalPaid={selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0}
+        balance={selectedExpense ? getExpenseBalance(selectedExpense) : Number(expenseForm.price) || 0}
+        initialPayment={expenseInitialPayment}
+        onCreateInventoryItem={() => openInventoryModal("create")}
         onOpenChange={(open) => !open && closeExpenseModal()}
         onFormChange={handleExpenseFormChange}
-        onSave={handleSaveExpense}
+        onInitialPaymentChange={setExpenseInitialPayment}
+        onSave={() => void handleSaveExpense()}
+        onSaveWithoutPayment={() => void handleSaveExpense(false, undefined, false, true)}
+        onSaveAndAddPayment={() => void handleSaveExpense(false, undefined, true)}
+      />
+      <ExpenseHistoryView
+        open={Boolean(expenseSnapshot)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExpenseSnapshot(null);
+            setExpenseSnapshotPaymentId("");
+            resetFinanceHistory();
+          }
+        }}
+        currentExpense={expenseSnapshot}
+        selectedPaymentId={expenseSnapshotPaymentId}
+        historyLogs={financeHistoryLogs}
+        isHistoryLoading={isFinanceHistoryLoading}
+        historyError={financeHistoryError}
+        inventoryItems={inventoryData}
+        onEdit={(expense) => editExpenseFromSnapshot(expense as DetailedExpense)}
+        onAddPayment={(expense) => openExpensePaymentModal(expense as DetailedExpense)}
+        onEditPayment={(expense, payment) => openExpensePaymentEditModal(expense as DetailedExpense, payment)}
+        onDeletePayment={(expense, payment) => void handleDeleteExpensePayment(expense as DetailedExpense, payment)}
+        onRestorePayment={(expense, payment) => void handleRestoreExpensePayment(expense as DetailedExpense, payment)}
+        canManagePayments={canDeleteExpenses}
       />
       <FinanceExpensePaymentModal
         expense={expenseToPay}
+        mode={expensePaymentMode}
+        payment={selectedExpensePayment}
         paymentMethod={expensePaymentMethod}
+        paymentAmount={expensePaymentAmount}
+        paymentDate={expensePaymentDate}
+        transactionId={expensePaymentTransactionId}
+        notes={expensePaymentNotes}
         isSaving={isSavingExpensePayment}
         formatCurrency={formatCurrency}
         onOpenChange={(open) => !open && setExpenseToPay(null)}
         onPaymentMethodChange={setExpensePaymentMethod}
-        onConfirm={handlePayExpense}
+        onPaymentAmountChange={setExpensePaymentAmount}
+        onPaymentDateChange={setExpensePaymentDate}
+        onTransactionIdChange={setExpensePaymentTransactionId}
+        onNotesChange={setExpensePaymentNotes}
+        onConfirm={() => void handlePayExpense()}
       />
-      <ConfirmDialog
+      <OverpaymentConfirmDialog
+        open={Boolean(expenseOverpaymentAction)}
+        onOpenChange={(open) => {
+          if (!open && !expenseOverpaymentLoadingAction) setExpenseOverpaymentAction(null);
+        }}
+        currentTotalDue={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPrice(expenseToPay) : Number(expenseForm.price) || 0}
+        previousPaidAmount={expenseOverpaymentAction === "payment" && expenseToPay ? getExpenseTotalPaid(expenseToPay) : 0}
+        paymentAmount={expenseOverpaymentAction === "payment" ? expensePaymentAmount : selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0}
+        adjustedPrice={expenseOverpaymentAdjustedPrice}
+        onAdjustedPriceChange={setExpenseOverpaymentAdjustedPrice}
+        onKeepPrice={() => void handleExpenseOverpaymentDecision(false)}
+        onAdjustPrice={() => void handleExpenseOverpaymentDecision(true)}
+        loadingAction={expenseOverpaymentLoadingAction}
+        subjectLabel="expense"
+      />
+      <DeleteExpenseDialog
         open={Boolean(expenseToDelete)}
         onOpenChange={(open) => !open && setExpenseToDelete(null)}
-        title="Delete Expense"
-        message={
+        description={
           expenseToDelete?.inventoryItemId
-            ? "This will remove the expense and reverse its linked stock quantity. The audit history will stay available."
-            : "This will remove the expense from finance reports. The audit history will stay available."
+            ? "This will mark the expense as deleted and reverse its linked stock quantity. It can be restored later."
+            : "This will mark the expense as deleted and remove it from default finance reports. It can be restored later."
         }
-        confirmLabel="Delete"
         loading={isDeletingExpense}
+        details={expenseToDelete ? {
+          amountLabel: formatCurrency(expenseToDelete.amount),
+          description: expenseToDelete.description,
+          dateLabel: formatFinanceDate(expenseToDelete.date),
+          categoryLabel: formatOptionLabel(expenseToDelete.category, EXPENSE_CATEGORY_OPTIONS),
+          vendor: expenseToDelete.vendor || undefined,
+          statusLabel: formatOptionLabel(expenseToDelete.status, EXPENSE_STATUS_OPTIONS),
+          inventoryLabel: expenseToDelete.inventoryItemId
+            ? `${inventoryData.find((item) => String(item.id) === String(expenseToDelete.inventoryItemId))?.item || "Linked stock"}${expenseToDelete.inventoryQuantity ? ` (${expenseToDelete.inventoryQuantity})` : ""}`
+            : undefined,
+        } : null}
         onConfirm={handleDeleteExpense}
       />
-      <ConfirmDialog
+      <DeletePaymentDialog
         open={Boolean(paymentToDelete)}
         onOpenChange={(open) => !open && setPaymentToDelete(null)}
-        title="Delete Payment"
-        message="This will soft-delete the payment and update the appointment balance."
-        confirmLabel="Delete"
         loading={isDeletingPayment}
+        details={paymentToDelete ? {
+          amountLabel: formatCurrency(Math.abs(Number(paymentToDelete.amount) || 0)),
+          patientName: paymentToDelete.patientName || (paymentToDelete.appointmentSnapshot as any)?.patientName,
+          appointmentLabel: paymentToDelete.appointmentType || (paymentToDelete.appointmentSnapshot as any)?.type,
+          dateLabel: formatTransactionTimestamp(paymentToDelete.paymentDate || paymentToDelete.date),
+          method: paymentToDelete.method,
+          reference: paymentToDelete.transactionId || paymentToDelete.id,
+        } : null}
         onConfirm={handleDeletePaymentTransaction}
       />
       <FinanceInventoryModal

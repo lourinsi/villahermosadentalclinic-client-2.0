@@ -1,7 +1,6 @@
 "use client";
 
-import { apiUrl } from "@/lib/api";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -11,23 +10,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getManagementDashboardPath } from "@/lib/management-routes";
+import {
+  consumeAuthMessage,
+  consumeSafeManagementReturnPath,
+} from "@/lib/auth-redirect";
 
 export default function StaffPortalLoginPage() {
-  const { login, logout, isLoading, user } = useAuth();
+  const { login, logout, isLoading, isAuthenticated, user } = useAuth();
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
+  const loginNavigationStarted = useRef(false);
+  const authMessageWasConsumed = useRef(false);
 
   useEffect(() => {
-    if (!isLoading) {
+    if (authMessageWasConsumed.current) return;
+    authMessageWasConsumed.current = true;
+    setSessionMessage(consumeAuthMessage());
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && !isSubmitting && !loginNavigationStarted.current && isAuthenticated) {
       const dashboardPath = getManagementDashboardPath(user?.role);
       if (dashboardPath) {
         router.replace(dashboardPath);
       }
     }
-  }, [isLoading, router, user]);
+  }, [isAuthenticated, isLoading, isSubmitting, router, user]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -39,24 +51,13 @@ export default function StaffPortalLoginPage() {
 
     try {
       setIsSubmitting(true);
-      await login(username, password);
-
-      const response = await fetch(apiUrl("/api/auth/verify"), {
-        method: "GET",
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        await logout();
-        toast.error("Verification failed. Please try again.");
-        return;
-      }
-
-      const data = await response.json();
-      const dashboardPath = getManagementDashboardPath(data.user?.role);
+      const authenticatedUser = await login(username, password);
+      const dashboardPath = getManagementDashboardPath(authenticatedUser.role);
       if (dashboardPath) {
+        const returnPath = consumeSafeManagementReturnPath(authenticatedUser.role);
+        loginNavigationStarted.current = true;
         toast.success("Staff login successful");
-        router.push(dashboardPath);
+        router.push(returnPath || dashboardPath);
         return;
       }
 
@@ -96,6 +97,16 @@ export default function StaffPortalLoginPage() {
         </CardHeader>
 
         <CardContent>
+          {sessionMessage && (
+            <div
+              className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-left text-sm leading-5 text-amber-900"
+              role="status"
+            >
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{sessionMessage}</span>
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <label htmlFor="username" className="text-sm font-medium text-slate-700">

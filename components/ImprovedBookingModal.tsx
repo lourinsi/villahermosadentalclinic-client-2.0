@@ -52,7 +52,6 @@ import useSharedBookingLogic, {
   getBookingEditTime,
   getDefaultBookingPaymentDate,
   normalizeBookingPaymentDate,
-  isFutureBookingPaymentDate,
   formatBookingPaymentDateLabel,
   isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
@@ -77,7 +76,7 @@ import useSharedBookingLogic, {
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
-import { BookingPaymentPage } from "./PaymentModal";
+import { BookingPaymentPage, getCanonicalPaymentMethodCardOptions } from "./PaymentModal";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectPatientModal } from "./SelectPatientModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
@@ -2210,11 +2209,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return false;
     }
 
-    if (isFutureBookingPaymentDate(normalizedDate)) {
-      toast.error("Payment date cannot be in the future.");
-      return false;
-    }
-
     if (normalizedDate !== paymentDate) setPaymentDate(normalizedDate);
     return true;
   };
@@ -3577,7 +3571,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                   <span className="text-gray-300">-</span>
                                   <span className="inline-flex items-center gap-1.5">
                                     <Tag className="h-4 w-4 text-blue-600" />
-                                    PHP {selectedTreatmentBasePrice.toLocaleString()}
+                                    <span className="text-[0.72em]">{"\u20b1"}</span>{selectedTreatmentBasePrice.toLocaleString()}
                                   </span>
                                 </div>
                               </div>
@@ -3602,7 +3596,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     <span className="block text-xs font-semibold text-gray-500">
                                       {t.name === "Other"
                                         ? "Custom treatment"
-                                        : `${optionDuration} mins${optionPrice ? ` - PHP ${optionPrice.toLocaleString()}` : ""}`}
+                                        : `${optionDuration} mins${optionPrice ? ` - \u20b1${optionPrice.toLocaleString()}` : ""}`}
                                     </span>
                                   </span>
                                 </div>
@@ -3808,7 +3802,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-semibold text-gray-500">Discount</p>
                             <div className="mt-0.5 flex items-center gap-2">
-                              <span className="text-lg font-black text-gray-900">PHP</span>
+                              <span className="text-sm font-black text-gray-900">{"\u20b1"}</span>
                               <Input
                                 type="number"
                                 value={discount}
@@ -3865,14 +3859,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     onPayFull={() => setAmountToPay(String(remainingBalance))}
                     payFullDisabled={remainingBalance <= 0}
                     paymentDateInputRef={paymentDateInputRef}
-                    maxPaymentDate={getDefaultBookingPaymentDate()}
                     onOpenPaymentDatePicker={openPaymentDatePicker}
                     paymentDateHelp={formatBookingPaymentDateLabel(paymentDate) || "Choose actual payment date."}
-                    methodOptions={[
-                      { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
-                      { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-violet-600", shadow: "shadow-violet-100" },
-                      ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
-                    ]}
+                    methodOptions={getCanonicalPaymentMethodCardOptions()}
                   />
                   <div className="hidden">
                   <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
@@ -3978,7 +3967,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               id="improvedBookingPaymentDate"
                               type="date"
                               value={paymentDate}
-                              max={getDefaultBookingPaymentDate()}
                               onChange={(e: any) => setPaymentDate(e.target.value)}
                               onClick={openPaymentDatePicker}
                               disabled={isPaymentDateDisabled}

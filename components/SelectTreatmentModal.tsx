@@ -324,7 +324,7 @@ export function SelectTreatmentModal({
                   Manual Price
                 </Label>
                 <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
-                  <span className="shrink-0 text-2xl font-black text-blue-600">PHP</span>
+                  <span className="shrink-0 text-xl font-black text-blue-600">{"\u20b1"}</span>
                   <Input
                     id="visit-treatment-price"
                     type="number"

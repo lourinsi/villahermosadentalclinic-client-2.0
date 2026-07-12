@@ -13,10 +13,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ApproveRejectDialog from "./ApproveRejectDialog";
-import BookingAppointmentHistory from "./BookingAppointmentHistory";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
+import BookingAppointmentHistory, { getMergedBookingLogs } from "./BookingAppointmentHistory";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, Calculator, AlertTriangle, CheckCircle2, History, ArrowLeft, RefreshCw, X, Pencil, Plus, User, Loader2, Check, ChevronRight, FileText, Users, WalletCards, EllipsisVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import AppointmentPatientChoiceDialog from "./AppointmentPatientChoiceDialog";
+import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
 import { AppointmentActionsMenu, createAppointmentHistoryActions } from "./AppointmentActionsMenu";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
@@ -57,6 +59,8 @@ import { SelectScheduleModal } from "./SelectScheduleModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { AppointmentStatusSelect } from "./AppointmentStatusSelect";
+import { CurrencyText } from "./CurrencyAmount";
+import { CurrentChangeIndicator, createCurrentFieldChange } from "./HistorySnapshotUI";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -77,8 +81,10 @@ interface AppointmentHistoryViewProps {
 }
 
 type SnapshotState = "historical" | "latest" | "current";
-type CurrentFieldChange = {
-  title: string;
+type SnapshotAuditChange = {
+  field: string;
+  previousValue: string;
+  snapshotValue: string;
 };
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
@@ -310,45 +316,6 @@ const formatChangeValue = (value: unknown) => {
   return text || "Not set";
 };
 
-const createCurrentFieldChange = (
-  fieldName: string,
-  snapshotValue: unknown,
-  currentValue: unknown,
-  snapshotLabel = formatChangeValue(snapshotValue),
-  currentLabel = formatChangeValue(currentValue),
-  normalize: (value: unknown) => string = normalizeComparableText
-): CurrentFieldChange | null => {
-  const normalizedCurrent = normalize(currentValue);
-  const normalizedSnapshot = normalize(snapshotValue);
-
-  if (currentValue === undefined || currentValue === null || normalizedCurrent === normalizedSnapshot) return null;
-
-  return {
-    title: `Current ${fieldName}: ${currentLabel}.`,
-  };
-};
-
-const CurrentChangeIndicator = ({ change }: { change?: CurrentFieldChange | null }) => {
-  if (!change) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200"
-          aria-label={change.title}
-          title={change.title}
-        >
-          <AlertTriangle className="h-3.5 w-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-[260px]">
-        {change.title}
-      </TooltipContent>
-    </Tooltip>
-  );
-};
-
 const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
   pickNumericValue(
     snapshot?.amount,
@@ -491,6 +458,26 @@ const isSamePaymentEntry = (first: any, second: any) => {
   );
 };
 
+const getPaymentAdjustmentDetails = (log: any) =>
+  log?.paymentAdjustment ||
+  log?.paymentAdjustmentDetails ||
+  log?.newState?.paymentAdjustment ||
+  log?.newState?._paymentAdjustment ||
+  null;
+
+const getPaymentAdjustmentId = (log: any) =>
+  String(
+    getPaymentAdjustmentDetails(log)?.paymentId ||
+    log?.paymentId ||
+    log?.paymentRecordId ||
+    ""
+  ).trim();
+
+const getHistoryTimestamp = (value: unknown) => {
+  const timestamp = new Date(String(value || "")).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true, selectedPaymentSnapshot, useCurrentAppointmentDetails = false }: AppointmentHistoryViewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -498,6 +485,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
   const [isAssignDoctorOpen, setIsAssignDoctorOpen] = useState(false);
+  const [isPatientChoiceOpen, setIsPatientChoiceOpen] = useState(false);
+  const [isSelectPatientOpen, setIsSelectPatientOpen] = useState(false);
   const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
   const [isOpeningPaymentEdit, setIsOpeningPaymentEdit] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
@@ -506,7 +495,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [latestPaymentLogMethod, setLatestPaymentLogMethod] = useState<string>("");
   const [paymentLogEntries, setPaymentLogEntries] = useState<any[]>([]);
   const [paymentLogsRefreshKey, setPaymentLogsRefreshKey] = useState(0);
+  const [historyLogsRefreshKey, setHistoryLogsRefreshKey] = useState(0);
   const [showAdditionalPayments, setShowAdditionalPayments] = useState(false);
+  const [isAuditHistoryExpanded, setIsAuditHistoryExpanded] = useState(false);
   const [historyLogs, setHistoryLogs] = useState<any[]>([]);
   const [paymentHistoryLogs, setPaymentHistoryLogs] = useState<any[]>([]);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
@@ -520,6 +511,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isScheduleTimePickerOpen, setIsScheduleTimePickerOpen] = useState(false);
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [selectedScheduleTime, setSelectedScheduleTime] = useState("");
+  const [selectedScheduleDuration, setSelectedScheduleDuration] = useState("30");
+  const [selectedScheduleStatus, setSelectedScheduleStatus] = useState("scheduled");
   const [isRepeatScheduleOpen, setIsRepeatScheduleOpen] = useState(false);
   const [isSavingRepeatSchedule, setIsSavingRepeatSchedule] = useState(false);
   const [repeatOption, setRepeatOption] = useState("next-week");
@@ -550,6 +543,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const shouldUseCurrentAppointmentDetails = Boolean(useCurrentAppointmentDetails && !openedFromBookingModal);
 
   useEffect(() => {
+    if (!open) return;
     setDisplayedSnapshot(appointmentSnapshot);
     setSelectedFocusedPaymentSnapshot(null);
     // Prefer explicit snapshot metadata when available. If the snapshot includes
@@ -561,7 +555,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? Boolean(appointmentSnapshot._isHistorical)
       : Boolean(isHistorical);
     setSnapshotState(derivedHistorical ? "historical" : "current");
-  }, [appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
+  }, [open, appointmentSnapshot, isHistorical, shouldUseCurrentAppointmentDetails]);
 
   useEffect(() => {
     if (!open) {
@@ -579,6 +573,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setCustomRepeatDate("");
       setIsCustomRepeatDatePickerOpen(false);
       setIsChangeTreatmentOpen(false);
+      setIsPatientChoiceOpen(false);
+      setIsSelectPatientOpen(false);
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
       setSelectedTreatmentPrice("");
@@ -586,6 +582,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setTreatmentToothNumberEntries([""]);
     }
   }, [open]);
+
+  useEffect(() => {
+    setIsAuditHistoryExpanded(false);
+  }, [displayedSnapshot]);
 
   const pushSnapshotHistory = (snapshot: any, state: SnapshotState) => {
     if (!snapshot) return;
@@ -650,12 +650,74 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
       if (!changedAppointmentId || changedAppointmentId === appointmentId) {
         setPaymentLogsRefreshKey((key) => key + 1);
+        setHistoryLogsRefreshKey((key) => key + 1);
       }
     };
 
     window.addEventListener("payments:updated", handlePaymentsUpdated as EventListener);
     return () => window.removeEventListener("payments:updated", handlePaymentsUpdated as EventListener);
   }, [open, displayedAppointmentId]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || typeof window === "undefined") return;
+
+    const handleAppointmentUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        appointmentId?: string | number | null;
+        appointment?: { id?: string | number | null } | null;
+      }>).detail;
+      const changedAppointmentId = String(
+        detail?.appointmentId ?? detail?.appointment?.id ?? ""
+      ).trim();
+
+      if (!changedAppointmentId || changedAppointmentId === appointmentId) {
+        setHistoryLogsRefreshKey((key) => key + 1);
+      }
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentUpdated as EventListener);
+    return () => window.removeEventListener("appointments:updated", handleAppointmentUpdated as EventListener);
+  }, [open, displayedAppointmentId]);
+
+  useEffect(() => {
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || isHistorical) return;
+
+    const controller = new AbortController();
+    const refreshCurrentSnapshotOnOpen = async () => {
+      try {
+        const response = await fetch(
+          apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`),
+          {
+            credentials: "include",
+            headers: getAuthHeaders(),
+            signal: controller.signal,
+          }
+        );
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.data) return;
+
+        setDisplayedSnapshot({
+          ...result.data,
+          id: result.data.id || appointmentId,
+          appointmentId,
+          _isHistorical: false,
+        });
+        setSelectedFocusedPaymentSnapshot(null);
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(result.data);
+        setShowAdditionalPayments(false);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to refresh current appointment on open:", error);
+        }
+      }
+    };
+
+    void refreshCurrentSnapshotOnOpen();
+    return () => controller.abort();
+  }, [open, displayedAppointmentId, isHistorical]);
 
   useEffect(() => {
     const appointmentId = String(displayedAppointmentId || "").trim();
@@ -729,7 +791,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         };
 
         const paymentRecords = await fetchPaymentRows(
-          `/api/payments/appointment/${encodeURIComponent(appointmentId)}`,
+          `/api/payments/appointment/${encodeURIComponent(appointmentId)}${snapshotState === "historical" ? "?includeDeleted=true" : ""}`,
           (payment: any) => ({
             ...payment,
             paymentId: payment.paymentId || payment.id,
@@ -856,7 +918,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             credentials: "include",
             headers: getAuthHeaders(),
           }),
-          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}`), {
+          fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(appointmentId)}?includeDeleted=true`), {
             credentials: "include",
             headers: getAuthHeaders(),
           }),
@@ -892,7 +954,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     return () => {
       cancelled = true;
     };
-  }, [open, displayedAppointmentId]);
+  }, [open, displayedAppointmentId, paymentLogsRefreshKey, historyLogsRefreshKey]);
 
   if (!displayedSnapshot) return null;
 
@@ -998,7 +1060,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const prevScheduleLabel = prevState ? `${formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
   const nextScheduleLabel = nextState ? `${formatWordyDate(nextState.date, { fallback: String(nextState.date || "No date") })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
-  const changedByName = displayedSnapshot.changedByName || appointmentSnapshot?.changedByName;
+  const latestMergedHistoryLog = getMergedBookingLogs(historyLogs, paymentHistoryLogs)[0];
+  const latestMergedHistoryActor =
+    latestMergedHistoryLog?.changedByName ||
+    latestMergedHistoryLog?.changedBy ||
+    "";
+  const changedByName =
+    displayedSnapshot.changedByName ||
+    displayedSnapshot.changedBy ||
+    appointmentSnapshot?.changedByName ||
+    appointmentSnapshot?.changedBy ||
+    latestMergedHistoryActor ||
+    "";
+  const snapshotActorName = changedByName || "Unknown";
   const isPastSnapshot = snapshotState === "historical";
   // Consider the snapshot to be a "log view" only when it's actually historical.
   // Many snapshots reconstructed from logs include `previousState`/`newState` metadata
@@ -1080,15 +1154,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const latestPaymentAmount = Number(latestPaymentLogAmount || 0);
   const shouldShowLatestPayment = !isPaymentAdjustmentSnapshot && !hasPaidInSnapshot && latestPaymentAmount > 0;
   const shouldShowPaymentLine = isPaymentAdjustmentSnapshot || hasPaidInSnapshot || shouldShowLatestPayment;
-  const snapshotPaymentLabel = isPaymentAdjustmentSnapshot
-    ? paymentAdjustment.delta < 0
-      ? "Payment Reduced"
-      : "Payment Adjusted"
-    : focusedPaymentAction === "deleted"
-      ? "Deleted Payment"
-      : focusedPaymentAction === "restored"
-        ? "Restored Payment"
-        : hasPaidInSnapshot ? "Paid in Snapshot" : "Latest Payment";
   const paymentSectionTitle = hasAppointmentLifecycleAction
     ? "Appointment Activity"
     : hasPaidInSnapshot ? "Selected Payment" : "Latest Payment";
@@ -1108,26 +1173,33 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const mainPaymentDividerClass = mainPaymentTone === "deleted"
     ? "border-red-100"
     : "border-emerald-100";
+  const formatCurrencyLabel = (value: number) => `\u20b1${Number(value).toLocaleString()}`;
   const snapshotPaymentAmount = hasPaidInSnapshot
     ? paidInSnapshotAmount
     : shouldShowLatestPayment
       ? latestPaymentAmount
       : 0;
-  const snapshotPaymentAmountLabel = isPaymentAdjustmentSnapshot
-    ? formatBookingPaymentAdjustmentAmountLabel(displayedSnapshot)
+  const snapshotPaymentAmountLabel = isPaymentAdjustmentSnapshot && paymentAdjustment.newAmount !== null
+    ? formatCurrencyLabel(paymentAdjustment.newAmount)
     : `\u20b1${snapshotPaymentAmount.toLocaleString()}`;
+  const snapshotPaymentAmountTitle = isPaymentAdjustmentSnapshot
+    ? formatBookingPaymentAdjustmentAmountLabel(displayedSnapshot)
+    : snapshotPaymentAmountLabel;
+  const snapshotPreviousPaymentAmountLabel =
+    isPaymentAdjustmentSnapshot && paymentAdjustment.previousAmount !== null
+      ? `from ${formatCurrencyLabel(paymentAdjustment.previousAmount)}`
+      : "";
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
-  const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
+  const fallbackTotalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
     ? Math.max(0, Number(displayedEffectivePrice) - Number(displayedBalanceNumeric))
     : (snapshotPaymentAmount ?? 0);
 
   const displayedBalanceLabel = displayedBalanceNumeric !== null
-    ? `₱${Number(displayedBalanceNumeric).toLocaleString()}`
-    : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : '₱0');
+    ? `\u20b1${Number(displayedBalanceNumeric).toLocaleString()}`
+    : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : "\u20b10");
 
   const latestStateForComparison = latestComparisonSnapshot ? getComparableSnapshotState(latestComparisonSnapshot) : null;
-  const formatCurrencyLabel = (value: number) => `\u20b1${Number(value).toLocaleString()}`;
   const normalizeNumberComparison = (value: unknown) => {
     const numeric = parseCurrencyNumber(value);
     return numeric === null ? normalizeComparableText(value) : String(numeric);
@@ -1136,6 +1208,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     formatWordyDate(String(value || ""), {
       fallback: formatChangeValue(value || "No date"),
     });
+  const paymentAdjustmentDateRaw = isPaymentAdjustmentSnapshot
+    ? (
+      displayedSnapshot?.paymentAdjustment?.newPaymentDate ||
+      displayedSnapshot?.paymentAdjustment?.updatedPaymentDate ||
+      displayedSnapshot?.paymentAdjustment?.paymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.newPaymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.updatedPaymentDate ||
+      displayedSnapshot?.paymentAdjustmentDetails?.paymentDate ||
+      displayedSnapshot?.newState?.paymentDate ||
+      displayedSnapshot?.newState?.paymentDetails?.date ||
+      displayedSnapshot?.newState?.transaction?.date ||
+      displayedSnapshot?.paymentDate ||
+      displayedSnapshot?.paymentDetails?.date ||
+      displayedSnapshot?.transaction?.date ||
+      logDate ||
+      displayedSnapshot?.changedAt ||
+      appointmentSnapshot?.paymentDate ||
+      appointmentSnapshot?.newState?.paymentDate
+    )
+    : "";
   const paidInSnapshotPaymentDateRaw =
     (focusedPaymentSnapshot ? getPaymentLogDateValue(focusedPaymentSnapshot) || getPaymentLogFallbackDateValue(focusedPaymentSnapshot) : "") ||
     displayedSnapshot?.paymentDate ||
@@ -1158,52 +1250,208 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     appointmentSnapshot?.newState?.paymentDate ||
     latestComparisonSnapshot?.createdAt ||
     appointmentSnapshot?.createdAt;
-  const snapshotPaymentDateRaw = hasPaidInSnapshot
-    ? paidInSnapshotPaymentDateRaw
-    : shouldShowLatestPayment
-      ? latestPaymentDateRaw
-      : "";
+  const snapshotPaymentDateRaw = isPaymentAdjustmentSnapshot
+    ? paymentAdjustmentDateRaw
+    : hasPaidInSnapshot
+      ? paidInSnapshotPaymentDateRaw
+      : shouldShowLatestPayment
+        ? latestPaymentDateRaw
+        : "";
   const snapshotPaymentDateLabel = snapshotPaymentDateRaw ? formatLongDate(snapshotPaymentDateRaw) : "";
-  const paymentLogRows = paymentLogEntries
+  const snapshotTimestamp = getHistoryTimestamp(displayedSnapshot?.changedAt || logDate);
+  const mergedHistoryForSnapshot = getMergedBookingLogs(historyLogs, paymentHistoryLogs);
+  const selectedMergedHistoryIndex = Number.isInteger(displayedSnapshot?._mergedHistoryIndex)
+    ? Number(displayedSnapshot._mergedHistoryIndex)
+    : -1;
+  const futureHistoryLogs = selectedMergedHistoryIndex >= 0
+    ? mergedHistoryForSnapshot.slice(0, selectedMergedHistoryIndex)
+    : mergedHistoryForSnapshot.filter((log) => getHistoryTimestamp(log?.changedAt) > snapshotTimestamp);
+  const futurePaymentLifecycleById = new Map<string, "deleted" | "restored">();
+  futureHistoryLogs.forEach((log) => {
+    const notes = String(log?.notes || "").trim().toLowerCase();
+    const action = notes.includes("payment restored")
+      ? "restored"
+      : notes.includes("payment deleted")
+        ? "deleted"
+        : null;
+    if (!action) return;
+
+    const state = log?.newState || log?.previousState || {};
+    const paymentId = String(
+      state?.paymentId ||
+      state?.paymentRecordId ||
+      log?.paymentId ||
+      log?.paymentRecordId ||
+      ""
+    ).trim();
+    // Logs are newest first, so retain the first (most current) lifecycle action.
+    if (paymentId && !futurePaymentLifecycleById.has(paymentId)) {
+      futurePaymentLifecycleById.set(paymentId, action);
+    }
+  });
+  const futureDeletedPaymentSnapshots = futureHistoryLogs
+    .filter((log) => String(log?.notes || "").toLowerCase().includes("payment deleted"))
+    .map((log) => {
+      const state = log?.newState || log?.previousState || {};
+      const amount = Math.abs(Number(state?.paymentAmount || log?.amount || 0));
+      const paymentId = String(state?.paymentId || state?.paymentRecordId || log?.paymentId || log?.paymentRecordId || "").trim();
+      if (!paymentId || amount <= 0) return null;
+
+      return {
+        ...state,
+        id: paymentId,
+        paymentId,
+        paymentRecordId: paymentId,
+        amount,
+        paymentAmount: amount,
+        paymentDate: state?.paymentDate || log?.paymentDate || log?.date,
+        paymentMethod: state?.paymentMethod || log?.paymentMethod,
+        deleted: true,
+        deletedAt: state?.paymentDeletedAt || log?.changedAt,
+        paymentDeleted: true,
+        paymentDeletedAt: state?.paymentDeletedAt || log?.changedAt,
+      };
+    })
+    .filter(Boolean);
+  const futureDeletedPaymentIds = new Set(
+    futureDeletedPaymentSnapshots.map((payment: any) => getPaymentEntryIdentity(payment))
+  );
+  const historicalPaymentEntries = [...paymentLogEntries];
+  if (isPastSnapshot) {
+    futureDeletedPaymentSnapshots.forEach((deletedPayment: any) => {
+      if (!historicalPaymentEntries.some((payment) => getPaymentEntryIdentity(payment) === getPaymentEntryIdentity(deletedPayment))) {
+        historicalPaymentEntries.push(deletedPayment);
+      }
+    });
+  }
+  const paymentLogRows = historicalPaymentEntries
     .map((payment) => {
-      const amount = getPaymentLogAmountValue(payment);
+      const paymentId = getPaymentEntryIdentity(payment);
+      const createdTimestamp = getHistoryTimestamp(payment?.createdAt);
+      if (isPastSnapshot && snapshotTimestamp && createdTimestamp && createdTimestamp > snapshotTimestamp) return null;
+
+      const currentAmount = getPaymentLogAmountValue(payment);
+      const futureAdjustments = isPastSnapshot && snapshotTimestamp && paymentId
+        ? historyLogs
+            .filter((log) => {
+              const adjustment = getPaymentAdjustmentDetails(log);
+              return Boolean(
+                adjustment?.isAdjustment &&
+                getPaymentAdjustmentId(log) === paymentId &&
+                getHistoryTimestamp(log?.changedAt) > snapshotTimestamp
+              );
+            })
+            .sort((a, b) => getHistoryTimestamp(b?.changedAt) - getHistoryTimestamp(a?.changedAt))
+        : [];
+      const amount = futureAdjustments.reduce((historicalAmount, log) => {
+        const previousAmount = Number(getPaymentAdjustmentDetails(log)?.previousAmount);
+        return Number.isFinite(previousAmount) ? previousAmount : historicalAmount;
+      }, currentAmount);
+      const deletedAtTimestamp = getHistoryTimestamp(payment?.deletedAt || payment?.paymentDeletedAt);
+      const deletedAfterSnapshot = futureDeletedPaymentIds.has(paymentId) || Boolean(
+        isPastSnapshot && snapshotTimestamp && deletedAtTimestamp && deletedAtTimestamp > snapshotTimestamp
+      );
+      const wasAlreadyDeleted = Boolean(
+        payment?.deleted && !deletedAfterSnapshot && (!snapshotTimestamp || !deletedAtTimestamp || deletedAtTimestamp <= snapshotTimestamp)
+      );
+      if (wasAlreadyDeleted) return null;
+
       const dateValue = getPaymentLogDateValue(payment);
+      const amountChanged = Math.abs(amount - currentAmount) > 0.01;
+      const amountDifference = Math.abs(currentAmount - amount);
+      const latestLifecycleAction = futurePaymentLifecycleById.get(paymentId);
+      const currentChange = latestLifecycleAction === "restored"
+        ? { title: "Payment restored." }
+        : latestLifecycleAction === "deleted" || deletedAfterSnapshot
+          ? { title: "Payment deleted." }
+        : amountChanged
+          ? {
+              title: `Payment ${currentAmount > amount ? "increased" : "decreased"} by ${formatCurrencyLabel(amountDifference)} (${formatCurrencyLabel(amount)} → ${formatCurrencyLabel(currentAmount)}).`,
+            }
+          : null;
 
       return {
         id: String(payment?.id || `${dateValue}-${amount}`),
         raw: payment,
+        actionRaw: payment,
         amount,
         amountLabel: `\u20b1${amount.toLocaleString()}`,
         dateLabel: dateValue ? formatLongDate(dateValue) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(payment)),
+        currentChange,
+        isCurrentlyDeleted: latestLifecycleAction === "restored"
+          ? false
+          : latestLifecycleAction === "deleted"
+            ? true
+            : Boolean(payment?.deleted || payment?.paymentDeleted),
       };
     })
-    .filter((payment) => payment.amount > 0);
+    .filter((payment): payment is NonNullable<typeof payment> => Boolean(payment && payment.amount > 0));
+  // The visible payment rows are the source of truth for the paid summary. This
+  // preserves reconstructed historical payments (including payments deleted later)
+  // while excluding records that were already deleted at the selected snapshot.
+  const totalPaidAmount = paymentLogRows.length > 0
+    ? paymentLogRows.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+    : fallbackTotalPaidAmount;
+  const matchedCurrentPaymentRow = hasFocusedPaymentSnapshot
+    ? paymentLogRows.find((payment) => isSamePaymentEntry(payment.raw, focusedPaymentSnapshot)) || null
+    : null;
   const selectedPaymentRow = hasFocusedPaymentSnapshot
     ? {
         id: getPaymentEntryIdentity(focusedPaymentSnapshot) || `selected-${getPaymentLogDateValue(focusedPaymentSnapshot)}-${focusedPaymentAmount}`,
         raw: focusedPaymentSnapshot,
+        actionRaw: matchedCurrentPaymentRow?.raw || focusedPaymentSnapshot,
         amount: focusedPaymentAmount,
         amountLabel: `\u20b1${focusedPaymentAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(focusedPaymentSnapshot)),
+        currentChange:
+          matchedCurrentPaymentRow?.currentChange ||
+          (focusedPaymentAction === "restored"
+            ? { title: "Payment restored." }
+            : focusedPaymentAction === "deleted"
+              ? { title: "Payment deleted." }
+              : null),
+        isCurrentlyDeleted: matchedCurrentPaymentRow?.isCurrentlyDeleted ?? focusedPaymentAction === "deleted",
       }
     : null;
   const mainPaymentRow = hasPaidInSnapshot
     ? selectedPaymentRow || {
         id: getPaymentEntryIdentity(displayedSnapshot) || `snapshot-${paidInSnapshotPaymentDateRaw}-${paidInSnapshotAmount}`,
         raw: displayedSnapshot,
+        actionRaw: displayedSnapshot,
         amount: paidInSnapshotAmount,
         amountLabel: `\u20b1${paidInSnapshotAmount.toLocaleString()}`,
         dateLabel: paidInSnapshotPaymentDateRaw ? formatLongDate(paidInSnapshotPaymentDateRaw) : "No date",
         methodLabel: normalizeBookingPaymentMethod(getPaymentLogMethodValue(displayedSnapshot)),
+        currentChange: null,
+        isCurrentlyDeleted: Boolean(displayedSnapshot?.deleted || displayedSnapshot?.paymentDeleted),
       }
     : shouldShowLatestPayment
       ? paymentLogRows[0] || null
       : null;
-  const additionalPaymentRows = paymentLogRows.filter((payment) =>
-    mainPaymentRow ? !isSamePaymentEntry(payment.raw, mainPaymentRow.raw) : true
-  );
+  const displayedMainPaymentAmountLabel = !isPaymentAdjustmentSnapshot && mainPaymentRow
+    ? mainPaymentRow.amountLabel
+    : snapshotPaymentAmountLabel;
+  const mainPaymentHistoryNote = focusedPaymentAction === "restored" ? "Was deleted" : "";
+  const paymentAdjustmentDateKey = paymentAdjustmentDateRaw ? formatBookingDateKey(paymentAdjustmentDateRaw as any) : "";
+  let removedAdjustmentDuplicatePayment = false;
+  const additionalPaymentRows = paymentLogRows.filter((payment) => {
+    if (mainPaymentRow && isSamePaymentEntry(payment.raw, mainPaymentRow.raw)) return false;
+
+    if (isPaymentAdjustmentSnapshot && !removedAdjustmentDuplicatePayment && paymentAdjustment.newAmount !== null) {
+      const amountMatches = Number(payment.amount) === Number(paymentAdjustment.newAmount);
+      const paymentDateKey = formatBookingDateKey(getPaymentLogDateValue(payment.raw) as any);
+      const dateMatches = !paymentAdjustmentDateKey || !paymentDateKey || paymentDateKey === paymentAdjustmentDateKey;
+
+      if (amountMatches && dateMatches) {
+        removedAdjustmentDuplicatePayment = true;
+        return false;
+      }
+    }
+
+    return true;
+  });
   const snapshotPaymentMethodLabel = normalizeBookingPaymentMethod(
     hasFocusedPaymentSnapshot
       ? getPaymentLogMethodValue(focusedPaymentSnapshot)
@@ -1390,6 +1638,176 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     notesCurrentChange,
     treatmentNotesCurrentChange,
   ];
+
+  const snapshotAuditChanges: SnapshotAuditChange[] = (() => {
+    const previous = isPlainObject(displayedSnapshot?.previousState) ? displayedSnapshot.previousState : null;
+    const selected = isPlainObject(displayedSnapshot?.newState) ? displayedSnapshot.newState : null;
+    if (!previous || !selected || !Object.keys(previous).length || previous.status === "none") return [];
+
+    const changes: SnapshotAuditChange[] = [];
+    const seenFields = new Set<string>();
+    const readable = (value: unknown) => {
+      if (value === null || value === undefined || String(value).trim() === "") return "Not set";
+      if (typeof value === "boolean") return value ? "Yes" : "No";
+      return String(value);
+    };
+    const addChange = (
+      field: string,
+      previousValue: unknown,
+      snapshotValue: unknown,
+      format: (value: unknown) => string = readable,
+      normalize: (value: unknown) => string = normalizeComparableText,
+      previousComparisonValue: unknown = previousValue,
+      snapshotComparisonValue: unknown = snapshotValue
+    ) => {
+      if (seenFields.has(field) || normalize(previousComparisonValue) === normalize(snapshotComparisonValue)) return;
+      seenFields.add(field);
+      changes.push({ field, previousValue: format(previousValue), snapshotValue: format(snapshotValue) });
+    };
+    const firstDefined = (state: any, keys: string[]) => {
+      for (const key of keys) {
+        if (state?.[key] !== undefined) return state[key];
+      }
+      return undefined;
+    };
+    const money = (value: unknown) => {
+      if (value === null || value === undefined || value === "") return "Not set";
+      const numeric = parseCurrencyNumber(value);
+      return numeric === null ? readable(value) : formatCurrencyLabel(numeric);
+    };
+    const status = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : formatBookingHistoryStatusLabel(value);
+    const date = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : formatWordyDate(value as any, { fallback: readable(value) });
+    const method = (value: unknown) => value === null || value === undefined || value === ""
+      ? "Not set"
+      : normalizeBookingPaymentMethod(value);
+    const personName = (state: any, kind: "patient" | "doctor") => {
+      if (kind === "doctor") return resolveDoctorDisplayNameFromSnapshot(state) || "Not set";
+      const resolved = resolvePatientName(state);
+      const rawId = String(state?.patientId || state?.patient_id || "").trim();
+      if (rawId && resolved === rawId) {
+        const recordId = String(patientRecord?.id || patientRecord?.patientId || "").trim();
+        if (recordId === rawId) return resolvePatientName({ patient: patientRecord });
+        return "Assigned patient";
+      }
+      return resolved || "Not set";
+    };
+    const patientIdentity = (state: any) => String(
+      state?.patient?.id || state?.patientId || state?.patient_id ||
+      state?.patient?.name || state?.patientName || state?.patient_name ||
+      [state?.patientFirstName || state?.patient?.firstName, state?.patientLastName || state?.patient?.lastName].filter(Boolean).join(" ") ||
+      ""
+    ).trim();
+    const doctorIdentity = (state: any) => String(
+      state?.doctorId || state?.doctor?.id || state?.doctor?.name || state?.doctorName || state?.doctor || ""
+    ).trim();
+    const treatment = (state: any) => {
+      if (state?.type === undefined && !state?.customType && !state?.serviceType) return "Not set";
+      return resolveAppointmentTypeName(state?.type ?? state?.serviceType, state?.customType);
+    };
+    const totalPaid = (state: any) => {
+      const explicit = firstDefined(state, ["totalPaid", "paid", "amountPaid"]);
+      if (explicit !== undefined) return explicit;
+      const price = parseCurrencyNumber(firstDefined(state, ["price", "totalPrice"]));
+      const discount = parseCurrencyNumber(firstDefined(state, ["discount", "discountAmount"])) ?? 0;
+      const balance = parseCurrencyNumber(firstDefined(state, ["balance", "remaining", "balanceAmount"]));
+      return price !== null && balance !== null ? Math.max(0, price - discount - balance) : undefined;
+    };
+    addChange("Appointment status", previous.status, selected.status, status, normalizeBookingHistoryStatus);
+    addChange("Payment status", previous.paymentStatus, selected.paymentStatus, status, normalizeBookingHistoryStatus);
+    addChange("Remaining balance", firstDefined(previous, ["balance", "remaining", "balanceAmount"]), firstDefined(selected, ["balance", "remaining", "balanceAmount"]), money, normalizeNumberComparison);
+    addChange("Total paid", totalPaid(previous), totalPaid(selected), money, normalizeNumberComparison);
+    addChange("Price", firstDefined(previous, ["price", "totalPrice"]), firstDefined(selected, ["price", "totalPrice"]), money, normalizeNumberComparison);
+    addChange("Discount", firstDefined(previous, ["discount", "discountAmount"]), firstDefined(selected, ["discount", "discountAmount"]), money, normalizeNumberComparison);
+    const previousPatientIdentity = patientIdentity(previous);
+    const selectedPatientIdentity = patientIdentity(selected);
+    const previousPatientName = personName(previous, "patient");
+    const selectedPatientName = personName(selected, "patient");
+    addChange(
+      "Patient",
+      previousPatientName === "Assigned patient" ? "Previous patient" : previousPatientName,
+      selectedPatientName === "Assigned patient" ? "Selected patient" : selectedPatientName,
+      readable,
+      normalizeComparableText,
+      previousPatientIdentity,
+      selectedPatientIdentity
+    );
+    addChange(
+      "Doctor",
+      personName(previous, "doctor"),
+      personName(selected, "doctor"),
+      readable,
+      normalizeDoctorName,
+      doctorIdentity(previous),
+      doctorIdentity(selected)
+    );
+    addChange("Appointment date", previous.date, selected.date, date, normalizeComparableDate);
+    addChange(
+      "Time slot",
+      `${previous.time || ""}|${previous.duration || ""}`,
+      `${selected.time || ""}|${selected.duration || ""}`,
+      (value) => {
+        const [time, duration] = String(value || "").split("|");
+        return time ? formatAppointmentTimeRange(time, duration) : "Not set";
+      }
+    );
+    addChange(
+      "Service / treatment",
+      treatment(previous),
+      treatment(selected),
+      readable,
+      normalizeComparableText,
+      `${previous.type ?? previous.serviceType ?? ""}|${previous.customType || ""}`,
+      `${selected.type ?? selected.serviceType ?? ""}|${selected.customType || ""}`
+    );
+    addChange("Tooth numbers", getBookingToothNumbersValue(previous), getBookingToothNumbersValue(selected));
+    addChange("Treatment notes", getBookingTreatmentNotesValue(previous), getBookingTreatmentNotesValue(selected));
+    addChange("Remarks / notes", previous.notes, selected.notes);
+    addChange("Cancellation reason", previous.cancellationReason, selected.cancellationReason);
+    if (focusedPaymentAction === "deleted") {
+      addChange("Payment state", "Active", "Deleted");
+    } else if (focusedPaymentAction === "restored") {
+      addChange("Payment state", "Deleted", "Active");
+    } else if (appointmentLifecycleAction === "deleted") {
+      addChange("Appointment state", "Active", "Deleted");
+    } else if (appointmentLifecycleAction === "restored") {
+      addChange("Appointment state", "Deleted", "Active");
+    } else {
+      addChange("Appointment deleted", Boolean(previous.deleted || previous.deletedAt), Boolean(selected.deleted || selected.deletedAt));
+    }
+
+    const adjustmentSource = displayedSnapshot?.paymentAdjustment || displayedSnapshot?.paymentAdjustmentDetails || selected?.paymentAdjustment || selected?._paymentAdjustment || {};
+    const adjustment = getBookingPaymentAdjustment(displayedSnapshot);
+    if (adjustment.isAdjustment && adjustment.previousAmount !== null && adjustment.newAmount !== null) {
+      addChange("Selected payment", adjustment.previousAmount, adjustment.newAmount, money, normalizeNumberComparison);
+    } else {
+      addChange(
+        "Selected payment",
+        firstDefined(previous, ["paymentAmount", "amountPaidThisTransaction"]),
+        firstDefined(selected, ["paymentAmount", "amountPaidThisTransaction"]),
+        money,
+        normalizeNumberComparison
+      );
+    }
+    addChange(
+      "Payment date",
+      adjustmentSource.previousDate ?? adjustmentSource.previousPaymentDate ?? adjustmentSource.oldPaymentDate ?? adjustmentSource.fromPaymentDate ?? previous.paymentDate,
+      adjustmentSource.newDate ?? adjustmentSource.newPaymentDate ?? adjustmentSource.updatedPaymentDate ?? adjustmentSource.toPaymentDate ?? selected.paymentDate,
+      date,
+      normalizeComparableDate
+    );
+    addChange(
+      "Payment method",
+      adjustmentSource.previousMethod ?? adjustmentSource.previousPaymentMethod ?? adjustmentSource.oldPaymentMethod ?? adjustmentSource.fromPaymentMethod ?? previous.paymentMethod,
+      adjustmentSource.newMethod ?? adjustmentSource.newPaymentMethod ?? adjustmentSource.updatedPaymentMethod ?? adjustmentSource.toPaymentMethod ?? selected.paymentMethod,
+      method
+    );
+
+    return changes;
+  })();
   const hasLaterChanges = Boolean(
     latestStateForComparison &&
     snapshotState !== "historical" &&
@@ -1407,7 +1825,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     : 'This log has later changes. Use "Latest" for current details.';
 
   const patientChanged = isPatientChange(displayedSnapshot);
-  const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
+  const changeTag = patientChanged ? "Patient Changed" : "";
 
   const appointmentId = displayedAppointmentId;
   const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
@@ -1417,11 +1835,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const doctorRouteName = displayedDoctorName || "";
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
-  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState && !displayedDoctorName);
+  const canSelectAppointmentPatient = Boolean(
+    canUseSnapshotActions &&
+    !showsLogSnapshotState &&
+    ["admin", "doctor", "receptionist"].includes(String(effectiveRole || ""))
+  );
+  const canOpenPatientChoice = Boolean(canSelectAppointmentPatient || canGoToPatient);
+  const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
-  const selectedScheduleDuration = String(normalizeBookingDuration(displayedSnapshot?.duration || 30));
   const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
   const repeatTargetDate = getRepeatTargetDate(displayedSnapshot?.date, repeatOption, customRepeatDate);
   const repeatTargetLabel = repeatTargetDate ? formatWordyDate(repeatTargetDate) : "";
@@ -1558,6 +1981,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const isLegacyPaymentRow = (payment: any) => String(payment?.id || "").startsWith("legacy-");
   const isReadOnlyPaymentRow = (payment: any) => isLegacyPaymentRow(payment) || isStoredPaymentLogRow(payment);
+  const isDeletedPaymentEntry = (payment: any) => Boolean(
+    payment?.deleted || payment?.paymentDeleted || payment?.deletedAt || payment?.paymentDeletedAt
+  );
+
+  const getRestorablePaymentEntryId = (payment: any) => {
+    if (!isDeletedPaymentEntry(payment)) return "";
+    return String(payment?.paymentId || payment?.paymentRecordId || payment?.id || "").trim();
+  };
 
   const getEditablePaymentEntryId = (payment: any) => {
     if (isReadOnlyPaymentRow(payment)) return "";
@@ -1727,6 +2158,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
     setSelectedScheduleDate(resolveScheduleDateValue(displayedSnapshot?.date));
     setSelectedScheduleTime(String(displayedSnapshot?.time || ""));
+    setSelectedScheduleDuration(String(normalizeBookingDuration(displayedSnapshot?.duration || 30)));
+    setSelectedScheduleStatus(String(normalizeAppointmentStatus(displayedSnapshot?.status || "scheduled")));
     setIsChangeScheduleOpen(true);
   };
 
@@ -1736,6 +2169,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
   const handleScheduleTimeSelect = (time: string) => {
     setSelectedScheduleTime(time);
+  };
+
+  const handleScheduleDurationChange = (duration: string) => {
+    setSelectedScheduleDuration(duration);
+  };
+
+  const handleScheduleStatusChange = (status: string) => {
+    setSelectedScheduleStatus(status);
   };
 
   const handleSaveScheduleChange = async () => {
@@ -1762,6 +2203,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       const updated = await updateAppointment(String(appointmentId), {
         date: nextDate,
         time: nextTime,
+        duration: Number(selectedScheduleDuration) || 30,
+        status: normalizeAppointmentStatus(selectedScheduleStatus) as Appointment["status"],
       } as Partial<Appointment>);
 
       setDisplayedSnapshot((current: any) => ({
@@ -1769,6 +2212,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         ...updated,
         date: updated?.date ?? nextDate,
         time: updated?.time ?? nextTime,
+        duration: updated?.duration ?? (Number(selectedScheduleDuration) || 30),
+        status: updated?.status ?? selectedScheduleStatus,
       }));
       setLatestComparisonSnapshot(null);
       try {
@@ -2046,6 +2491,102 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     router.push(`${managementBasePath}/patients/${encodeURIComponent(patientRouteName)}`);
   };
 
+  const handleRestorePaymentEntry = async (payment: any) => {
+    const paymentId = getRestorablePaymentEntryId(payment);
+    if (!paymentId) {
+      toast.error("Could not find the deleted payment record.");
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/payments/${encodeURIComponent(paymentId)}/restore`), {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        toast.error(result?.message || "Failed to restore payment");
+        return;
+      }
+
+      setPaymentLogsRefreshKey((key) => key + 1);
+      window.dispatchEvent(new CustomEvent("payments:updated", {
+        detail: {
+          appointmentId: String(appointmentId),
+          payment: { id: paymentId, appointmentId: String(appointmentId) },
+        },
+      }));
+      toast.success("Payment restored successfully");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to restore payment:", error);
+      toast.error("Failed to restore payment");
+    }
+  };
+
+  const openPatientChoiceDialog = () => {
+    if (!canOpenPatientChoice) return;
+    setIsPatientChoiceOpen(true);
+  };
+
+  const openPatientSelector = async () => {
+    if (!canSelectAppointmentPatient || !appointmentId) {
+      toast.error("This appointment cannot change patients");
+      return;
+    }
+
+    setIsPatientChoiceOpen(false);
+    setIsSelectPatientOpen(true);
+  };
+
+  const handleSelectAppointmentPatient = async (patient: PatientSelectOption) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const nextPatientId = String(patient.id || "").trim();
+    const nextPatientName = String(patient.name || "").trim();
+    if (!nextPatientId || !nextPatientName) {
+      toast.error("Please select a valid patient");
+      return;
+    }
+
+    try {
+      const updated = await updateAppointment(String(appointmentId), {
+        patientId: nextPatientId,
+        patientName: nextPatientName,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        patientId: updated?.patientId ?? nextPatientId,
+        patientName: updated?.patientName ?? nextPatientName,
+        patient: updated?.patient ?? patient,
+        patientProfile: patient.profilePicture || patient.profilePictureUrl || current?.patientProfile,
+        patientProfilePicture: patient.profilePicture || patient.profilePictureUrl || current?.patientProfilePicture,
+      }));
+      setPatientRecord(patient);
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Patient updated");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update patient:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update patient");
+      throw error;
+    }
+  };
+
   const goToDoctor = () => {
     if (!canGoToDoctor) {
       toast.error("No doctor profile available");
@@ -2093,13 +2634,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const viewLatestSnapshot = () => {
     if (!displayedSnapshot) return;
     pushSnapshotHistory(displayedSnapshot, snapshotState);
-
-    if (appointmentId && typeof onViewCurrent === "function") {
-      onViewCurrent(appointmentId);
-      return;
-    }
-
-    fetchLatestLogSnapshot();
+    void fetchLatestLogSnapshot();
   };
 
   const fetchLatestLogSnapshotForAppointment = async (targetAppointmentId: string) => {
@@ -2213,6 +2748,33 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
     setIsFetchingLogs(true);
     try {
+      const currentResponse = await fetch(
+        apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`),
+        {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        }
+      );
+      const currentPayload = await currentResponse.json().catch(() => ({}));
+      const currentAppointment = currentResponse.ok && currentPayload?.data
+        ? currentPayload.data
+        : null;
+
+      if (currentAppointment) {
+        setDisplayedSnapshot({
+          ...currentAppointment,
+          id: currentAppointment.id || appointmentId,
+          appointmentId,
+          _isHistorical: false,
+        });
+        setSelectedFocusedPaymentSnapshot(null);
+        setSnapshotState("current");
+        setLatestComparisonSnapshot(currentAppointment);
+        setShowAdditionalPayments(false);
+        onViewCurrent?.(appointmentId);
+        return;
+      }
+
       const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
         credentials: "include",
         headers: getAuthHeaders(),
@@ -2231,7 +2793,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
       // Server returns logs ordered desc; take the first as the most recent
       const latest = logs[0];
-      const snap = latest.newState && Object.keys(latest.newState).length > 0 ? latest.newState : latest.previousState;
+      const latestState = latest.newState && Object.keys(latest.newState).length > 0 ? latest.newState : latest.previousState;
+      const snap = latestState ? { ...latestState } : null;
       if (!snap) {
         toast.error("No snapshot data available in latest log");
         return;
@@ -2243,8 +2806,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       snap.changedByName = latest.changedByName;
 
       setDisplayedSnapshot(snap);
+      setSelectedFocusedPaymentSnapshot(null);
       setSnapshotState("current");
       setLatestComparisonSnapshot(null);
+      setShowAdditionalPayments(false);
     } catch (err) {
       console.error("Failed to load logs:", err);
       toast.error("Failed to load appointment logs");
@@ -2276,29 +2841,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[94dvh] max-h-[94dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.75rem] border-none bg-white p-0 shadow-[0_28px_90px_rgba(15,23,42,0.22)] data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[94vh] sm:w-[min(68rem,calc(100vw-2rem))] sm:max-w-[68rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
+          className="!fixed !bottom-0 !left-0 !top-auto !flex h-[92dvh] max-h-[92dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.35rem] border border-slate-200 bg-white p-0 shadow-[0_28px_90px_rgba(15,23,42,0.16)] data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:h-auto sm:max-h-[94vh] sm:w-[min(68rem,calc(100vw-2rem))] sm:max-w-[68rem] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.75rem]"
         >
-          <DialogHeader className="shrink-0 bg-white px-5 pb-4 pt-3 sm:px-8 sm:pb-5 sm:pt-8">
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex min-w-0 flex-1 items-start gap-4">
+          <DialogHeader className="shrink-0 bg-white px-4 pb-4 pt-2 sm:px-10 sm:pb-6 sm:pt-8">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
+              <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
                 {snapshotHistory.length > 0 ? (
-                  <Button size="icon" variant="ghost" className="mt-1 h-11 w-11 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" title="Go back to previous snapshot" onClick={goBackSnapshot}>
+                  <Button size="icon" variant="ghost" className="mt-1 h-10 w-10 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-11 sm:w-11" title="Go back to previous snapshot" onClick={goBackSnapshot}>
                     <ArrowLeft className="h-5 w-5" />
                   </Button>
                 ) : null}
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-violet-600 bg-white text-violet-700">
-                  <Clock className="h-6 w-6" />
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-[3px] border-violet-600 bg-white text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.12)] sm:h-16 sm:w-16">
+                  <Clock className="h-7 w-7 sm:h-8 sm:w-8" />
                 </div>
-                <div className="min-w-0 pt-1">
-                  <DialogTitle className="flex flex-wrap items-center gap-x-5 gap-y-2 text-slate-950">
-                    <span className="text-2xl font-black tracking-tight sm:text-[2rem]">Snapshot</span>
+                <div className="min-w-0 pt-0.5 sm:pt-1">
+                  <DialogTitle className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-slate-950 sm:gap-x-5">
+                    <span className="truncate text-3xl font-black tracking-tight sm:text-[2rem]">Snapshot</span>
                     {showsLogSnapshotState ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className={`inline-flex cursor-help items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                            <StateIcon className="h-4 w-4" />
-                            {stateLabel}
+                          <span className={`inline-flex cursor-help items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-wider sm:gap-2 sm:px-4 sm:py-2 sm:text-xs ${stateBadgeClass}`}>
+                            <StateIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            {stateLabel.toUpperCase()}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-[220px] border-amber-200 bg-amber-50 text-center text-amber-800">
@@ -2306,27 +2871,32 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <span className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-wider ${stateBadgeClass}`}>
-                        <StateIcon className="h-4 w-4" />
-                        {stateLabel}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-wider sm:gap-2 sm:px-4 sm:py-2 sm:text-xs ${stateBadgeClass}`}>
+                        <StateIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        {stateLabel.toUpperCase()}
                       </span>
                     )}
                   </DialogTitle>
-                  <DialogDescription className="mt-3 line-clamp-2 text-left text-sm font-semibold leading-6 text-slate-500 sm:text-base">
-                    {timestampPrefix} {snapshotDate}{changeSuffix ? ` - ${changeSuffix}` : ""}
+                  <DialogDescription className="mt-1.5 text-left text-sm font-semibold leading-5 text-slate-500 sm:mt-3 sm:text-base sm:leading-6">
+                    <span className="block truncate">{timestampPrefix} {snapshotDate}</span>
+                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-black uppercase tracking-wide text-slate-400 sm:text-[13px]">
+                        <span className="truncate">by {snapshotActorName}</span>
+                        {changeTag ? <span aria-hidden="true">-</span> : null}
+                        {changeTag ? <span className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700">{changeTag}</span> : null}
+                      </span>
                   </DialogDescription>
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-3 lg:justify-end">
+              <div className="flex shrink-0 items-center gap-2 sm:justify-end sm:gap-3">
                 {canOpenAppointment ? (
-                  <Button className="h-12 rounded-xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-200 transition-all hover:bg-violet-700 active:scale-95 sm:h-14 sm:px-7 sm:text-base" title="Open this appointment" onClick={handleOpenAppointment}>
-                    <CalendarIcon className="mr-2 h-5 w-5" />
+                  <Button className="h-12 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-200 transition-all hover:bg-violet-700 active:scale-95 sm:px-7 sm:text-base" title="Open this appointment" onClick={handleOpenAppointment}>
+                    <CalendarIcon className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                     Open
                   </Button>
                 ) : null}
                 {showsLogSnapshotState ? (
-                  <Button className="h-12 rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 shadow-none transition-all hover:bg-amber-100 active:scale-95 sm:h-14" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
+                  <Button className="h-12 rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 shadow-none transition-all hover:bg-amber-100 active:scale-95" title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"} disabled={!appointmentId || isFetchingLogs} onClick={viewLatestSnapshot}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${isFetchingLogs ? "animate-spin" : ""}`} />
                     Latest
                   </Button>
@@ -2357,143 +2927,145 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                     )}
                     triggerVariant="outline"
                     triggerSize="icon"
-                    triggerClassName="h-12 w-12 rounded-xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 sm:h-14 sm:w-14"
+                    triggerClassName="h-12 w-12 rounded-2xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
                     triggerIcon={<EllipsisVertical className="h-5 w-5" />}
                     ariaLabel="More appointment actions"
                   />
                 ) : null}
-                <Button type="button" variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-xl text-slate-600 hover:bg-slate-100 sm:h-14 sm:w-14" aria-label="Close snapshot">
-                  <X className="h-7 w-7" />
+                <Button type="button" variant="outline" size="icon" onClick={() => onOpenChange(false)} className="h-12 w-12 rounded-2xl border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" aria-label="Close snapshot">
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 pb-5 custom-scrollbar sm:px-8 sm:pb-7">
-            <div className="grid gap-4">
-              <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
-                <div className="flex flex-wrap gap-3">
-                  <div className="min-w-[11.5rem] rounded-full border border-emerald-100 bg-emerald-50/70 px-4 py-3 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
-                        <CalendarIcon className="h-5 w-5" />
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 pb-4 sleek-scrollbar sm:px-10 sm:pb-8">
+            <div className="grid gap-3 sm:gap-4">
+              <div className="grid gap-3 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
+                  <div className="min-w-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 shadow-sm sm:min-w-[11.5rem] sm:rounded-full sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100 sm:h-10 sm:w-10">
+                        <CalendarIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
                           {canChangeStatus ? (
                             <AppointmentStatusSelect
                               value={nextStatus || displayedSnapshot.status}
                               statuses={APPOINTMENT_STATUSES}
                               includeDeleted={effectiveRole === "admin"}
                               onChange={handleStatusChange}
-                              badgeClassName="text-base font-black capitalize"
+                              badgeClassName="max-w-[5.8rem] truncate text-sm font-black capitalize sm:max-w-none sm:text-base"
                             />
                           ) : (
-                            <p className={`truncate text-base font-black ${displayedStatusColors.textColor}`}>
+                            <p className={`truncate text-sm font-black sm:text-base ${displayedStatusColors.textColor}`}>
                               {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
                             </p>
                           )}
                           <CurrentChangeIndicator change={statusCurrentChange} />
                         </div>
                         {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
-                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
+                          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevStatus)}</p>
                         ) : null}
                       </div>
                     </div>
                   </div>
 
-                  <div className="min-w-[10.5rem] rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-600 shadow-sm ring-1 ring-slate-200">
-                        <WalletCards className="h-5 w-5" />
+                  <div className="min-w-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm sm:min-w-[10.5rem] sm:rounded-full sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-600 shadow-sm ring-1 ring-slate-200 sm:h-10 sm:w-10">
+                        <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />
                       </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className={`truncate text-base font-black ${displayedPaymentStatusColors.textColor}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <p className={`truncate text-sm font-black sm:text-base ${displayedPaymentStatusColors.textColor}`}>
                             {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus)}
                           </p>
                           <CurrentChangeIndicator change={paymentStatusCurrentChange} />
                         </div>
                         {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
-                          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
+                          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-bold text-slate-400 sm:text-[11px]"><History className="h-3 w-3" />Was {formatBookingHistoryStatusLabel(prevPaymentStatus)}</p>
                         ) : null}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-[1.35rem] border border-violet-100 bg-white p-4 shadow-[0_10px_30px_rgba(79,70,229,0.08)] sm:p-5">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-4">
-                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 ring-1 ring-violet-200">
-                        <Banknote className="h-6 w-6" />
+                <div className="rounded-2xl border border-violet-100 bg-white p-3 shadow-[0_10px_30px_rgba(79,70,229,0.08)] sm:rounded-[1.35rem] sm:p-5">
+                  <div className="flex items-center justify-between gap-3 sm:gap-4">
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 ring-1 ring-violet-200 sm:h-14 sm:w-14">
+                        <Banknote className="h-5 w-5 sm:h-6 sm:w-6" />
                       </span>
                       <div className="min-w-0">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-violet-700">Balance</Label>
-                        <p className="mt-1 text-sm font-bold text-slate-500">To be settled</p>
+                        <Label className="block text-[10px] font-black uppercase tracking-widest text-violet-700 sm:text-xs">Balance</Label>
+                        <p className="mt-0.5 truncate text-xs font-bold text-slate-500 sm:mt-1 sm:text-sm">To be settled</p>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2 text-right">
-                      <p className="text-3xl font-black tracking-tight text-violet-700 sm:text-4xl">{displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel}</p>
+                      <p className="text-2xl font-black tracking-tight text-violet-700 sm:text-4xl">
+                        <CurrencyText value={displayedBalanceNumeric !== null ? formatCurrencyLabel(displayedBalanceNumeric) : displayedBalanceLabel} />
+                      </p>
                       <CurrentChangeIndicator change={balanceCurrentChange} />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-[1.08fr_1fr]">
-                <div className="grid gap-4">
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex items-center gap-3 text-violet-700">
-                      <Users className="h-6 w-6" />
+              <div className="grid gap-4 lg:grid-cols-[1.08fr_1fr] lg:items-start">
+                <div className="order-2 grid gap-4 lg:order-1">
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex items-center gap-2 text-violet-700">
+                      <Users className="h-5 w-5 sm:h-6 sm:w-6" />
                       <Label className="text-sm font-black uppercase tracking-wide">People</Label>
                     </div>
-                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <div className="mt-4 grid overflow-hidden rounded-2xl border border-slate-100 bg-white sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={canGoToPatient ? goToPatient : undefined}
-                        tabIndex={canGoToPatient ? 0 : -1}
-                        aria-disabled={!canGoToPatient}
-                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 px-4 py-3 text-left transition-colors ${canGoToPatient ? "hover:bg-slate-50" : "cursor-default"}`}
+                        onClick={canOpenPatientChoice ? openPatientChoiceDialog : undefined}
+                        tabIndex={canOpenPatientChoice ? 0 : -1}
+                        aria-disabled={!canOpenPatientChoice}
+                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:px-5 sm:py-4 ${canOpenPatientChoice ? "hover:bg-slate-50" : "cursor-default"}`}
                       >
-                        <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm" sizeClass="h-14 w-14 rounded-full" />
+                        <PatientAvatar src={resolvedPatientImage} name={patientName} dob={snapshotPatientDob} className="h-12 w-12 shrink-0 rounded-full border border-violet-100 shadow-sm sm:h-14 sm:w-14" sizeClass="h-12 w-12 rounded-full sm:h-14 sm:w-14" />
                         <div className="min-w-0 flex-1">
-                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Patient</Label>
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
-                            <p className="truncate text-lg font-black leading-tight text-slate-950">{patientName}</p>
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 sm:text-xs">Patient</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2 sm:mt-1">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{patientName}</p>
                             <CurrentChangeIndicator change={patientCurrentChange} />
                           </div>
                         </div>
-                        <ChevronRight className={`h-6 w-6 shrink-0 ${canGoToPatient ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                        <ChevronRight className={`h-5 w-5 shrink-0 sm:h-6 sm:w-6 ${canOpenPatientChoice ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
                       </button>
 
                       <button
                         type="button"
-                        onClick={canAssignDoctor ? () => setIsAssignDoctorOpen(true) : canGoToDoctor ? goToDoctor : undefined}
-                        tabIndex={canAssignDoctor || canGoToDoctor ? 0 : -1}
-                        aria-disabled={!canAssignDoctor && !canGoToDoctor}
-                        className={`group flex min-h-[5.25rem] w-full items-center gap-4 border-t border-slate-200 px-4 py-3 text-left transition-colors ${canAssignDoctor || canGoToDoctor ? "hover:bg-slate-50" : "cursor-default"}`}
+                        onClick={canAssignDoctor ? () => setIsAssignDoctorOpen(true) : undefined}
+                        tabIndex={canAssignDoctor ? 0 : -1}
+                        aria-disabled={!canAssignDoctor}
+                        className={`group flex min-h-[4.5rem] w-full items-center gap-3 border-t border-slate-100 px-3 py-3 text-left transition-colors sm:min-h-[5.25rem] sm:gap-4 sm:border-l sm:border-t-0 sm:px-5 sm:py-4 ${canAssignDoctor ? "hover:bg-slate-50" : "cursor-default"}`}
                       >
-                        <Avatar className="h-14 w-14 shrink-0 rounded-full border border-violet-100 shadow-sm">
+                        <Avatar className="h-12 w-12 shrink-0 rounded-full border border-violet-100 shadow-sm sm:h-14 sm:w-14">
                           <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
-                          <AvatarFallback className="rounded-full bg-violet-50 text-violet-700"><Stethoscope className="h-6 w-6" /></AvatarFallback>
+                          <AvatarFallback className="rounded-full bg-violet-50 text-violet-700"><Stethoscope className="h-5 w-5 sm:h-6 sm:w-6" /></AvatarFallback>
                         </Avatar>
                         <div className="min-w-0 flex-1">
-                          <Label className="block text-xs font-black uppercase tracking-widest text-slate-400">Doctor</Label>
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
-                            <p className={`truncate text-lg font-black leading-tight ${canAssignDoctor ? "text-violet-700" : "text-slate-950"}`}>{canAssignDoctor ? "Assign doctor" : displayedDoctorName || "Unassigned"}</p>
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 sm:text-xs">Doctor</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2 sm:mt-1">
+                            <p className={`truncate text-base font-black leading-tight sm:text-lg ${canAssignDoctor && !displayedDoctorName ? "text-violet-700" : "text-slate-950"}`}>{canAssignDoctor && !displayedDoctorName ? "Assign doctor" : displayedDoctorName || "Unassigned"}</p>
                             <CurrentChangeIndicator change={doctorCurrentChange} />
                           </div>
                         </div>
-                        <ChevronRight className={`h-6 w-6 shrink-0 ${canAssignDoctor || canGoToDoctor ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
+                        <ChevronRight className={`h-6 w-6 shrink-0 ${canAssignDoctor ? "text-slate-500 transition-transform group-hover:translate-x-0.5" : "text-slate-300"}`} />
                       </button>
                     </div>
                   </section>
 
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                      <div className="flex items-center gap-3">
-                        <CalendarIcon className="h-6 w-6" />
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-violet-700">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                         <Label className="text-sm font-black uppercase tracking-wide">Schedule</Label>
                       </div>
                       <Button
@@ -2501,109 +3073,133 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         variant="outline"
                         onClick={openChangeScheduleModal}
                         disabled={!canChangeSchedule}
-                        className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-10 rounded-full border-violet-100 bg-violet-50 px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 sm:px-5 sm:text-sm"
                       >
                         <Pencil className="mr-2 h-4 w-4" />
                         Change
                       </Button>
                     </div>
-                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                      <div className="min-w-0 sm:border-r sm:border-slate-200 sm:pr-6">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Date</Label>
-                        <div className="mt-2 flex items-start gap-2">
-                          <p className="break-words text-lg font-black leading-tight text-slate-950">{formattedDate}</p>
-                          <CurrentChangeIndicator change={dateCurrentChange} />
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="flex min-w-0 items-center gap-3 sm:border-r sm:border-slate-100 sm:pr-6">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <CalendarIcon className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Date</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{formattedDate}</p>
+                            <CurrentChangeIndicator change={dateCurrentChange} />
+                          </div>
                         </div>
                       </div>
-                      <div className="min-w-0">
-                        <Label className="block text-xs font-black uppercase tracking-widest text-slate-500">Time Slot</Label>
-                        <div className="mt-2 flex items-start gap-2">
-                          <p className="break-words text-lg font-black leading-tight text-slate-950">{displayedTimeLabel}</p>
-                          <CurrentChangeIndicator change={timeCurrentChange} />
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <Clock className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <Label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Time Slot</Label>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                            <p className="truncate text-base font-black leading-tight text-slate-950 sm:text-lg">{displayedTimeLabel}</p>
+                            <CurrentChangeIndicator change={timeCurrentChange} />
+                          </div>
                         </div>
                       </div>
                     </div>
                   </section>
 
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                      <div className="flex items-center gap-3">
-                        <Stethoscope className="h-6 w-6" />
-                        <Label className="text-sm font-black uppercase tracking-wide">Service</Label>
-                      </div>
-                      {displayedToothNumbersText ? (
-                        <span className="inline-flex max-w-full shrink-0 items-center rounded-full bg-violet-100 px-4 py-1.5 text-sm font-black text-violet-700">
-                          Tooth # {displayedToothNumbersText}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                  <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-                          <Stethoscope className="h-7 w-7" />
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                          <Stethoscope className="h-6 w-6" />
                         </span>
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className="truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
-                          <CurrentChangeIndicator change={serviceCurrentChange} />
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Service</Label>
+                            <CurrentChangeIndicator change={serviceCurrentChange} />
+                          </div>
+                          <p className="mt-0.5 truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={openChangeTreatmentModal}
-                        disabled={!canChangeTreatment || isLoadingTreatmentOptions}
-                        className="h-11 rounded-full border-violet-100 bg-violet-50 px-6 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
-                        Change
-                      </Button>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+                        {displayedToothNumbersText ? (
+                          <span className="inline-flex max-w-full items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 ring-1 ring-violet-100">
+                            Tooth # {displayedToothNumbersText}
+                          </span>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={openChangeTreatmentModal}
+                          disabled={!canChangeTreatment || isLoadingTreatmentOptions}
+                          className="h-10 rounded-full border-violet-200 bg-white px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-50 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60 sm:h-11 sm:px-6 sm:text-sm"
+                        >
+                          {isLoadingTreatmentOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                          Change
+                        </Button>
+                      </div>
                     </div>
                   </section>
                 </div>
 
-                <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm lg:min-h-[28.25rem]">
+                <section className="order-1 rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5 lg:order-2">
                   <div className="flex flex-wrap items-center justify-between gap-3 text-violet-700">
-                    <div className="flex items-center gap-3">
-                      <WalletCards className="h-6 w-6" />
+                    <div className="flex items-center gap-2">
+                      <WalletCards className="h-5 w-5 sm:h-6 sm:w-6" />
                       <Label className="text-sm font-black uppercase tracking-wide">Payment</Label>
                     </div>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={handleRecordPayment}
-                      className="h-10 rounded-full border-violet-100 bg-violet-50 px-5 text-sm font-black text-violet-700 shadow-none hover:bg-violet-100 hover:text-violet-800"
+                      className="h-10 rounded-full border-violet-200 bg-white px-4 text-xs font-black text-violet-700 shadow-none hover:bg-violet-50 hover:text-violet-800 sm:px-5 sm:text-sm"
                     >
                       <Plus className="mr-2 h-4 w-4" />
                       Record Payment
                     </Button>
                   </div>
-                  <div className="mt-12">
+                  <div className="mt-5">
                     <div className="flex items-center gap-2">
-                      <Label className="block text-sm font-bold uppercase tracking-wide text-slate-500">Price</Label>
+                      <Label className="block text-xs font-bold uppercase tracking-wide text-slate-500 sm:text-sm">Price</Label>
                       <CurrentChangeIndicator change={priceCurrentChange} />
                     </div>
-                    <div className="mt-4">
+                    <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-2">
                       {displayedDiscountAmount > 0 ? (
                         <>
-                          <div className="text-lg font-bold text-slate-300 line-through">{"\u20b1"}{Number(displayedBasePrice).toLocaleString()}</div>
-                          <div className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{Number(displayedEffectivePrice).toLocaleString()}</div>
+                          <div className="text-sm font-bold text-slate-300 line-through sm:text-lg">
+                            <CurrencyText value={formatCurrencyLabel(Number(displayedBasePrice) || 0)} />
+                          </div>
+                          <div className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                            <CurrencyText value={formatCurrencyLabel(Number(displayedEffectivePrice) || 0)} />
+                          </div>
                         </>
                       ) : (
-                        <span className="text-4xl font-black tracking-tight text-slate-950">{"\u20b1"}{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
+                        <span className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                          <CurrencyText value={formatCurrencyLabel(Number(displayedEffectivePrice) || 0)} />
+                        </span>
                       )}
+                      <div className="mb-1 flex min-w-0 items-center gap-1.5 text-violet-700 sm:mb-1.5">
+                        <Calculator className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+                        <span className="text-xs font-black tracking-tight sm:text-sm">
+                          PAID: {formatCurrencyLabel(Number(totalPaidAmount) || 0)}
+                        </span>
+                        <span className="text-[10px] font-medium text-slate-700 sm:text-xs">
+                          ({paymentLogRows.length} {paymentLogRows.length === 1 ? "payment" : "payments"})
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-10 border-t border-slate-200 pt-8">
-                    <div className="flex items-center gap-3 text-slate-500">
-                      <History className="h-5 w-5" />
-                      <Label className="text-sm font-black uppercase tracking-wide">{paymentSectionTitle}</Label>
+                  <div className="mt-5 border-t border-slate-200 pt-4">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <History className="h-4 w-4 sm:h-5 sm:w-5" />
+                      <Label className="text-xs font-black uppercase tracking-wide sm:text-sm">{paymentSectionTitle}</Label>
                     </div>
                     {hasAppointmentLifecycleAction ? (
-                      <div className={`mt-5 rounded-2xl border p-4 ${appointmentLifecycleClass}`}>
+                      <div className={`mt-3 rounded-2xl border p-3 sm:p-4 ${appointmentLifecycleClass}`}>
                         <div className="flex items-start gap-3">
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm">
-                            <AppointmentLifecycleIcon className="h-5 w-5" />
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80 shadow-sm sm:h-10 sm:w-10">
+                            <AppointmentLifecycleIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                           </span>
                           <div className="min-w-0">
                             <p className="text-xs font-black uppercase tracking-widest">{appointmentLifecycleLabel}</p>
@@ -2615,72 +3211,112 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         </div>
                       </div>
                     ) : shouldShowPaymentLine ? (
-                      <div className={`mt-5 rounded-2xl border p-4 ${mainPaymentCardClass}`}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <p className={`text-xs font-black uppercase tracking-widest ${mainPaymentTextClass}`}>{snapshotPaymentLabel}</p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className={`max-w-[45%] text-right text-sm font-black ${mainPaymentMethodTextClass}`}>{snapshotPaymentMethodLabel}</p>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
-                                  title="Payment actions"
-                                >
-                                  <EllipsisVertical className="h-3.5 w-3.5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-36">
-                                <DropdownMenuItem
-                                  onClick={() => handleEditPaymentEntry(mainPaymentRow?.raw)}
-                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                                >
-                                  <Pencil className="mr-2 h-3.5 w-3.5" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => handleDeletePaymentEntry(mainPaymentRow?.raw)}
-                                  disabled={!getEditablePaymentEntryId(mainPaymentRow?.raw)}
-                                  className="text-red-600 focus:text-red-600"
-                                >
-                                  <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                      <div className={`mt-3 overflow-hidden rounded-2xl border p-3 sm:p-4 ${mainPaymentCardClass}`}>
+                        <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                          <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-black shadow-sm ring-1 ring-emerald-100 sm:h-14 sm:w-20">
+                            <span className={`max-w-full truncate px-1 ${mainPaymentTextClass}`}>{snapshotPaymentMethodLabel}</span>
                           </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                          <p className={`text-2xl font-black ${mainPaymentTextClass}`}>{snapshotPaymentAmountLabel}</p>
-                          <p className={`text-sm font-bold ${mainPaymentMutedTextClass}`}>
-                            {snapshotPaymentDateLabel || "No date"}
-                          </p>
+                          <div className="grid min-w-0 grid-cols-[minmax(4.5rem,max-content)_minmax(7.5rem,1fr)] gap-x-6 gap-y-2 max-[420px]:grid-cols-1 sm:gap-x-8">
+                            <div className="min-w-0">
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Amount</p>
+                              <div className="mt-1 flex items-center gap-2">
+                                <p className={`truncate text-lg font-black sm:text-xl ${mainPaymentTextClass}`} title={snapshotPaymentAmountTitle}>
+                                  <CurrencyText value={displayedMainPaymentAmountLabel} />
+                                </p>
+                                <CurrentChangeIndicator change={mainPaymentRow?.currentChange} />
+                              </div>
+                              {snapshotPreviousPaymentAmountLabel ? (
+                                <p className={`mt-0.5 truncate text-[10px] font-black leading-tight sm:text-xs ${mainPaymentMutedTextClass}`} title={snapshotPreviousPaymentAmountLabel}>
+                                  <CurrencyText value={snapshotPreviousPaymentAmountLabel} />
+                                </p>
+                              ) : null}
+                              {mainPaymentHistoryNote ? (
+                                <p className={`mt-0.5 text-[10px] font-bold leading-tight sm:text-xs ${mainPaymentMutedTextClass}`}>
+                                  {mainPaymentHistoryNote}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${mainPaymentMutedTextClass}`}>Date</p>
+                              <p className={`mt-1 truncate text-sm font-black sm:text-base ${mainPaymentTextClass}`} title={snapshotPaymentDateLabel || "No date"}>
+                                {snapshotPaymentDateLabel || "No date"}
+                              </p>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-10 w-10 rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-violet-700"
+                                title="Payment actions"
+                              >
+                                <EllipsisVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-36">
+                              {mainPaymentRow?.isCurrentlyDeleted ? (
+                                <DropdownMenuItem
+                                  onClick={() => handleRestorePaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                  disabled={!getRestorablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                  className="text-emerald-700 focus:text-emerald-700"
+                                >
+                                  <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                                  Restore
+                                </DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => handleEditPaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                  >
+                                    <Pencil className="mr-2 h-3.5 w-3.5" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeletePaymentEntry(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                    disabled={!getEditablePaymentEntryId(mainPaymentRow?.actionRaw || mainPaymentRow?.raw)}
+                                    className="text-red-600 focus:text-red-600"
+                                  >
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                         {additionalPaymentRows.length > 0 ? (
-                          <div className="mt-4">
+                          <div className={`mt-3 border-t pt-3 ${mainPaymentDividerClass}`}>
                             <Button
                               type="button"
                               variant="ghost"
                               onClick={() => setShowAdditionalPayments((current) => !current)}
-                              className={`h-9 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
+                              className={`h-8 rounded-full px-0 text-sm font-black hover:bg-transparent ${mainPaymentTextClass}`}
                             >
                               {showAdditionalPayments ? "Show less" : `See more (${additionalPaymentRows.length})`}
                             </Button>
                             {showAdditionalPayments ? (
-                              <div className={`mt-2 space-y-2 border-t pt-3 ${mainPaymentDividerClass}`}>
+                              <div className="mt-2 space-y-2">
                                 {additionalPaymentRows.map((payment) => {
                                   const paymentId = getEditablePaymentEntryId(payment.raw);
+                                  const restorePaymentId = getRestorablePaymentEntryId(payment.raw);
+                                  const isDeletedPayment = payment.isCurrentlyDeleted;
                                   const paymentUnavailableMessage = getPaymentEntryEditUnavailableMessage(payment.raw);
 
                                   return (
                                     <div key={payment.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
-                                      <p className="text-sm font-black text-emerald-700">{payment.amountLabel}</p>
-                                      <div className="flex min-w-0 items-center gap-2 text-right">
+                                      <div className="flex min-w-0 max-w-[70%] shrink-0 items-center gap-2">
+                                        <p className="truncate text-sm font-black text-emerald-700" title={payment.amountLabel}>
+                                          <CurrencyText value={payment.amountLabel} />
+                                        </p>
+                                        <CurrentChangeIndicator change={payment.currentChange} />
+                                      </div>
+                                      <div className="flex min-w-0 flex-1 items-center justify-end gap-2 text-right">
                                         <div className="min-w-0">
                                           <p className="truncate text-xs font-black text-emerald-700/80">{payment.methodLabel}</p>
-                                          <p className="mt-0.5 text-xs font-bold text-emerald-700/60">{payment.dateLabel}</p>
+                                          <p className="mt-0.5 truncate text-xs font-bold text-emerald-700/60" title={payment.dateLabel}>{payment.dateLabel}</p>
                                         </div>
                                         <DropdownMenu>
                                           <DropdownMenuTrigger asChild>
@@ -2695,23 +3331,37 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                                             </Button>
                                           </DropdownMenuTrigger>
                                           <DropdownMenuContent align="end" className="w-36">
-                                            <DropdownMenuItem
-                                              onClick={() => handleEditPaymentEntry(payment.raw)}
-                                              disabled={!paymentId}
-                                              title={paymentId ? "Edit payment" : paymentUnavailableMessage}
-                                            >
-                                              <Pencil className="mr-2 h-3 w-3" />
-                                              Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={() => handleDeletePaymentEntry(payment.raw)}
-                                              disabled={!paymentId}
-                                              title={paymentId ? "Delete payment" : paymentUnavailableMessage}
-                                              className="text-red-600 focus:text-red-600"
-                                            >
-                                              <Trash2 className="mr-2 h-3 w-3" />
-                                              Delete
-                                            </DropdownMenuItem>
+                                            {isDeletedPayment ? (
+                                              <DropdownMenuItem
+                                                onClick={() => handleRestorePaymentEntry(payment.raw)}
+                                                disabled={!restorePaymentId}
+                                                title={restorePaymentId ? "Restore payment" : "Could not find the deleted payment record."}
+                                                className="text-emerald-700 focus:text-emerald-700"
+                                              >
+                                                <RotateCcw className="mr-2 h-3 w-3" />
+                                                Restore
+                                              </DropdownMenuItem>
+                                            ) : (
+                                              <>
+                                                <DropdownMenuItem
+                                                  onClick={() => handleEditPaymentEntry(payment.raw)}
+                                                  disabled={!paymentId}
+                                                  title={paymentId ? "Edit payment" : paymentUnavailableMessage}
+                                                >
+                                                  <Pencil className="mr-2 h-3 w-3" />
+                                                  Edit
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                  onClick={() => handleDeletePaymentEntry(payment.raw)}
+                                                  disabled={!paymentId}
+                                                  title={paymentId ? "Delete payment" : paymentUnavailableMessage}
+                                                  className="text-red-600 focus:text-red-600"
+                                                >
+                                                  <Trash2 className="mr-2 h-3 w-3" />
+                                                  Delete
+                                                </DropdownMenuItem>
+                                              </>
+                                            )}
                                           </DropdownMenuContent>
                                         </DropdownMenu>
                                       </div>
@@ -2724,7 +3374,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         ) : null}
                       </div>
                     ) : (
-                      <p className="mt-5 max-w-[18rem] text-base font-semibold italic leading-7 text-slate-500">
+                      <p className="mt-4 max-w-[18rem] text-sm font-semibold italic leading-6 text-slate-500 sm:mt-5 sm:text-base sm:leading-7">
                         No payment recorded for this snapshot.
                       </p>
                     )}
@@ -2732,62 +3382,149 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </section>
               </div>
 
-              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <div className="flex items-center gap-3 text-violet-700">
-                  <FileText className="h-6 w-6" />
+              {showsLogSnapshotState ? (
+                <section className="overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.06)]">
+                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
+                        <History className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-black uppercase tracking-wide text-violet-700">Detailed Audit History</h3>
+                        <p className="mt-1 text-xs font-semibold text-slate-500 sm:text-sm">
+                          {snapshotAuditChanges.length === 1
+                            ? "1 change in this snapshot"
+                            : `${snapshotAuditChanges.length} changes in this snapshot`}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-expanded={isAuditHistoryExpanded}
+                      aria-controls="detailed-audit-history-content"
+                      onClick={() => setIsAuditHistoryExpanded((expanded) => !expanded)}
+                      className="h-9 self-start rounded-full px-3 text-xs font-black text-violet-700 hover:bg-violet-50 hover:text-violet-800 sm:self-auto sm:text-sm"
+                    >
+                      {isAuditHistoryExpanded ? "Show less" : "Show more"}
+                      <ChevronRight className={`ml-1.5 h-4 w-4 transition-transform ${isAuditHistoryExpanded ? "rotate-90" : ""}`} />
+                    </Button>
+                  </div>
+
+                  {isAuditHistoryExpanded ? (
+                    <div id="detailed-audit-history-content" className="border-t border-slate-100 bg-violet-50/35 p-3 sm:p-4">
+                      {snapshotAuditChanges.length > 0 ? (
+                        <div className="space-y-2">
+                          {snapshotAuditChanges.map((change) => (
+                            <div
+                              key={change.field}
+                              className="grid min-w-0 gap-2 rounded-xl border border-violet-100/80 bg-white/85 px-3 py-3 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-3 sm:px-4"
+                            >
+                              <p className="break-words text-sm font-black text-slate-600">
+                                {change.field}
+                              </p>
+                              <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-semibold leading-5 text-slate-500">
+                                {change.previousValue}
+                              </p>
+                              <ChevronRight className="h-4 w-4 shrink-0 rotate-90 text-violet-400 sm:rotate-0" aria-hidden="true" />
+                              <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-black leading-5 text-violet-800">
+                                {change.snapshotValue}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="rounded-xl border border-violet-100/80 bg-white/85 px-4 py-3 text-sm font-semibold italic text-slate-500">
+                          No detailed changes were recorded for this snapshot.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
+                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                   <Label className="text-sm font-black uppercase tracking-wide">Treatment Notes</Label>
                   <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
                 </div>
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
                 </div>
               </section>
 
               {displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason ? (
-                <section className="rounded-[1.25rem] border border-red-100 bg-red-50/60 p-4 shadow-sm sm:p-5">
-                  <div className="flex items-center gap-3 text-red-600">
-                    <AlertTriangle className="h-6 w-6" />
-                    <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
-                    <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
+                <section className="rounded-[1.35rem] border border-red-100 bg-red-50/60 p-4 shadow-[0_12px_35px_rgba(248,113,113,0.08)] sm:p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-red-600">
+                        <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
+                        <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
+                        <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-sm font-bold leading-6 text-red-700/80 sm:text-base">{displayedSnapshot.cancellationReason}</p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-red-300" />
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap break-words rounded-xl border border-red-100 bg-white px-4 py-3 text-base font-bold leading-7 text-red-700/80">{displayedSnapshot.cancellationReason}</p>
                 </section>
               ) : null}
 
-              <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <div className="flex items-center gap-3 text-violet-700">
-                  <FileText className="h-6 w-6" />
+              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
+                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                   <Label className="text-sm font-black uppercase tracking-wide">Remarks</Label>
                   <CurrentChangeIndicator change={notesCurrentChange} />
                 </div>
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-base font-semibold leading-7 custom-scrollbar ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
                 </div>
               </section>
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 !flex-col !items-stretch !justify-center gap-3 border-t border-slate-200 bg-white/95 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-12px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm sm:px-8">
+          <DialogFooter className="shrink-0 !flex-col !items-stretch !justify-center gap-2 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm sm:gap-3 sm:px-8 sm:pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pt-4">
             {canShowSnapshotActions ? (
-              <div className="-mx-5 -mt-4 mb-1 border-b border-amber-100 bg-amber-50/70 px-5 py-3 sm:-mx-8 sm:px-8">
-                <p className="flex items-start justify-center gap-2 text-center text-sm font-semibold leading-5 text-amber-700"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{actionNoteText}</p>
+              <div className="-mx-4 -mt-3 mb-1 border-b border-amber-100 bg-amber-50/70 px-4 py-2.5 sm:-mx-8 sm:-mt-4 sm:px-8 sm:py-3">
+                <p className="flex items-start justify-center gap-2 text-center text-xs font-semibold leading-5 text-amber-700 sm:text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{actionNoteText}</p>
               </div>
             ) : null}
             {canShowSnapshotActions ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Button className="h-12 w-full rounded-xl bg-emerald-600 text-base font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-5 w-5" />Accept</Button>
-                <Button className="h-12 w-full rounded-xl border-red-200 bg-white text-base font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-5 w-5" />Decline</Button>
+              <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+                <Button className="h-11 w-full rounded-xl bg-emerald-600 text-sm font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95 sm:h-12 sm:text-base" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Accept</Button>
+                <Button className="h-11 w-full rounded-xl border-red-200 bg-white text-sm font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95 sm:h-12 sm:text-base" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Decline</Button>
               </div>
             ) : null}
             {canRestoreNotification ? (
-              <Button className="h-12 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
+              <Button className="h-11 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95 sm:h-12" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
             ) : null}
             <div className="flex justify-center">
-              <Button onClick={() => onOpenChange(false)} variant="outline" className="h-14 min-w-[11rem] rounded-xl border-slate-200 bg-white px-8 text-base font-black text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900">Close</Button>
+              <Button onClick={() => onOpenChange(false)} variant="outline" className="h-12 min-w-[13rem] rounded-[1.35rem] border-violet-100 bg-violet-50/40 px-8 text-base font-black text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.10)] transition-all hover:bg-violet-50 hover:text-violet-800 sm:h-14 sm:min-w-[15rem]">Close</Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AppointmentPatientChoiceDialog
+        open={isPatientChoiceOpen}
+        onOpenChange={setIsPatientChoiceOpen}
+        patientName={patientName}
+        patientImage={resolvedPatientImage}
+        patientDob={snapshotPatientDob}
+        canSelectPatient={canSelectAppointmentPatient}
+        canOpenProfile={canGoToPatient}
+        onSelectPatient={openPatientSelector}
+        onOpenProfile={goToPatient}
+      />
+
+      <SelectPatientModal
+        open={isSelectPatientOpen}
+        onOpenChange={setIsSelectPatientOpen}
+        selectedPatientId={String(displayedPatientId || "")}
+        selectedPatientName={patientName}
+        canCreatePatients={canSelectAppointmentPatient}
+        onConfirm={handleSelectAppointmentPatient}
+      />
 
       <Dialog
         open={isRepeatScheduleOpen}
@@ -2941,6 +3678,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         doctorLabel={displayedDoctorName || "No doctor assigned"}
         selectedDate={selectedScheduleDisplayDate}
         selectedTime={selectedScheduleTime}
+        selectedDuration={selectedScheduleDuration}
+        onDurationChange={handleScheduleDurationChange}
+        status={selectedScheduleStatus}
+        statusOptions={APPOINTMENT_STATUSES}
+        onStatusChange={handleScheduleStatusChange}
         onDateClick={() => setIsScheduleDatePickerOpen(true)}
         onTimeClick={() => setIsScheduleTimePickerOpen(true)}
         onSave={handleSaveScheduleChange}

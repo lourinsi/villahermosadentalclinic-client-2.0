@@ -137,7 +137,7 @@ export function NextAppointmentCard({
   // If no appointment, show empty state
   if (!appointment) {
     const emptyContent = (
-      <div className="relative p-12 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 text-gray-600 shadow-sm">
+      <div className="relative rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-gray-600 shadow-sm sm:p-8 xl:p-12">
         <div className="flex flex-col items-center justify-center gap-4">
           <div className="p-4 bg-gray-100 rounded-full">
             <Calendar className="h-8 w-8 text-gray-400" />
@@ -260,26 +260,26 @@ export function NextAppointmentCard({
   // Doctor/Admin view - show patient details
   if (role === "doctor" || role === "admin") {
     const cardContent = (
-      <div className="relative rounded-3xl bg-white border border-emerald-100 shadow-sm overflow-hidden min-h-[240px] flex flex-col group transition-all duration-300 hover:shadow-md w-full">
+      <div className="relative flex min-h-[210px] w-full flex-col overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm transition-all duration-300 hover:shadow-md xl:min-h-[240px] xl:rounded-3xl">
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
         
         <div
-          className={`relative z-10 flex flex-col h-full p-8 transition-opacity duration-300 ${
+          className={`relative z-10 flex h-full flex-col p-5 transition-opacity duration-300 lg:p-6 xl:p-8 ${
             isFading ? "opacity-0" : "opacity-100"
           }`}
           aria-live={hasMultiple ? "polite" : undefined}
         >
-          <div className="flex items-start justify-between mb-6">
+          <div className="mb-5 flex items-start justify-between gap-4 xl:mb-6">
             <div className="space-y-1">
               <div className="flex items-center space-x-2 text-emerald-600 bg-emerald-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
                 <Clock className="h-3 w-3" />
                 <span>Next Appointment</span>
               </div>
-              <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
+              <h3 className="mt-2 text-2xl font-black tracking-tight text-gray-900 xl:text-3xl">
                 {currentPatientName}
               </h3>
-              <p className="text-gray-500 font-bold text-lg">
+              <p className="text-base font-bold text-gray-500 xl:text-lg">
                 {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
               </p>
             </div>
@@ -288,12 +288,12 @@ export function NextAppointmentCard({
               src={resolvedPatientImage}
               name={currentPatientName}
               dob={patientRecord?.dateOfBirth || patientRecord?.birthDate || patientRecord?.dob || patientRecord?.birthday}
-              className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500 overflow-hidden"
-              sizeClass="h-20 w-20 rounded-2xl"
+              className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-emerald-100/50 bg-emerald-50 shadow-inner transition-transform duration-500 group-hover:rotate-3 xl:h-20 xl:w-20"
+              sizeClass="h-16 w-16 rounded-2xl xl:h-20 xl:w-20"
             />
           </div>
 
-          <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="mt-auto flex flex-col items-center justify-between gap-4 lg:flex-row xl:gap-6">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
                 <Calendar className="h-4 w-4 text-emerald-600" />
@@ -309,7 +309,7 @@ export function NextAppointmentCard({
 
             <Button
               size="lg"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl px-8 h-12 shadow-lg hover:shadow-emerald-900/10 active:scale-95 transition-all w-full md:w-auto"
+            className="h-11 w-full rounded-xl bg-emerald-600 px-6 font-bold text-white shadow-lg transition-all hover:bg-emerald-700 hover:shadow-emerald-900/10 active:scale-95 lg:w-auto xl:h-12 xl:px-8"
               onClick={() => onViewDetails(currentAppointment)}
             >
               View Details
@@ -360,29 +360,29 @@ export function NextAppointmentCard({
 
   // Patient view - show doctor details
   const patientCardContent = (
-    <div className="relative rounded-3xl bg-white border border-violet-100 shadow-sm overflow-hidden min-h-[240px] flex flex-col group transition-all duration-300 hover:shadow-md w-full">
+    <div className="relative flex min-h-[210px] w-full flex-col overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm transition-all duration-300 hover:shadow-md xl:min-h-[240px] xl:rounded-3xl">
       {/* Decorative elements */}
       <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
       
       <div
-        className={`relative z-10 flex flex-col h-full p-8 transition-opacity duration-300 ${
+        className={`relative z-10 flex h-full flex-col p-5 transition-opacity duration-300 lg:p-6 xl:p-8 ${
           isFading ? "opacity-0" : "opacity-100"
         }`}
         aria-live={hasMultiple ? "polite" : undefined}
       >
-        <div className="flex items-start justify-between mb-6">
+        <div className="mb-5 flex items-start justify-between gap-4 xl:mb-6">
           <div className="space-y-1">
             <div className="flex items-center space-x-2 text-violet-600 bg-violet-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
               <Calendar className="h-3 w-3" />
               <span>Upcoming Visit</span>
             </div>
-            <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
+            <h3 className="mt-2 text-2xl font-black tracking-tight text-gray-900 xl:text-3xl">
               {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
             </h3>
-            <p className="text-gray-500 font-bold text-lg">with {currentDoctorLabel || "Doctor"}</p>
+            <p className="text-base font-bold text-gray-500 xl:text-lg">with {currentDoctorLabel || "Doctor"}</p>
           </div>
           
-          <Avatar className="h-20 w-20 rounded-2xl bg-violet-50 flex items-center justify-center border-2 border-violet-100/50 shadow-inner group-hover:-rotate-3 transition-transform duration-500 overflow-hidden">
+          <Avatar className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-violet-100/50 bg-violet-50 shadow-inner transition-transform duration-500 group-hover:-rotate-3 xl:h-20 xl:w-20">
             {resolvedDoctorImage ? (
               <AvatarImage src={resolvedDoctorImage} alt={currentDoctorName || "Doctor"} className="object-cover" />
             ) : (
@@ -393,7 +393,7 @@ export function NextAppointmentCard({
           </Avatar>
         </div>
 
-        <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="mt-auto flex flex-col items-center justify-between gap-4 lg:flex-row xl:gap-6">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
               <Calendar className="h-4 w-4 text-violet-600" />
@@ -409,7 +409,7 @@ export function NextAppointmentCard({
 
           <Button
             size="lg"
-            className="bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl px-8 h-12 shadow-lg hover:shadow-violet-900/10 active:scale-95 transition-all w-full md:w-auto"
+            className="h-11 w-full rounded-xl bg-violet-600 px-6 font-bold text-white shadow-lg transition-all hover:bg-violet-700 hover:shadow-violet-900/10 active:scale-95 lg:w-auto xl:h-12 xl:px-8"
             onClick={() => onViewDetails(currentAppointment)}
           >
             View Details

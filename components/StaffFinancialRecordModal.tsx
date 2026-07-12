@@ -130,7 +130,7 @@ export function StaffFinancialRecordModal({
 
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Label htmlFor="staff-financial-amount">Amount (PHP)</Label>
+              <Label htmlFor="staff-financial-amount">Amount ({"\u20b1"})</Label>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button type="button" className="text-muted-foreground" aria-label="Amount guidance">
@@ -177,7 +177,7 @@ export function StaffFinancialRecordModal({
             </Label>
             <Input
               id="staff-financial-repayment"
-              placeholder={isCashAdvance ? "e.g., PHP 2,500 x 2 payrolls" : "Optional payroll note"}
+              placeholder={isCashAdvance ? "e.g., \u20b12,500 x 2 payrolls" : "Optional payroll note"}
               {...staffPasswordManagerIgnoreProps}
               value={form.repaymentSchedule}
               onChange={(event) => updateForm({ repaymentSchedule: event.target.value })}

@@ -151,7 +151,7 @@ export default function AddStaffModal(props: AddStaffModalProps) {
               </div>
               {showCompensationFields ? (
                 <div className="space-y-2">
-                  <Label htmlFor="staff-base-salary">Base Monthly Salary (PHP)</Label>
+                  <Label htmlFor="staff-base-salary">Base Monthly Salary ({"\u20b1"})</Label>
                   <Input
                     id="staff-base-salary"
                     type="number"

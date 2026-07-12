@@ -9,7 +9,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
-import { Calendar, DollarSign, AlertCircle, Users, Clock, ChevronRight } from "lucide-react";
+import { Calendar, DollarSign, AlertCircle, Users, ChevronRight } from "lucide-react";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { NextAppointmentCard } from "./NextAppointmentCard";
@@ -62,6 +62,13 @@ const getDashboardTransactionReportingDate = (transaction: { date?: string | nul
 
 const getDashboardExpenseReportingDate = (expense: { date?: string | null }) =>
   toDashboardDateOnly(expense.date);
+
+const getDashboardExpensePaidAmount = (expense: { amount?: number | string | null; totalPaid?: number | string | null; status?: string | null }) => {
+  if (expense.totalPaid !== undefined && expense.totalPaid !== null) return Math.max(0, Number(expense.totalPaid) || 0);
+  return ["paid", "partial", "overpaid"].includes(String(expense.status || "").toLowerCase().trim())
+    ? Math.max(0, Number(expense.amount) || 0)
+    : 0;
+};
 
 const getAppointmentDateTime = (appointment: Appointment) => new Date(`${appointment.date}T${appointment.time}`);
 
@@ -258,9 +265,9 @@ export function Dashboard({ portal }: DashboardProps) {
   ), [dashboardPeriodRange, financeTransactions]);
   const periodExpenses = useMemo(() => (
     detailedExpenses
-      .filter((expense) => String(expense.status || "").toLowerCase().trim() === "paid")
+      .filter((expense) => String(expense.status || "").toLowerCase().trim() !== "cancelled")
       .filter((expense) => isDateWithinDashboardRange(getDashboardExpenseReportingDate(expense), dashboardPeriodRange))
-      .reduce((sum, expense) => sum + Math.abs(Number(expense.amount) || 0), 0)
+      .reduce((sum, expense) => sum + getDashboardExpensePaidAmount(expense), 0)
   ), [dashboardPeriodRange, detailedExpenses]);
 
   // Get upcoming appointments visible to the current portal.
@@ -364,74 +371,21 @@ export function Dashboard({ portal }: DashboardProps) {
     String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
   const managementBasePath = portal === "admin" && user?.role === "receptionist" ? "/receptionist" : `/${portal}`;
-  const mobileStats = portal === "admin"
-    ? [
-        {
-          title: `${dashboardPeriodRange.title} Expenses`,
-          value: `\u20b1${periodExpenses.toLocaleString()}`,
-          helper: "Paid expenses",
-          icon: DollarSign,
-          iconClass: "bg-rose-50 text-rose-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-        {
-          title: `${dashboardPeriodRange.title} Appointments`,
-          value: filteredAppointments.length.toString(),
-          helper: "Scheduled",
-          icon: Calendar,
-          iconClass: "bg-emerald-50 text-emerald-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-        {
-          title: "Appointment Requests",
-          value: pendingAppointmentsCount.toString(),
-          helper: "Action required",
-          icon: Clock,
-          iconClass: "bg-amber-50 text-amber-600",
-          pillClass: "bg-amber-50 text-amber-700",
-        },
-        {
-          title: `${dashboardPeriodRange.title} Revenue`,
-          value: `\u20b1${periodRevenue.toLocaleString()}`,
-          helper: "Recorded payments",
-          icon: DollarSign,
-          iconClass: "bg-violet-50 text-violet-600",
-          pillClass: "bg-emerald-50 text-emerald-700",
-        },
-      ]
-    : [
-        {
-          title: "Appointments",
-          value: filteredAppointments.length.toString(),
-          helper: "Current view",
-          icon: Calendar,
-          iconClass: "bg-violet-50 text-violet-600",
-          pillClass: "bg-violet-50 text-violet-700",
-        },
-        {
-          title: "Requests",
-          value: pendingAppointmentsCount.toString(),
-          helper: "Action required",
-          icon: AlertCircle,
-          iconClass: "bg-amber-50 text-amber-600",
-          pillClass: "bg-amber-50 text-amber-700",
-        },
-      ];
   const mobileVisitWeeks = [0.2, 0.47, 0.93, 0.58, 0.47, 0.32];
   const monthlyVisitTotal = currentMonthAppointments.length;
   const monthlyVisitAverage = Math.round((monthlyVisitTotal / Math.max(1, new Date().getDate())) * 10) / 10;
 
   return (
-    <div data-tour-id={`${portal}-dashboard-page`} className="min-h-screen space-y-5 bg-[#f8fafc] p-1 sm:p-3 md:space-y-10 md:p-0">
+    <div data-tour-id={`${portal}-dashboard-page`} className="min-h-screen space-y-4 bg-[#f8fafc] p-1 sm:p-3 md:space-y-10 md:p-0">
       {portal !== "patient" && (
         <div className="md:hidden">
-          <div className="grid grid-cols-3 rounded-[1.35rem] border border-gray-100 bg-white p-1.5 shadow-sm">
+          <div className="grid grid-cols-3 rounded-2xl border border-gray-100 bg-white p-1 shadow-sm sm:p-1.5">
             {(["day", "week", "month"] as const).map((mode) => (
               <Button
                 key={mode}
                 size="sm"
                 variant="ghost"
-                className={`h-12 rounded-2xl text-sm font-black transition-all ${
+                className={`h-10 rounded-xl text-sm font-black transition-all sm:h-12 sm:rounded-2xl ${
                   viewMode === mode
                     ? "bg-violet-600 text-white shadow-lg shadow-violet-200 hover:bg-violet-600 hover:text-white"
                     : "text-slate-500 hover:bg-gray-50 hover:text-slate-700"
@@ -444,29 +398,6 @@ export function Dashboard({ portal }: DashboardProps) {
           </div>
         </div>
       )}
-
-      <div className="grid grid-cols-2 gap-3 md:hidden">
-        {mobileStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.title} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-slate-500">{stat.title}</p>
-                  <p className="mt-3 text-2xl font-black tracking-tight text-gray-950">{stat.value}</p>
-                </div>
-                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${stat.iconClass}`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-2.5 py-1 text-xs font-black ${stat.pillClass}`}>{stat.helper}</span>
-                <span className="text-xs font-semibold text-slate-500">Current view</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
       <div className="hidden flex-col gap-4 md:flex md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
@@ -497,7 +428,6 @@ export function Dashboard({ portal }: DashboardProps) {
       {/* Stats Cards */}
       <div
         data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}
-        className="hidden md:block"
       >
         <DashboardStats
           portal={portal}
@@ -512,7 +442,7 @@ export function Dashboard({ portal }: DashboardProps) {
       </div>
 
       <div className="md:hidden">
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm sm:p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-black text-gray-950">Next Appointment</h2>
@@ -526,10 +456,10 @@ export function Dashboard({ portal }: DashboardProps) {
             <button
               type="button"
               onClick={() => handleViewAppointment(nextAppointment)}
-              className="flex w-full items-center gap-4 rounded-2xl border border-violet-100 bg-violet-50/50 p-4 text-left"
+              className="flex w-full items-center gap-3 rounded-2xl border border-violet-100 bg-violet-50/50 p-3 text-left sm:gap-4 sm:p-4"
             >
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-violet-600 shadow-sm">
-                <Calendar className="h-7 w-7" />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-violet-600 shadow-sm sm:h-14 sm:w-14 sm:rounded-2xl">
+                <Calendar className="h-6 w-6 sm:h-7 sm:w-7" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-black text-gray-950">
@@ -542,9 +472,9 @@ export function Dashboard({ portal }: DashboardProps) {
               <ChevronRight className="h-6 w-6 shrink-0 text-slate-400" />
             </button>
           ) : (
-            <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center">
-              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-violet-50 text-violet-600">
-                <Calendar className="h-7 w-7" />
+            <div className="rounded-2xl border border-dashed border-gray-200 p-5 text-center sm:p-6">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 sm:h-14 sm:w-14">
+                <Calendar className="h-6 w-6 sm:h-7 sm:w-7" />
               </div>
               <p className="font-black text-gray-950">No appointments yet</p>
               <p className="mt-1 text-sm font-semibold text-slate-500">Schedule your first visit today.</p>
@@ -604,7 +534,7 @@ export function Dashboard({ portal }: DashboardProps) {
       </div>
 
       <div className="space-y-4 md:hidden">
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm sm:p-4">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="text-xl font-black text-gray-950">{portal === "admin" ? "Recent Schedule" : "My Schedule"}</h2>
@@ -621,9 +551,9 @@ export function Dashboard({ portal }: DashboardProps) {
                   key={appointment.id}
                   type="button"
                   onClick={() => handleViewAppointment(appointment)}
-                  className="flex w-full items-center gap-4 py-3 text-left"
+                  className="flex w-full items-center gap-3 py-3 text-left sm:gap-4"
                 >
-                  <div className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                  <div className="flex h-12 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-violet-50 text-violet-600 sm:h-14 sm:w-16">
                     <span className="text-sm font-black">{formatTimeTo12h(appointment.time).split(" ")[0]}</span>
                     <span className="text-[10px] font-black uppercase">{formatTimeTo12h(appointment.time).split(" ")[1] || ""}</span>
                   </div>
@@ -631,7 +561,7 @@ export function Dashboard({ portal }: DashboardProps) {
                     <p className="truncate font-black text-gray-950">{portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}</p>
                     <p className="mt-0.5 truncate text-sm font-semibold text-slate-500">{getAppointmentTypeName(appointment.type, appointment.customType)}</p>
                   </div>
-                  <span className="rounded-xl bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                  <span className="hidden rounded-xl bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 min-[420px]:inline-flex">
                     {normalizeAppointmentStatus(appointment.status)}
                   </span>
                   <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
@@ -643,7 +573,7 @@ export function Dashboard({ portal }: DashboardProps) {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm sm:p-4">
           <div className="mb-4 flex items-start justify-between">
             <div>
               <h2 className="text-xl font-black text-gray-950">Visit Statistics</h2>
@@ -653,8 +583,8 @@ export function Dashboard({ portal }: DashboardProps) {
               View All
             </Button>
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_8.5rem] gap-4">
-            <div className="flex h-32 items-end justify-between gap-2 border-b border-gray-100 px-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_8.5rem] sm:gap-4">
+            <div className="flex h-28 items-end justify-between gap-2 border-b border-gray-100 px-1 sm:h-32 sm:px-2">
               {mobileVisitWeeks.map((height, index) => (
                 <div key={index} className="flex flex-1 flex-col items-center justify-end gap-2">
                   <div
@@ -665,18 +595,18 @@ export function Dashboard({ portal }: DashboardProps) {
                 </div>
               ))}
             </div>
-            <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+            <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-3 sm:p-4">
               <p className="text-sm font-bold text-slate-500">Total Visits</p>
-              <p className="mt-1 text-3xl font-black text-violet-600">{monthlyVisitTotal}</p>
+              <p className="mt-1 text-2xl font-black text-violet-600 sm:text-3xl">{monthlyVisitTotal}</p>
               <p className="mt-4 text-sm font-bold text-slate-500">Avg. per day</p>
-              <p className="mt-1 text-2xl font-black text-violet-600">{monthlyVisitAverage}</p>
+              <p className="mt-1 text-xl font-black text-violet-600 sm:text-2xl">{monthlyVisitAverage}</p>
             </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm sm:p-4">
           <h2 className="text-xl font-black text-gray-950">Quick Actions</h2>
-          <div className="mt-4 grid grid-cols-4 gap-2">
+          <div className="mt-3 grid grid-cols-4 gap-2 sm:mt-4">
             {[
               { label: "Schedule", helper: "Book visit", icon: Calendar, action: () => openCreateModal() },
               { label: "Patients", helper: "Manage", icon: Users, action: () => router.push(`${managementBasePath}/patients`) },
@@ -689,18 +619,18 @@ export function Dashboard({ portal }: DashboardProps) {
                   key={action.label}
                   type="button"
                   onClick={action.action}
-                  className="relative flex min-h-[7rem] flex-col items-center justify-center rounded-2xl border border-gray-100 bg-white px-2 text-center shadow-sm"
+                  className="relative flex min-h-[5.75rem] flex-col items-center justify-center rounded-xl border border-gray-100 bg-white px-1.5 text-center shadow-sm sm:min-h-[7rem] sm:rounded-2xl sm:px-2"
                 >
                   {action.label === "Requests" && pendingAppointmentsCount > 0 && (
                     <span className="absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white">
                       {pendingAppointmentsCount > 9 ? "9+" : pendingAppointmentsCount}
                     </span>
                   )}
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-violet-50 text-violet-600">
-                    <Icon className="h-6 w-6" />
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
+                    <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
-                  <span className="mt-2 text-xs font-black text-gray-950">{action.label}</span>
-                  <span className="mt-0.5 text-[10px] font-semibold text-slate-500">{action.helper}</span>
+                  <span className="mt-2 text-[11px] font-black text-gray-950 sm:text-xs">{action.label}</span>
+                  <span className="mt-0.5 hidden text-[10px] font-semibold text-slate-500 min-[420px]:inline">{action.helper}</span>
                 </button>
               );
             })}

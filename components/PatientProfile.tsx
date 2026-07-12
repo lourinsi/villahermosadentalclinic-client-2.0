@@ -29,6 +29,7 @@ import {
   Camera,
   Upload,
   Trash2,
+  PenLine,
   User as UserIcon,
   Clock,
   CheckCircle,
@@ -58,19 +59,24 @@ import {
   ArrowLeft,
   Stethoscope,
   RotateCcw,
-  X
+  X,
+  MoreHorizontal
 } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 
-import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import PatientAvatar from "./PatientAvatar";
+import DeletePaymentDialog from "./DeletePaymentDialog";
+import SignatureInputModal from "./SignatureInputModal";
+import { CurrencyText } from "./CurrencyAmount";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -295,6 +301,7 @@ type ConsentFormState = {
   dentistSignatureName: string;
   signedDate: string;
   patientSignatureImage: string;
+  dentistSignatureImage: string;
   signedAt: string;
 };
 
@@ -327,6 +334,7 @@ const createConsentFormState = (data?: Record<string, any>): ConsentFormState =>
     dentistSignatureName: String(source.dentistSignatureName ?? source.consentDentistSignatureName ?? ""),
     signedDate: String(source.signedDate ?? source.consentSignedDate ?? todayDateInputValue()),
     patientSignatureImage: String(source.patientSignatureImage ?? source.consentPatientSignatureImage ?? ""),
+    dentistSignatureImage: String(source.dentistSignatureImage ?? source.consentDentistSignatureImage ?? ""),
     signedAt: String(source.signedAt ?? source.consentSignedAt ?? ""),
   };
 };
@@ -339,6 +347,7 @@ const serializeConsentForm = (consentForm: ConsentFormState) => ({
   consentGuardianSignatureName: consentForm.guardianName.trim(),
   consentDentistSignatureName: consentForm.dentistSignatureName.trim(),
   consentPatientSignatureImage: consentForm.patientSignatureImage,
+  consentDentistSignatureImage: consentForm.dentistSignatureImage,
   consentSignedDate: consentForm.signedDate,
   consentSignedAt: consentForm.signedAt,
 });
@@ -351,6 +360,7 @@ const consentFormComparable = (consentForm: ConsentFormState) => ({
   dentistSignatureName: consentForm.dentistSignatureName.trim(),
   signedDate: consentForm.signedDate,
   patientSignatureImage: consentForm.patientSignatureImage,
+  dentistSignatureImage: consentForm.dentistSignatureImage,
 });
 
 const resolveImageSource = (source?: string) => {
@@ -891,7 +901,7 @@ export function PatientProfile({
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
                     <span className={`block truncate text-lg font-black leading-tight md:text-xl ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-violet-600"}`}>
-                      PHP {Number(displayedBalance || 0).toLocaleString()}
+                      <CurrencyText value={`\u20b1${Number(displayedBalance || 0).toLocaleString()}`} />
                     </span>
                   </div>
                 </div>
@@ -1077,7 +1087,7 @@ const formatPatientLogDate = (value?: string | Date | null, fallback = "N/A") =>
 
 const formatPatientHistoryCurrency = (value?: number | string | null) => {
   const amount = Number(value || 0);
-  return `₱${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "0"}`;
+  return `\u20b1${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "0"}`;
 };
 
 const getPatientHistoryDateParts = (value?: string | Date | null) => {
@@ -1125,13 +1135,36 @@ const parsePaymentTimestamp = (value?: string | Date) => {
 const getPaymentSortDateValue = (txn: RecentTransaction) =>
   String((txn as any).paymentDate || txn.date || "");
 
-const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
+const comparePaymentTransactionsChronologically = (
+  a: RecentTransaction,
+  b: RecentTransaction,
+  direction: "asc" | "desc" = "desc"
+) => {
   const paymentDateDiff = parsePaymentTimestamp(getPaymentSortDateValue(b)) - parsePaymentTimestamp(getPaymentSortDateValue(a));
 
-  if (paymentDateDiff !== 0) return paymentDateDiff;
+  if (paymentDateDiff !== 0) {
+    return direction === "asc" ? -paymentDateDiff : paymentDateDiff;
+  }
 
-  return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
+  const keyDiff = getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
+  return direction === "asc" ? -keyDiff : keyDiff;
 };
+
+const comparePaymentTransactionsByDate = (
+  a: RecentTransaction,
+  b: RecentTransaction,
+  direction: "asc" | "desc" = "desc"
+) => {
+  const aDeleted = isSoftDeletedPaymentTransaction(a);
+  const bDeleted = isSoftDeletedPaymentTransaction(b);
+
+  if (aDeleted !== bDeleted) return aDeleted ? 1 : -1;
+
+  return comparePaymentTransactionsChronologically(a, b, direction);
+};
+
+const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) =>
+  comparePaymentTransactionsByDate(a, b, "desc");
 
 const normalizeComparableText = (value: unknown) =>
   String(value ?? "").toLowerCase().trim().replace(/\s+/g, " ");
@@ -1406,7 +1439,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const canSeeDeletedAppointments = effectiveRole === "admin";
-  const canSeeDeletedPayments = effectiveRole !== "receptionist";
   const shouldLoadTreatmentOptions = activeTab === "history" || activeTab === "payments";
   const { options: treatmentOptions, isLoading: isLoadingTreatmentOptions } = useAppointmentTypeOptions(shouldLoadTreatmentOptions);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: activeTab === "history" || activeTab === "payments" });
@@ -1449,6 +1481,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [isRescheduleDatePickerOpen, setIsRescheduleDatePickerOpen] = useState(false);
   const [isRescheduleTimePickerOpen, setIsRescheduleTimePickerOpen] = useState(false);
+  const [rescheduleDuration, setRescheduleDuration] = useState("30");
+  const [rescheduleStatus, setRescheduleStatus] = useState("scheduled");
   const [isRescheduleSaving, setIsRescheduleSaving] = useState(false);
   const [updateTreatmentAppointment, setUpdateTreatmentAppointment] = useState<Appointment | HistoryAppointment | null>(null);
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
@@ -1475,9 +1509,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [questionnaireLoadedPatientId, setQuestionnaireLoadedPatientId] = useState<string | null>(null);
   const [consentForm, setConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
   const [savedConsentForm, setSavedConsentForm] = useState<ConsentFormState>(() => createConsentFormState());
-  const [consentCanvasRef, setConsentCanvasRef] = useState<HTMLCanvasElement | null>(null);
-  const [hasConsentSignatureInk, setHasConsentSignatureInk] = useState(false);
-  const [isConsentSignatureDirty, setIsConsentSignatureDirty] = useState(false);
+  const [consentSignatureModalTarget, setConsentSignatureModalTarget] = useState<"patient" | "dentist" | null>(null);
   const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
   const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
@@ -1546,8 +1578,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(nextConsentForm);
       setSavedConsentForm(nextConsentForm);
-      setHasConsentSignatureInk(Boolean(nextConsentForm.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(String(patient.id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load questionnaire");
@@ -1563,23 +1593,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       loadQuestionnaireTab();
     }
   }, [activeTab, hasRestoredQuestionnaireDraft, loadQuestionnaireTab, patient.id, questionnaireLoadedPatientId, questionnaireQuestions.length]);
-
-  useEffect(() => {
-    if (!consentCanvasRef) return;
-
-    const context = consentCanvasRef.getContext("2d");
-    if (!context) return;
-
-    context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-    if (!consentForm.patientSignatureImage) return;
-
-    const image = new Image();
-    image.onload = () => {
-      context.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-      context.drawImage(image, 0, 0, consentCanvasRef.width, consentCanvasRef.height);
-    };
-    image.src = consentForm.patientSignatureImage;
-  }, [consentCanvasRef, consentForm.patientSignatureImage]);
 
   const questionnaireHasChanges = React.useMemo(
     () =>
@@ -1600,7 +1613,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     [consentForm.acknowledgements]
   );
 
-  const hasConsentSignature = hasConsentSignatureInk || Boolean(consentForm.patientSignatureImage);
+  const hasConsentSignature = Boolean(consentForm.patientSignatureImage);
   const isConsentFormComplete =
     allConsentAcknowledgementsAccepted &&
     Boolean(consentForm.patientSignatureName.trim()) &&
@@ -1647,29 +1660,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         [id]: checked,
       },
     }));
-    setIsModified(true);
-  };
-
-  const getConsentCanvasSignatureImage = () => {
-    if (!consentCanvasRef) return consentForm.patientSignatureImage;
-
-    const context = consentCanvasRef.getContext("2d");
-    if (!context) return consentForm.patientSignatureImage;
-
-    const imageData = context.getImageData(0, 0, consentCanvasRef.width, consentCanvasRef.height).data;
-    const hasInk = imageData.some((value, index) => index % 4 === 3 && value > 0);
-    return hasInk ? consentCanvasRef.toDataURL("image/png") : "";
-  };
-
-  const persistConsentSignatureFromCanvas = () => {
-    const signatureImage = getConsentCanvasSignatureImage();
-    setConsentForm((current) => ({
-      ...current,
-      accepted: false,
-      patientSignatureImage: signatureImage,
-    }));
-    setHasConsentSignatureInk(Boolean(signatureImage));
-    setIsConsentSignatureDirty(true);
     setIsModified(true);
   };
 
@@ -1724,7 +1714,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setIsSavingConsent(true);
     try {
-      const signatureImage = getConsentCanvasSignatureImage();
+      const signatureImage = consentForm.patientSignatureImage;
       const isComplete =
         allConsentAcknowledgementsAccepted &&
         Boolean(consentForm.patientSignatureName.trim()) &&
@@ -1776,8 +1766,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setSavedPhysicianInformation(nextPhysicianInformation);
       setConsentForm(savedConsent);
       setSavedConsentForm(savedConsent);
-      setHasConsentSignatureInk(Boolean(savedConsent.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setHasRestoredQuestionnaireDraft(false);
       toast.success("Consent form saved");
       return true;
@@ -2075,12 +2063,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
-    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage">, string> = {
+    const consentFieldLabels: Record<keyof Pick<ConsentFormState, "patientSignatureName" | "guardianName" | "dentistSignatureName" | "signedDate" | "patientSignatureImage" | "dentistSignatureImage">, string> = {
       patientSignatureName: "Consent Form - Patient / Parent / Guardian Signature Name",
       guardianName: "Consent Form - Parent / Guardian Name",
       dentistSignatureName: "Consent Form - Dentist Signature",
       signedDate: "Consent Form - Date",
       patientSignatureImage: "Consent Form - Drawn Signature",
+      dentistSignatureImage: "Consent Form - Dentist Drawn Signature",
     };
 
     Object.entries(consentFieldLabels).forEach(([field, label]) => {
@@ -2089,8 +2078,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const newValue = toComparableValue(consentForm[consentField]);
       if (oldValue !== newValue) {
         changes[label] = {
-          old: field === "patientSignatureImage" ? Boolean(savedConsentForm.patientSignatureImage) : savedConsentForm[consentField],
-          new: field === "patientSignatureImage" ? Boolean(consentForm.patientSignatureImage) : consentForm[consentField],
+          old: field === "patientSignatureImage" || field === "dentistSignatureImage" ? Boolean(savedConsentForm[consentField]) : savedConsentForm[consentField],
+          new: field === "patientSignatureImage" || field === "dentistSignatureImage" ? Boolean(consentForm[consentField]) : consentForm[consentField],
         };
       }
     });
@@ -2121,12 +2110,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setIsModified(hasTrackedChanges);
   }, [hasTrackedChanges, setIsModified]);
 
-  // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
-  const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
+  // Local payment deletion state for PatientDetails (prefixed to avoid collisions)
   const [pdConfirmLoading, setPdConfirmLoading] = useState(false);
-  const [pdConfirmAction, setPdConfirmAction] = useState<null | (() => Promise<void>)>(null);
-  const [pdConfirmTitle, setPdConfirmTitle] = useState<string>("");
-  const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
+  const [pdPaymentToDelete, setPdPaymentToDelete] = useState<{
+    transaction: RecentTransaction;
+    paymentId: string;
+    appointmentId?: string;
+  } | null>(null);
 
   // New state for filters
   const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
@@ -2427,6 +2417,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setRescheduleAppointment(sourceAppointment);
     setRescheduleDate(Number.isNaN(appointmentDate.getTime()) ? new Date() : appointmentDate);
     setRescheduleTime(String((sourceAppointment as any).time || "").trim());
+    setRescheduleDuration(String(normalizeBookingDuration((sourceAppointment as any).duration || 30)));
+    setRescheduleStatus(String(normalizeAppointmentStatus((sourceAppointment as any).status || "scheduled")));
     setIsRescheduleDatePickerOpen(false);
     setIsRescheduleTimePickerOpen(false);
   };
@@ -2437,6 +2429,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setRescheduleAppointment(null);
     setRescheduleDate(null);
     setRescheduleTime("");
+    setRescheduleDuration("30");
+    setRescheduleStatus("scheduled");
     setIsRescheduleDatePickerOpen(false);
     setIsRescheduleTimePickerOpen(false);
   };
@@ -2462,6 +2456,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const updated = await updateAppointment(appointmentId, {
         date,
         time: selectedTime,
+        duration: Number(rescheduleDuration) || 30,
+        status: normalizeAppointmentStatus(rescheduleStatus) as Appointment["status"],
       } as Partial<Appointment>);
 
       const patchAppointment = (apt: Appointment) =>
@@ -2471,6 +2467,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               ...updated,
               date: updated.date || date,
               time: updated.time || selectedTime,
+              duration: updated.duration ?? (Number(rescheduleDuration) || 30),
+              status: updated.status || rescheduleStatus,
             } as Appointment)
           : apt;
 
@@ -2790,6 +2788,22 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const procedures = new Set(mappedHistory.map(apt => apt.type).filter(Boolean));
       return ['all', ...Array.from(procedures) as string[]];
   }, [mappedHistory]);
+  const activeHistoryFilterItemClass = (isActive: boolean) =>
+    isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white" : "";
+  const historyProcedureLabel = historyProcedureFilter === "all" ? "All Services" : String(historyProcedureFilter);
+  const historyDoctorLabel = doctorFilter
+    ? String(doctorFilter)
+    : historyDoctorFilter === "all"
+      ? "All Providers"
+      : String(historyDoctorFilter);
+  const historyPaymentLabel = historyPaymentStatusFilter === "all"
+    ? "All Payments"
+    : PAYMENT_STATUSES.find((status) => status.value === historyPaymentStatusFilter)?.label || "Payment";
+  const resetHistoryFilters = () => {
+    setHistoryProcedureFilter("all");
+    if (!doctorFilter) setHistoryDoctorFilter("all");
+    setHistoryPaymentStatusFilter("all");
+  };
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
@@ -2818,39 +2832,40 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
   const [paymentSearchFilter, setPaymentSearchFilter] = useState('');
   const [paymentDateSortDirection, setPaymentDateSortDirection] = useState<"asc" | "desc">("desc");
+  const [showDeletedPayments, setShowDeletedPayments] = useState(false);
 
   const uniquePaymentDoctors = React.useMemo(() => {
     const doctors = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.doctor)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(doctors)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   const uniquePaymentMethods = React.useMemo(() => {
     const methods = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.method)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(methods)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   const uniquePaymentProcedures = React.useMemo(() => {
     const procedures = new Set(
       allTransactions
-        .filter((t) => !isPaymentLogLikeRow(t) && (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(t)))
+        .filter((t) => !isPaymentLogLikeRow(t))
         .map(t => t.appointmentType)
         .filter(Boolean)
         .map(String)
     );
     return ['all', ...Array.from(procedures)];
-  }, [allTransactions, canSeeDeletedPayments]);
+  }, [allTransactions]);
 
   useEffect(() => {
     if (paymentDoctorFilter !== 'all' && !uniquePaymentDoctors.includes(paymentDoctorFilter)) setPaymentDoctorFilter('all');
@@ -2864,15 +2879,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     if (paymentProcedureFilter !== 'all' && !uniquePaymentProcedures.includes(paymentProcedureFilter)) setPaymentProcedureFilter('all');
   }, [paymentProcedureFilter, uniquePaymentProcedures]);
 
+  const paymentMethodLabel = paymentMethodFilter === "all" ? "All Methods" : String(paymentMethodFilter);
+  const paymentDoctorLabel = doctorFilter
+    ? String(doctorFilter)
+    : paymentDoctorFilter === "all"
+      ? "All Doctors"
+      : String(paymentDoctorFilter);
+  const paymentProcedureLabel = paymentProcedureFilter === "all" ? "All Procedures" : String(paymentProcedureFilter);
+  const paymentSortLabel = paymentDateSortDirection === "desc" ? "Newest Paid" : "Oldest Paid";
+  const paymentDeletedLabel = showDeletedPayments ? "Showing deleted" : "Deleted hidden";
+
   const filteredTransactions = React.useMemo(() => {
     const search = paymentSearchFilter.trim().toLowerCase();
-    const getVisiblePaymentDateTimestamp = (transaction: RecentTransaction) =>
-      parsePaymentTimestamp(getPaymentSortDateValue(transaction));
 
     return allTransactions
       .filter(t => {
         if (isPaymentLogLikeRow(t)) return false;
-        if (!canSeeDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
+        if (!showDeletedPayments && isSoftDeletedPaymentTransaction(t)) return false;
         if (doctorFilter && t.doctor !== doctorFilter) return false;
         if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
         if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
@@ -2897,15 +2920,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         return true;
       })
       .sort((a, b) => {
-        const paymentDateDiff = getVisiblePaymentDateTimestamp(a) - getVisiblePaymentDateTimestamp(b);
-        if (paymentDateDiff !== 0) {
-          return paymentDateSortDirection === "asc" ? paymentDateDiff : -paymentDateDiff;
-        }
-
-        const keyDiff = getPaymentTransactionKey(a).localeCompare(getPaymentTransactionKey(b));
-        return paymentDateSortDirection === "asc" ? keyDiff : -keyDiff;
+        return comparePaymentTransactionsChronologically(a, b, paymentDateSortDirection);
       });
-  }, [allTransactions, canSeeDeletedPayments, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter]);
+  }, [allTransactions, doctorFilter, paymentDateSortDirection, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter, paymentSearchFilter, showDeletedPayments]);
 
   const paymentSummary = React.useMemo(() => {
     return mockAppointmentHistoryLocal.reduce(
@@ -2929,13 +2946,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     Boolean(paymentSearchFilter.trim()) ||
     paymentMethodFilter !== "all" ||
     paymentDoctorFilter !== "all" ||
-    paymentProcedureFilter !== "all";
+    paymentProcedureFilter !== "all" ||
+    showDeletedPayments;
 
   const clearPaymentFilters = () => {
     setPaymentSearchFilter("");
     setPaymentMethodFilter("all");
     setPaymentDoctorFilter("all");
     setPaymentProcedureFilter("all");
+    setShowDeletedPayments(false);
   };
 
   const getPaymentMethodIcon = (method: string) => {
@@ -3084,8 +3103,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const blankConsentForm = createConsentFormState();
     setConsentForm(blankConsentForm);
     setSavedConsentForm(blankConsentForm);
-    setHasConsentSignatureInk(false);
-    setIsConsentSignatureDirty(false);
   }, [loadedPatient.id, patient]);
 
   useEffect(() => {
@@ -3111,8 +3128,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const restoredSavedConsentForm = createConsentFormState(draft.savedConsentForm || draft.patientQuestionnaireData || {});
       setConsentForm(restoredConsentForm);
       setSavedConsentForm(restoredSavedConsentForm);
-      setHasConsentSignatureInk(Boolean(restoredConsentForm.patientSignatureImage));
-      setIsConsentSignatureDirty(false);
       setQuestionnaireLoadedPatientId(currentPatientId);
       setActiveTab(draft.activeTab || "info");
       setHasRestoredQuestionnaireDraft((draft.questionnaireQuestions || []).length > 0);
@@ -3363,8 +3378,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           if (!patient?.id) return [];
 
           try {
-            const includeDeletedQuery = canSeeDeletedPayments ? "?includeDeleted=true" : "";
-            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}${includeDeletedQuery}`), {
+            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}?includeDeleted=true`), {
               headers,
               credentials: 'include',
               signal: controller.signal,
@@ -3394,7 +3408,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       });
 
       return () => controller.abort();
-    }, [buildPatientTransactions, canSeeDeletedPayments, patientAppointments, patient?.id, shouldLoadFinancialLog]);
+    }, [buildPatientTransactions, patientAppointments, patient?.id, shouldLoadFinancialLog]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -3453,7 +3467,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const handleDeletePayment = async (paymentId: string, appointmentId?: string) => {
     if (!paymentId || paymentId.startsWith("legacy-")) {
       toast.error("This payment total comes from legacy appointment data and cannot be deleted here.");
-      return;
+      return false;
     }
 
     try {
@@ -3496,21 +3510,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         }));
         window.dispatchEvent(new CustomEvent("payments:updated"));
         refreshPatients();
+        return true;
       } else {
         toast.error(result.message || "Failed to delete payment");
+        return false;
       }
     } catch (err) {
       console.error("Error deleting payment:", err);
       toast.error("Error deleting payment");
+      return false;
     }
   };
 
   const handleRestorePayment = async (paymentId: string, appointmentId?: string) => {
-    if (effectiveRole !== "admin") {
-      toast.error("Only admins can restore deleted payments");
-      return;
-    }
-
     if (!paymentId) {
       toast.error("Could not find the payment to restore");
       return;
@@ -3575,12 +3587,25 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    setPdConfirmTitle("Delete Payment");
-    setPdConfirmMessage("Are you sure you want to delete this payment? This will update the appointment balance. This action cannot be undone.  ");
-    setPdConfirmAction(() => async () => {
-      await handleDeletePayment(paymentId, txn.appointmentId || getTransactionAppointmentId(txn));
+    setPdPaymentToDelete({
+      transaction: txn,
+      paymentId,
+      appointmentId: txn.appointmentId || getTransactionAppointmentId(txn),
     });
-    setPdIsConfirmOpen(true);
+  };
+
+  const confirmDeletePaymentTransaction = async () => {
+    if (!pdPaymentToDelete) return;
+
+    try {
+      setPdConfirmLoading(true);
+      const deleted = await handleDeletePayment(pdPaymentToDelete.paymentId, pdPaymentToDelete.appointmentId);
+      if (deleted) {
+        setPdPaymentToDelete(null);
+      }
+    } finally {
+      setPdConfirmLoading(false);
+    }
   };
 
   const handleDeleteLegacyPayment = async (appointmentId: string) => {
@@ -3640,8 +3665,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setQuestionnaireAnswers(savedQuestionnaireAnswers);
     setPhysicianInformation(savedPhysicianInformation);
     setConsentForm(savedConsentForm);
-    setHasConsentSignatureInk(Boolean(savedConsentForm.patientSignatureImage));
-    setIsConsentSignatureDirty(false);
     setIsModified(false);
   };
 
@@ -3655,7 +3678,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ? getHistoryAppointmentType(rescheduleAppointment as Appointment)
       : String((rescheduleAppointment as any).type || "Appointment")
     : "";
-  const rescheduleDuration = String((rescheduleAppointment as any)?.duration || "");
   const rescheduleAppointmentId = rescheduleAppointment?.id ? String(rescheduleAppointment.id) : "";
   const activeTreatmentOptions = treatmentOptions.filter((option): option is ServiceCatalogItem => option.isActive !== false);
   const updateTreatmentCurrentLabel = updateTreatmentAppointment
@@ -3879,8 +3901,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2.5">
-                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ledger Balance (PHP)</Label>
+                      {/* <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ledger Balance ({"\u20b1"})</Label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₱</span>
                           <Input
@@ -3890,7 +3912,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             className="h-12 pl-10 bg-slate-50/30 border-slate-200 font-black text-slate-900 rounded-xl focus:ring-violet-200"
                           />
                         </div>
-                      </div>
+                      </div> */}
                       <div className="space-y-2.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Insurance Carrier</Label>
                         <div className="relative">
@@ -4310,16 +4332,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         </TabsContent>
 
         <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-          <Card className={cardClass}>
-            <CardHeader className={cardHeaderClass}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+          <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <CardHeader className="px-5 py-5 sm:px-6 lg:px-7">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                     <ShieldCheck className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <CardTitle className="text-base font-bold text-slate-900">Consent Form</CardTitle>
-                    <p className="mt-1 text-sm font-medium text-slate-500">Receptionist-managed informed consent and signatures</p>
+                    <CardTitle className="text-xl font-black leading-tight text-slate-950 sm:text-2xl">Consent Form</CardTitle>
+                    <p className="mt-1 text-sm font-medium text-slate-600">Receptionist-managed informed consent and signatures</p>
                   </div>
                 </div>
                 {savedConsentForm.accepted && !consentFormHasChanges && (
@@ -4329,148 +4351,190 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-5 p-5 sm:p-6">
+            <CardContent className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6 lg:px-7 lg:pb-7">
               {isLoadingQuestionnaire ? (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
                   Loading consent form...
                 </div>
               ) : (
                 <>
-                  <div className="space-y-3">
-                    {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                  <div className="space-y-2">
+                    {CONSENT_ACKNOWLEDGEMENTS.map((item, index) => (
                       <label
                         key={item.id}
                         htmlFor={`patient-consent-${item.id}`}
-                        className="flex min-h-20 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/30"
+                        className="flex min-h-[74px] cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-violet-200 hover:bg-violet-50/30 sm:gap-4 sm:px-5"
                       >
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-50 text-sm font-black text-violet-600">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 space-y-1 pr-1">
+                          <span className="block text-sm font-black leading-5 text-slate-950">{item.title}</span>
+                          <span className="block text-sm font-medium leading-5 text-slate-600">{item.description}</span>
+                        </span>
                         <Checkbox
                           id={`patient-consent-${item.id}`}
                           checked={consentForm.acknowledgements[item.id]}
                           onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
                           disabled={isSavingConsent}
-                          className="mt-0.5 border-emerald-200 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600"
+                          className="shrink-0 rounded-full border-violet-400 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
                         />
-                        <span className="space-y-1">
-                          <span className="block text-sm font-bold leading-5 text-slate-900">{item.title}</span>
-                          <span className="block text-sm font-medium leading-6 text-slate-600">{item.description}</span>
-                        </span>
                       </label>
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <div className="space-y-2 lg:col-span-2">
-                      <Label htmlFor="patient-consent-signature-name">Patient / Parent / Guardian Signature Name *</Label>
-                      <Input
-                        id="patient-consent-signature-name"
-                        value={consentForm.patientSignatureName}
-                        onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
-                        disabled={isSavingConsent}
-                        placeholder="Type full legal name"
-                      />
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+                    <div className="flex min-h-full flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(210px,1fr)]">
+                        <div className="space-y-2">
+                          <Label htmlFor="patient-consent-signature-name" className="text-sm font-black text-slate-950">
+                            Patient / Parent / Guardian Full Name *
+                          </Label>
+                          <Input
+                            id="patient-consent-signature-name"
+                            value={consentForm.patientSignatureName}
+                            onChange={(event) => updateConsentField("patientSignatureName", event.target.value)}
+                            disabled={isSavingConsent}
+                            placeholder="Type full legal name"
+                            className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="patient-consent-date" className="text-sm font-black text-slate-950">Date *</Label>
+                          <Input
+                            id="patient-consent-date"
+                            type="date"
+                            value={consentForm.signedDate}
+                            onChange={(event) => updateConsentField("signedDate", event.target.value)}
+                            disabled={isSavingConsent}
+                            className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                          />
+                        </div>
+                      </div>
+                      {/* <div className="mt-3 space-y-2">
+                        <Label htmlFor="patient-consent-guardian-name" className="text-sm font-black text-slate-950">Parent / Guardian Name</Label>
+                        <Input
+                          id="patient-consent-guardian-name"
+                          value={consentForm.guardianName}
+                          onChange={(event) => updateConsentField("guardianName", event.target.value)}
+                          disabled={isSavingConsent}
+                          placeholder="Required only when applicable"
+                          className="h-11 rounded-lg border-slate-200 bg-white font-medium"
+                        />
+                      </div> */}
+                      <div className="mt-4 flex flex-1 flex-col">
+                        <Label className="text-sm font-black text-slate-950">Patient / Parent / Guardian Drawn Signature *</Label>
+                        <button
+                          type="button"
+                          onClick={() => setConsentSignatureModalTarget("patient")}
+                          disabled={isSavingConsent}
+                          className="mt-2 flex min-h-[184px] w-full flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[216px]"
+                        >
+                          {consentForm.patientSignatureImage ? (
+                            <img src={consentForm.patientSignatureImage} alt="Patient signature" className="max-h-[152px] max-w-full object-contain sm:max-h-[184px]" />
+                          ) : (
+                            <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                              <PenLine className="h-4 w-4" />
+                              Add signature
+                            </span>
+                          )}
+                        </button>
+                        <div className="grid gap-2 pt-3 sm:grid-cols-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 w-full rounded-lg border-slate-200 font-black"
+                            onClick={() => setConsentSignatureModalTarget("patient")}
+                            disabled={isSavingConsent}
+                          >
+                            <PenLine className="mr-2 h-4 w-4" />
+                            {consentForm.patientSignatureImage ? "Edit Signature" : "Open Signature Pad"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 w-full rounded-lg border-slate-200 font-black"
+                            onClick={() => updateConsentField("patientSignatureImage", "")}
+                            disabled={isSavingConsent || !consentForm.patientSignatureImage}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Clear Signature
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="patient-consent-date">Date *</Label>
-                      <Input
-                        id="patient-consent-date"
-                        type="date"
-                        value={consentForm.signedDate}
-                        onChange={(event) => updateConsentField("signedDate", event.target.value)}
-                        disabled={isSavingConsent}
-                      />
-                    </div>
-                    <div className="space-y-2 lg:col-span-2">
-                      <Label htmlFor="patient-consent-guardian-name">Parent / Guardian Name</Label>
-                      <Input
-                        id="patient-consent-guardian-name"
-                        value={consentForm.guardianName}
-                        onChange={(event) => updateConsentField("guardianName", event.target.value)}
-                        disabled={isSavingConsent}
-                        placeholder="Required only when applicable"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="patient-consent-dentist-signature">Dentist / Signature</Label>
+
+                    <div className="flex min-h-full flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                          <UserIcon className="h-4 w-4" />
+                        </span>
+                        <Label htmlFor="patient-consent-dentist-signature" className="text-sm font-black text-slate-950">
+                          Dentist / Signature
+                        </Label>
+                      </div>
                       <Input
                         id="patient-consent-dentist-signature"
                         value={consentForm.dentistSignatureName}
                         onChange={(event) => updateConsentField("dentistSignatureName", event.target.value)}
                         disabled={isSavingConsent}
-                        placeholder="Dentist name or signature"
+                        placeholder="Dentist name"
+                        className="h-11 rounded-lg border-slate-200 bg-white font-medium"
                       />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold">Patient / Parent / Guardian Drawn Signature *</Label>
-                    <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-4">
-                      <canvas
-                        ref={setConsentCanvasRef}
-                        className="h-32 w-full cursor-crosshair rounded border border-slate-200 bg-white"
-                        style={{ touchAction: "none" }}
-                        onPointerDown={(event) => {
-                          const canvas = event.currentTarget as HTMLCanvasElement;
-                          const context = canvas.getContext("2d");
-                          if (context) {
-                            canvas.setPointerCapture(event.pointerId);
-                            const rect = canvas.getBoundingClientRect();
-                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-                            context.lineCap = "round";
-                            context.lineJoin = "round";
-                            context.lineWidth = 2;
-                            context.beginPath();
-                            context.moveTo(x, y);
-                          }
-                        }}
-                        onPointerMove={(event) => {
-                          if (event.buttons !== 1) return;
-                          const canvas = event.currentTarget as HTMLCanvasElement;
-                          const context = canvas.getContext("2d");
-                          if (context) {
-                            const rect = canvas.getBoundingClientRect();
-                            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-                            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-                            context.lineTo(x, y);
-                            context.stroke();
-                            setHasConsentSignatureInk(true);
-                            setIsConsentSignatureDirty(true);
-                            setIsModified(true);
-                          }
-                        }}
-                        onPointerUp={persistConsentSignatureFromCanvas}
-                        onPointerCancel={persistConsentSignatureFromCanvas}
-                      />
-                      <Button
+                      <button
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full"
-                        onClick={() => {
-                          if (consentCanvasRef) {
-                            const context = consentCanvasRef.getContext("2d");
-                            context?.clearRect(0, 0, consentCanvasRef.width, consentCanvasRef.height);
-                          }
-                          updateConsentField("patientSignatureImage", "");
-                          setHasConsentSignatureInk(false);
-                          setIsConsentSignatureDirty(true);
-                        }}
+                        onClick={() => setConsentSignatureModalTarget("dentist")}
                         disabled={isSavingConsent}
+                        className="mt-4 flex min-h-[184px] w-full flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30 disabled:cursor-not-allowed disabled:opacity-70 sm:min-h-[216px]"
                       >
-                        Clear Signature
-                      </Button>
+                        {consentForm.dentistSignatureImage ? (
+                          <img src={consentForm.dentistSignatureImage} alt="Dentist signature" className="max-h-[152px] max-w-full object-contain sm:max-h-[184px]" />
+                        ) : (
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                            <PenLine className="h-4 w-4" />
+                            Add dentist signature
+                          </span>
+                        )}
+                      </button>
+                      <div className="grid gap-2 pt-3 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setConsentSignatureModalTarget("dentist")}
+                          disabled={isSavingConsent}
+                          className="h-10 w-full rounded-lg border-slate-200 font-black"
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          Upload
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => updateConsentField("dentistSignatureImage", "")}
+                          disabled={isSavingConsent || !consentForm.dentistSignatureImage}
+                          className="h-10 w-full rounded-lg border-slate-200 font-black"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Clear
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm font-medium text-slate-500">
-                      {isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}
+                  <div className="flex flex-col gap-4 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
+                      <span>{isConsentFormComplete ? "Ready to save completed consent." : "Incomplete consent can be saved as a draft."}</span>
                     </p>
                     <Button
                       type="button"
                       onClick={saveConsentForm}
                       disabled={isSavingConsent || !consentFormHasChanges}
-                      className="gap-2"
+                      className="h-11 gap-2 rounded-lg bg-violet-600 px-5 font-black text-white shadow-lg shadow-violet-200 hover:bg-violet-700"
                     >
                       {isSavingConsent ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -4519,7 +4583,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
+                <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
                   <div className="relative">
                     <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <Input
@@ -4530,18 +4594,82 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     />
                   </div>
 
-                  <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <SelectValue placeholder="All Services" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniqueProcedures.map(proc => (
-                        <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Services' : proc}</SelectItem>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl border-slate-200 bg-white shadow-sm md:hidden" aria-label="Visit history filters">
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-[70vh] w-72 overflow-y-auto">
+                      <DropdownMenuLabel>Visit filters</DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        Filters: {historyProcedureLabel} / {historyDoctorLabel} / {historyPaymentLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Services</DropdownMenuLabel>
+                      {uniqueProcedures.map((proc) => (
+                        <DropdownMenuItem
+                          key={proc}
+                          className={activeHistoryFilterItemClass(historyProcedureFilter === proc)}
+                          onSelect={() => setHistoryProcedureFilter(proc)}
+                        >
+                          {proc === "all" ? "All Services" : proc}
+                        </DropdownMenuItem>
                       ))}
-                    </SelectContent>
-                  </Select>
+                      {!doctorFilter ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-slate-500">Providers</DropdownMenuLabel>
+                          {uniqueDoctors.map((doctor) => (
+                            <DropdownMenuItem
+                              key={doctor}
+                              className={activeHistoryFilterItemClass(historyDoctorFilter === doctor)}
+                              onSelect={() => setHistoryDoctorFilter(doctor)}
+                            >
+                              {doctor === "all" ? "All Providers" : doctor}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      ) : null}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Payments</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(historyPaymentStatusFilter === "all")}
+                        onSelect={() => setHistoryPaymentStatusFilter("all")}
+                      >
+                        All Payments
+                      </DropdownMenuItem>
+                      {PAYMENT_STATUSES.map((status) => (
+                        <DropdownMenuItem
+                          key={status.value}
+                          className={activeHistoryFilterItemClass(historyPaymentStatusFilter === status.value)}
+                          onSelect={() => setHistoryPaymentStatusFilter(status.value)}
+                        >
+                          {status.label}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={resetHistoryFilters}>
+                        Reset filters
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className="hidden md:block">
+                    <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                        <SelectValue placeholder="All Services" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniqueProcedures.map(proc => (
+                          <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Services' : proc}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   {!doctorFilter ? (
+                    <div className="hidden md:block">
                     <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
                       <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
                         <SelectValue placeholder="All Providers" />
@@ -4552,21 +4680,24 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         ))}
                       </SelectContent>
                     </Select>
+                    </div>
                   ) : (
                     <div className="hidden md:block" />
                   )}
 
-                  <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <SelectValue placeholder="All Payments" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Payments</SelectItem>
-                      {PAYMENT_STATUSES.map(status => (
-                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="hidden md:block">
+                    <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
+                        <SelectValue placeholder="All Payments" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Payments</SelectItem>
+                        {PAYMENT_STATUSES.map(status => (
+                          <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -4615,9 +4746,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
                     const visitTransactions = (appointment.transactions || []).filter((txn) =>
                       Number(txn.amount || 0) > 0 &&
-                      !isPaymentLogLikeRow(txn) &&
-                      (canSeeDeletedPayments || !isSoftDeletedPaymentTransaction(txn))
-                    );
+                      !isPaymentLogLikeRow(txn)
+                    ).sort((a, b) => comparePaymentTransactionsByDate(a, b, "desc"));
 
                     return (
                       <div key={appointmentId} className="grid gap-3 xl:grid-cols-[7.5rem_minmax(0,1fr)]">
@@ -4697,21 +4827,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div className="grid gap-2 border-slate-200 text-sm sm:grid-cols-3 xl:grid-cols-1 xl:border-l xl:pl-5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Total</span>
-                                <span className="font-black text-slate-900">{formatPatientHistoryCurrency(appointment.price)}</span>
+                                <span className="font-black text-slate-900"><CurrencyText value={formatPatientHistoryCurrency(appointment.price)} /></span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Paid</span>
-                                <span className={isPaid ? "font-black text-emerald-600" : "font-black text-slate-900"}>{formatPatientHistoryCurrency(appointment.totalPaid)}</span>
+                                <span className={isPaid ? "font-black text-emerald-600" : "font-black text-slate-900"}><CurrencyText value={formatPatientHistoryCurrency(appointment.totalPaid)} /></span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-slate-500">Balance</span>
                                 {isVoidedAppointment && originalDisplayedBalance > 0 ? (
                                   <span className="font-black">
-                                    <span className="text-red-500 line-through decoration-red-400 decoration-2">{formatPatientHistoryCurrency(originalDisplayedBalance)}</span>
-                                    <span className="ml-2 text-emerald-600">PHP 0</span>
+                                    <span className="text-red-500 line-through decoration-red-400 decoration-2"><CurrencyText value={formatPatientHistoryCurrency(originalDisplayedBalance)} /></span>
+                                    <span className="ml-2 text-emerald-600"><CurrencyText value={formatPatientHistoryCurrency(0)} /></span>
                                   </span>
                                 ) : (
-                                  <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}>{formatPatientHistoryCurrency(displayedBalance)}</span>
+                                  <span className={displayedBalance > 0 ? "font-black text-red-600" : "font-black text-emerald-600"}><CurrencyText value={formatPatientHistoryCurrency(displayedBalance)} /></span>
                                 )}
                               </div>
                             </div>
@@ -4866,7 +4996,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                             <div className="flex flex-wrap items-center gap-2">
                                               <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
                                               <span className="font-semibold text-slate-400">-</span>
-                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                              <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
+                                                <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                              </span>
                                               {paymentDisplay.label ? (
                                                 <PaymentTransactionStatusBadge
                                                   display={paymentDisplay}
@@ -4883,7 +5015,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                          <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
+                                            <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                          </span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3 md:block">
                                           <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
@@ -4930,7 +5064,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                                 <span className="sr-only">Delete payment</span>
                                               </Button>
                                             </>
-                                          ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                          ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                             <Button
                                               type="button"
                                               variant="outline"
@@ -4994,7 +5128,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
-                <div className={`grid gap-3 ${doctorFilter ? "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]" : "lg:grid-cols-[minmax(14rem,1.7fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_auto_auto]"}`}>
+                <div className="grid grid-cols-[minmax(0,1fr)_3rem] gap-3 md:grid-cols-[minmax(220px,1fr)_3rem_180px_180px_180px_auto_auto] xl:grid-cols-[minmax(280px,1fr)_3rem_190px_190px_190px_auto_auto]">
                   <div className="relative min-w-0">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <Input
@@ -5004,17 +5138,115 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       className="h-12 rounded-lg border-slate-200 bg-white pl-11 text-sm font-medium shadow-none placeholder:text-slate-400"
                     />
                   </div>
-                  <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
-                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
-                      <SelectValue placeholder="All Methods" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniquePaymentMethods.map(method => (
-                        <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-12 w-12 rounded-lg border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                        title="Payment history filters"
+                        aria-label="Payment history filters"
+                      >
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-[70vh] w-72 overflow-y-auto">
+                      <DropdownMenuLabel>Payment filters</DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        Filters: {paymentMethodLabel} / {paymentDoctorLabel} / {paymentProcedureLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuLabel className="max-w-full truncate text-xs font-semibold text-slate-500">
+                        {paymentSortLabel} / {paymentDeletedLabel}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Methods</DropdownMenuLabel>
+                      {uniquePaymentMethods.map((method) => (
+                        <DropdownMenuItem
+                          key={String(method)}
+                          className={activeHistoryFilterItemClass(paymentMethodFilter === method)}
+                          onSelect={() => setPaymentMethodFilter(String(method))}
+                        >
+                          {method === "all" ? "All Methods" : String(method)}
+                        </DropdownMenuItem>
                       ))}
-                    </SelectContent>
-                  </Select>
-                  {!doctorFilter && (
+                      {!doctorFilter ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-slate-500">Doctors</DropdownMenuLabel>
+                          {uniquePaymentDoctors.map((doctor) => (
+                            <DropdownMenuItem
+                              key={String(doctor)}
+                              className={activeHistoryFilterItemClass(paymentDoctorFilter === doctor)}
+                              onSelect={() => setPaymentDoctorFilter(String(doctor))}
+                            >
+                              {String(doctor) === "all" ? "All Doctors" : String(doctor)}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      ) : null}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Procedures</DropdownMenuLabel>
+                      {uniquePaymentProcedures.map((procedure) => (
+                        <DropdownMenuItem
+                          key={String(procedure)}
+                          className={activeHistoryFilterItemClass(paymentProcedureFilter === procedure)}
+                          onSelect={() => setPaymentProcedureFilter(String(procedure))}
+                        >
+                          {String(procedure) === "all" ? "All Procedures" : String(procedure)}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Sort</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(paymentDateSortDirection === "desc")}
+                        onSelect={() => setPaymentDateSortDirection("desc")}
+                      >
+                        Newest Paid
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(paymentDateSortDirection === "asc")}
+                        onSelect={() => setPaymentDateSortDirection("asc")}
+                      >
+                        Oldest Paid
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-slate-500">Deleted payments</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(!showDeletedPayments)}
+                        onSelect={() => setShowDeletedPayments(false)}
+                      >
+                        Hide deleted payments
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={activeHistoryFilterItemClass(showDeletedPayments)}
+                        onSelect={() => setShowDeletedPayments(true)}
+                      >
+                        Show deleted payments
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={clearPaymentFilters}>
+                        Reset filters
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className="hidden md:block">
+                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                      <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                        <SelectValue placeholder="All Methods" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniquePaymentMethods.map(method => (
+                          <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {!doctorFilter ? (
+                    <div className="hidden md:block">
                     <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
                       <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
                         <SelectValue placeholder="All Doctors" />
@@ -5025,21 +5257,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         ))}
                       </SelectContent>
                     </Select>
+                    </div>
+                  ) : (
+                    <div className="hidden md:block" />
                   )}
-                  <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
-                    <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
-                      <SelectValue placeholder="All Procedures" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {uniquePaymentProcedures.map(proc => (
-                        <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                  <div className="hidden md:block">
+                    <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
+                      <SelectTrigger className="h-12 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-none">
+                        <SelectValue placeholder="All Procedures" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uniquePaymentProcedures.map(proc => (
+                          <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                    className="hidden h-12 rounded-lg border-slate-200 px-4 text-sm font-bold text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 md:inline-flex"
                     onClick={() => setPaymentDateSortDirection((direction) => direction === "desc" ? "asc" : "desc")}
                     title="Sort by payment date"
                   >
@@ -5053,7 +5292,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50"
+                    className="hidden h-12 rounded-lg border-violet-300 px-4 text-sm font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50 md:inline-flex"
                     onClick={clearPaymentFilters}
                     disabled={!hasPaymentFilters}
                   >
@@ -5065,48 +5304,57 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </CardHeader>
 
             <CardContent className="space-y-8 p-5 pt-0 sm:p-7 sm:pt-0">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                      <CreditCard className="h-7 w-7" />
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 sm:h-11 sm:w-11">
+                      <CreditCard className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Paid</p>
-                      <p className="mt-1 truncate text-2xl font-black text-emerald-600">
-                        {formatPatientHistoryCurrency(paymentSummary.totalPaid)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Total Paid</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-emerald-600">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.totalPaid)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Paid</span>
+                      </div>
                     </div>
                   </div>
-                  <CheckCircle className="h-8 w-8 shrink-0 text-emerald-600" />
+                  <CheckCircle className="h-5 w-5 shrink-0 text-emerald-600" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                      <AlertTriangle className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 sm:h-11 sm:w-11">
+                      <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Outstanding</p>
-                      <p className="mt-1 truncate text-2xl font-black text-red-600">
-                        {formatPatientHistoryCurrency(paymentSummary.outstanding)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Outstanding</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-red-600">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.outstanding)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600">Due</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
-                <div className="flex min-h-[7rem] items-center justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/50">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-                      <FileText className="h-7 w-7" />
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-md shadow-slate-200/50 sm:p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 sm:h-11 sm:w-11">
+                      <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-500">Total Billed</p>
-                      <p className="mt-1 truncate text-2xl font-black text-slate-950">
-                        {formatPatientHistoryCurrency(paymentSummary.totalBilled)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-black text-slate-500">Total Billed</p>
+                      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+                        <span className="max-w-[calc(100%-2rem)] shrink-0 truncate text-xl font-black text-slate-950">
+                          <CurrencyText value={formatPatientHistoryCurrency(paymentSummary.totalBilled)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">Billed</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="h-7 w-7 shrink-0 text-slate-700" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-500" />
                 </div>
               </div>
 
@@ -5177,7 +5425,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
                                 <div className="sm:text-right">
                                   <div className="text-2xl font-black text-emerald-600">
-                                    <span className={isInactivePayment ? "text-gray-600" : ""}>{formatPatientHistoryCurrency(txn.amount)}</span>
+                                    <span className={isInactivePayment ? "text-gray-600" : ""}>
+                                      <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                    </span>
                                   </div>
                                   <div className="mt-2">
                                     <PaymentTransactionStatusBadge display={paymentDisplay} />
@@ -5217,7 +5467,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         <span className="sr-only">Delete Payment</span>
                                       </Button>
                                     </>
-                                  ) : effectiveRole === "admin" && isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                  ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
                                     <Button
                                       variant="outline"
                                       className="h-12 rounded-lg border-emerald-200 bg-white px-4 text-sm font-black uppercase text-emerald-700 shadow-md shadow-slate-200/60 hover:bg-emerald-50"
@@ -5263,6 +5513,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         doctorLabel={rescheduleDoctorName || "Unassigned"}
         selectedDate={rescheduleDate}
         selectedTime={rescheduleTime}
+        selectedDuration={rescheduleDuration}
+        onDurationChange={setRescheduleDuration}
+        status={rescheduleStatus}
+        statusOptions={APPOINTMENT_STATUSES}
+        onStatusChange={setRescheduleStatus}
         onDateClick={() => setIsRescheduleDatePickerOpen(true)}
         onTimeClick={() => setIsRescheduleTimePickerOpen(true)}
         onSave={handleSaveReschedule}
@@ -5449,29 +5704,51 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         onSecondary={handleDiscardRecoveredDraft}
         loading={isRecoverySaving}
       />
-      {/* Record Payment Dialog is now a separate component */}
-      <ConfirmDialog
-        open={pdIsConfirmOpen}
-        onOpenChange={(open: boolean) => {
-          if (!open) setPdConfirmAction(null);
-          setPdIsConfirmOpen(open);
+      <DeletePaymentDialog
+        open={Boolean(pdPaymentToDelete)}
+        onOpenChange={(open) => {
+          if (!open && !pdConfirmLoading) setPdPaymentToDelete(null);
         }}
-        title={pdConfirmTitle || "Confirm"}
-        message={pdConfirmMessage || "Are you sure?"}
         loading={pdConfirmLoading}
-        onConfirm={async () => {
-          if (pdConfirmAction) {
-            try {
-              setPdConfirmLoading(true);
-              await pdConfirmAction();
-            } finally {
-              setPdConfirmLoading(false);
-              setPdConfirmAction(null);
-            }
+        description="This will mark the payment as deleted and update the appointment balance. It can be restored later from deleted payment views."
+        details={pdPaymentToDelete ? {
+          amountLabel: formatPatientHistoryCurrency(pdPaymentToDelete.transaction.amount),
+          patientName: pdPaymentToDelete.transaction.patientName,
+          appointmentLabel: pdPaymentToDelete.transaction.appointmentType,
+          dateLabel: formatPatientLogDate(
+            (pdPaymentToDelete.transaction as any).paymentDate || pdPaymentToDelete.transaction.date,
+            ""
+          ),
+          method: pdPaymentToDelete.transaction.method,
+          reference: pdPaymentToDelete.transaction.transactionId || pdPaymentToDelete.transaction.id,
+        } : null}
+        onConfirm={confirmDeletePaymentTransaction}
+      />
+      <SignatureInputModal
+        open={Boolean(consentSignatureModalTarget)}
+        onOpenChange={(open) => {
+          if (!open) setConsentSignatureModalTarget(null);
+        }}
+        value={
+          consentSignatureModalTarget === "dentist"
+            ? consentForm.dentistSignatureImage
+            : consentForm.patientSignatureImage
+        }
+        title={consentSignatureModalTarget === "dentist" ? "Dentist Signature" : "Patient Signature"}
+        description={
+          consentSignatureModalTarget === "dentist"
+            ? "Add the dentist signature for this consent form."
+            : "Add the patient, parent, or guardian signature for this consent form."
+        }
+        signatureLabel={consentSignatureModalTarget === "dentist" ? "Dentist Signature" : "Patient / Parent / Guardian Signature"}
+        disabled={isSavingConsent}
+        onSave={(signatureImage) => {
+          if (consentSignatureModalTarget === "dentist") {
+            updateConsentField("dentistSignatureImage", signatureImage);
+          } else {
+            updateConsentField("patientSignatureImage", signatureImage);
           }
         }}
-        confirmLabel="Yes"
-        cancelLabel="No"
       />
 
       {/* Appointment Snapshot Dialog */}

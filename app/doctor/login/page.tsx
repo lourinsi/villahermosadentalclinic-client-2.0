@@ -1,7 +1,5 @@
 "use client";
 
-import { apiUrl } from "@/lib/api";
-
 import React, { useState } from "react";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useRouter } from "next/navigation";
@@ -32,28 +30,15 @@ export default function DoctorLoginPage() {
 
     try {
       setIsSubmitting(true);
-      await login(username, password);
-      
-      // The user is now logged in, but we must verify their role for this portal
-      const response = await fetch(apiUrl("/api/auth/verify"), {
-        method: "GET",
-        credentials: "include",
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const dashboardPath = getManagementDashboardPath(data.user?.role);
-        if (dashboardPath && data.user?.role === "doctor") {
-          toast.success("Doctor login successful!");
-          router.push(dashboardPath);
-        } else {
-          // Wrong portal! Logout immediately
-          await logout();
-          toast.error("Unauthorized: This portal is for Doctors only.");
-        }
+      const authenticatedUser = await login(username, password);
+      const dashboardPath = getManagementDashboardPath(authenticatedUser.role);
+      if (dashboardPath && authenticatedUser.role === "doctor") {
+        toast.success("Doctor login successful!");
+        router.push(dashboardPath);
       } else {
+        // Wrong portal! Logout immediately.
         await logout();
-        toast.error("Verification failed. Please try again.");
+        toast.error("Unauthorized: This portal is for Doctors only.");
       }
     } catch (error) {
       console.error("[DOCTOR LOGIN] Error:", error);

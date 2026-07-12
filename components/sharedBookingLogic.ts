@@ -409,7 +409,7 @@ const toBookingHistoryNumber = (value: unknown): number | null => {
 
 export function formatBookingHistoryMoney(value: unknown) {
   const numeric = Math.abs(toBookingHistoryNumber(value) ?? 0);
-  return `PHP ${numeric.toLocaleString()}`;
+  return `\u20b1${numeric.toLocaleString()}`;
 }
 
 export function getBookingPaymentAdjustment(log: any) {
@@ -672,14 +672,6 @@ export function getDefaultBookingPaymentDate(now: Date = new Date()) {
 
 export function normalizeBookingPaymentDate(dateInput?: Date | string | null) {
   return formatBookingDateKey(dateInput);
-}
-
-export function isFutureBookingPaymentDate(dateInput?: Date | string | null, now: Date = new Date()) {
-  const paymentDate = parseLocalDateOnly(dateInput);
-  if (!paymentDate) return false;
-
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return paymentDate.getTime() > today.getTime();
 }
 
 export function formatBookingPaymentDateLabel(dateInput?: Date | string | null) {

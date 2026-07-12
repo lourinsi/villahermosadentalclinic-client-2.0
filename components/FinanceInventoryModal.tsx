@@ -261,7 +261,7 @@ export function FinanceInventoryModal({
             {renderFieldError("unit")}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="inventory-cost">Unit Cost (PHP)</Label>
+            <Label htmlFor="inventory-cost">Unit Cost ({"\u20b1"})</Label>
             <Input
               id="inventory-cost"
               type="number"
