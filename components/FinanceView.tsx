@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { FinanceExpenseModal, type FinanceExpenseModalMode } from "./FinanceExpenseModal";
+import { FinanceExpenseModal, type FinanceExpenseModalMode, type InitialExpensePayment } from "./FinanceExpenseModal";
 import ExpenseHistoryView from "./ExpenseHistoryView";
 import { FinanceExpensePaymentModal, type ExpensePayment } from "./FinanceExpensePaymentModal";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
@@ -833,6 +833,39 @@ const getFinancePaymentStatusDisplay = (transaction: RecentTransaction) => {
 const isCountableIncomeTransaction = (transaction: RecentTransaction) =>
   transaction.type === "income" && !isSoftDeletedPaymentTransaction(transaction);
 
+type ExpenseTimelinePaymentHistoryProps = {
+  expense: DetailedExpense;
+  payments: ExpensePayment[];
+  canManage: boolean;
+  onCreate: () => void;
+  onView: (payment: ExpensePayment) => void;
+  onEdit: (payment: ExpensePayment) => void;
+  onDelete: (payment: ExpensePayment) => void;
+  onRestore: (payment: ExpensePayment) => void;
+};
+
+const ExpenseTimelinePaymentHistory = ({ expense, payments, canManage, onCreate, onView, onEdit, onDelete, onRestore }: ExpenseTimelinePaymentHistoryProps) => {
+  const rows = [...payments].sort((left, right) => String(right.paymentDate || right.date || right.createdAt || "").localeCompare(String(left.paymentDate || left.date || left.createdAt || "")));
+  return (
+    <section className="mt-5 border-t border-slate-100 pt-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2"><Wallet className="h-4 w-4 text-violet-600" /><h5 className="text-sm font-black text-slate-950">Payment History</h5><span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">{rows.length}</span></div>
+        {!expense.deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-violet-200 text-xs font-black text-violet-700 hover:bg-violet-50" onClick={onCreate}><Plus className="mr-1.5 h-3.5 w-3.5" />Record payment</Button> : null}
+      </div>
+      {rows.length === 0 ? <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">No payments recorded for this expense.</div> : <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="hidden grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid"><span>Payment method</span><span>Amount</span><span>Date</span><span>Reference no.</span><span className="text-right">Actions</span></div>
+        <div className="divide-y divide-slate-100">{rows.map((payment) => { const deleted = Boolean(payment.deleted); const method = formatOptionLabel(payment.method, PAYMENT_METHOD_OPTIONS); const date = payment.paymentDate || payment.date; return <div key={payment.id} className={`grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] md:items-center ${deleted ? "bg-slate-50 text-slate-400" : "bg-white"}`}>
+          <div className="flex min-w-0 items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${deleted ? "bg-slate-100 text-slate-400" : "bg-violet-50 text-violet-700"}`}><CreditCard className="h-4 w-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`truncate font-black ${deleted ? "text-slate-500" : "text-slate-900"}`}>{method}</span><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${deleted ? "bg-slate-200 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>{deleted ? "Deleted" : "Payment"}</span></div>{payment.notes ? <p className="mt-0.5 line-clamp-1 text-xs font-medium text-slate-500">{payment.notes}</p> : null}</div></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span><span className={`font-black ${deleted ? "text-slate-500" : "text-emerald-600"}`}>{formatCurrency(payment.amount)}</span></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span><span className="font-bold text-slate-700">{formatFinanceDate(date)}</span></div>
+          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span><span className="font-mono text-xs font-bold text-slate-600">{payment.transactionId ? `Ref: ${payment.transactionId}` : "—"}</span></div>
+          <div className="flex items-center justify-end gap-1.5"><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onView(payment)} title="View payment"><Eye className="h-3.5 w-3.5" /></Button>{canManage ? deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-emerald-200 px-2 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-50" onClick={() => onRestore(payment)}><RotateCcw className="mr-1 h-3.5 w-3.5" />Restore</Button> : <><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onEdit(payment)} title="Edit payment"><Edit className="h-3.5 w-3.5" /></Button><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-red-100 text-red-600 hover:bg-red-50" onClick={() => onDelete(payment)} title="Delete payment"><Trash2 className="h-3.5 w-3.5" /></Button></> : null}</div>
+        </div>; })}</div>
+      </div>}
+    </section>
+  );
+};
+
 export function FinanceView() {
   const { effectiveRole } = useAdminViewMode();
   const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
@@ -843,7 +876,9 @@ export function FinanceView() {
   const [expenseModalMode, setExpenseModalMode] = useState<FinanceExpenseModalMode | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<DetailedExpense | null>(null);
   const [expenseSnapshot, setExpenseSnapshot] = useState<DetailedExpense | null>(null);
+  const [expenseSnapshotPaymentId, setExpenseSnapshotPaymentId] = useState("");
   const [expenseForm, setExpenseForm] = useState(createEmptyExpense);
+  const [expenseInitialPayment, setExpenseInitialPayment] = useState<InitialExpensePayment>({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
   const [expenseFieldErrors, setExpenseFieldErrors] = useState<ExpenseFieldErrors>({});
   const [expenseToPay, setExpenseToPay] = useState<DetailedExpense | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<DetailedExpense | null>(null);
@@ -1089,7 +1124,7 @@ export function FinanceView() {
     const loadPaymentLedgers = async () => {
       const rows = await Promise.all(detailedExpenses.map(async (expense) => {
         try {
-          const payments = await fetchApiData<ExpensePayment[]>(`/api/finance/detailed-expenses/${encodeURIComponent(expense.id)}/payments`, "expense payments");
+          const payments = await fetchApiData<ExpensePayment[]>(`/api/finance/detailed-expenses/${encodeURIComponent(expense.id)}/payments${canDeleteExpenses ? "?includeDeleted=true" : ""}`, "expense payments");
           return [expense.id, payments || []] as const;
         } catch { return [expense.id, []] as const; }
       }));
@@ -1099,7 +1134,7 @@ export function FinanceView() {
     const refresh = () => void loadPaymentLedgers();
     window.addEventListener("expense-payments:updated", refresh);
     return () => { active = false; window.removeEventListener("expense-payments:updated", refresh); };
-  }, [detailedExpenses]);
+  }, [canDeleteExpenses, detailedExpenses]);
 
   const filteredDetailedExpenses = useMemo(() => {
     const periodRange = getPeriodRange(timePeriodFilter);
@@ -1458,11 +1493,13 @@ export function FinanceView() {
     setSelectedExpense(expense || null);
     setExpenseForm(expense ? createExpenseFormFromExpense(expense) : createEmptyExpense());
     setExpenseFieldErrors({});
+    setExpenseInitialPayment({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
     setExpenseModalMode(mode);
   };
 
-  const openExpenseSnapshot = (expense: DetailedExpense) => {
+  const openExpenseSnapshot = (expense: DetailedExpense, paymentId = "") => {
     setExpenseSnapshot(expense);
+    setExpenseSnapshotPaymentId(paymentId);
     resetFinanceHistory();
     void loadFinanceHistory("expense", { entityId: expense.id });
   };
@@ -1471,6 +1508,7 @@ export function FinanceView() {
     const liveExpense = detailedExpenses.find((item) => item.id === expense.id) || expenseSnapshot;
     if (!liveExpense) return;
     setExpenseSnapshot(null);
+    setExpenseSnapshotPaymentId("");
     openExpenseModal("edit", liveExpense);
   };
 
@@ -1478,6 +1516,7 @@ export function FinanceView() {
     setExpenseModalMode(null);
     setSelectedExpense(null);
     setExpenseForm(createEmptyExpense());
+    setExpenseInitialPayment({ amount: 0, paymentDate: todayDate(), method: "cash", transactionId: "", notes: "" });
     setExpenseFieldErrors({});
     resetFinanceHistory();
   };
@@ -1515,6 +1554,7 @@ export function FinanceView() {
     if (!expenseForm.description.trim()) requiredErrors.description = "Enter a description.";
     const price = Math.max(0, Number(expenseForm.price) || 0);
     const totalPaid = expenseModalMode === "edit" && selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0;
+    const initialPaymentAmount = expenseModalMode === "create" ? Math.max(0, Number(expenseInitialPayment.amount) || 0) : 0;
     if (price <= 0) requiredErrors.price = "Enter a total price greater than zero.";
 
     if (Object.keys(requiredErrors).length > 0) {
@@ -1523,8 +1563,14 @@ export function FinanceView() {
       return;
     }
 
-    if (totalPaid > price && !confirmedOverpayment) {
-      setExpenseOverpaymentAdjustedPrice(String(totalPaid));
+    if (initialPaymentAmount > 0 && !expenseInitialPayment.paymentDate) {
+      toast.error("Choose the initial payment date");
+      return;
+    }
+
+    const paymentToCompare = totalPaid || initialPaymentAmount;
+    if (paymentToCompare > price + 0.01 && !confirmedOverpayment) {
+      setExpenseOverpaymentAdjustedPrice(String(paymentToCompare));
       setExpenseOverpaymentAction("save");
       return;
     }
@@ -1578,7 +1624,36 @@ export function FinanceView() {
       toast.success(isEditingExpense ? "Expense updated" : "Expense added");
       closeExpenseModal();
       await fetchData();
-      if (!isEditingExpense && addPaymentAfterSave && savedExpense) openExpensePaymentModal(savedExpense);
+      let expenseAfterCreate = savedExpense;
+      if (!isEditingExpense && initialPaymentAmount > 0 && savedExpense) {
+        try {
+          const paymentResult = await fetchApiData<{ payment: ExpensePayment; expense: DetailedExpense }>(
+            `/api/finance/detailed-expenses/${encodeURIComponent(savedExpense.id)}/payments`,
+            "initial expense payment",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                amount: initialPaymentAmount,
+                method: expenseInitialPayment.method || "cash",
+                paymentDate: expenseInitialPayment.paymentDate,
+                transactionId: expenseInitialPayment.transactionId.trim() || undefined,
+                notes: expenseInitialPayment.notes.trim() || undefined,
+                origin: "initial_expense_creation",
+                overpaymentPolicy: adjustedPrice !== undefined ? "increase_expense_price" : "allow",
+                ...(adjustedPrice !== undefined ? { adjustedPrice: effectivePrice } : {}),
+              }),
+            }
+          );
+          expenseAfterCreate = paymentResult?.expense || savedExpense;
+          window.dispatchEvent(new CustomEvent("expense-payments:updated", { detail: { expenseId: savedExpense.id } }));
+          window.dispatchEvent(new CustomEvent("expenses:updated"));
+          await fetchData();
+          toast.success("Initial payment recorded");
+        } catch (paymentError) {
+          toast.error(`Expense added, but the initial payment could not be recorded: ${paymentError instanceof Error ? paymentError.message : "Unknown error"}`);
+        }
+      }
+      if (!isEditingExpense && addPaymentAfterSave && expenseAfterCreate) openExpensePaymentModal(expenseAfterCreate);
     } catch (error) {
       console.error("Error saving expense:", error);
       toast.error(error instanceof Error ? error.message : "Failed to save expense");
@@ -2635,7 +2710,10 @@ export function FinanceView() {
       }
 
       if (expense) {
-        openExpenseSnapshot(expense);
+        openExpenseSnapshot(
+          expense,
+          isExpensePaymentTransaction(transaction) ? getExpensePaymentTransactionId(transaction) : ""
+        );
         return;
       }
 
@@ -3280,11 +3358,11 @@ export function FinanceView() {
                       <div className="relative space-y-5 pl-7 sm:pl-11">
                         <div className="absolute bottom-8 left-[13px] top-8 border-l-2 border-dashed border-violet-100 sm:left-[17px]" />
                         {filteredDetailedExpenses.map((expense) => {
-                          const totalPrice = getExpenseTotalPrice(expense); const totalPaid = getExpenseTotalPaid(expense); const balance = getExpenseBalance(expense); const deleted = isDeletedExpenseRecord(expense); const dateParts = getFinanceTimelineDateParts(expense.date); const normalizedStatus = normalizeFilterValue(expense.status); const paymentRows = (expensePaymentsByExpense[expense.id] || expense.payments || []).filter((payment) => !payment.deleted).sort((a, b) => String(b.date).localeCompare(String(a.date))); const latestPayment = paymentRows[0] || expense.latestPayment; const paymentCount = paymentRows.length || expense.paymentCount || 0; const paidPercent = totalPrice > 0 ? Math.min(100, Math.max(0, (totalPaid / totalPrice) * 100)) : 0;
+                          const totalPrice = getExpenseTotalPrice(expense); const totalPaid = getExpenseTotalPaid(expense); const balance = getExpenseBalance(expense); const deleted = isDeletedExpenseRecord(expense); const dateParts = getFinanceTimelineDateParts(expense.date); const normalizedStatus = normalizeFilterValue(expense.status); const paymentRows = (expensePaymentsByExpense[expense.id] || expense.payments || []).sort((a, b) => String(b.paymentDate || b.date || b.createdAt || "").localeCompare(String(a.paymentDate || a.date || a.createdAt || ""))); const paymentCount = paymentRows.filter((payment) => !payment.deleted).length || expense.paymentCount || 0;
                           return <article key={expense.id} className="relative"><span className={`absolute -left-[1.55rem] top-9 h-4 w-4 rounded-full border-4 border-white shadow sm:-left-[2.15rem] ${deleted ? "bg-slate-400" : normalizedStatus === "paid" ? "bg-emerald-500" : "bg-violet-600"}`} /><div className={`rounded-2xl border p-4 shadow-sm transition hover:border-violet-200 hover:shadow-md sm:p-5 ${deleted ? "border-red-100 bg-red-50/40" : "border-slate-200 bg-white"}`}>
                             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 gap-4"><div className="hidden w-20 shrink-0 border-r border-slate-100 pr-4 text-center sm:block"><div className="text-xs font-black tracking-widest text-violet-600">{dateParts.month}</div><div className="text-3xl font-black text-slate-950">{dateParts.day}</div><div className="text-xs font-bold text-slate-400">{dateParts.year}</div></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h4 className="truncate text-lg font-black text-slate-950">{expense.description}</h4><Badge className={deleted ? deletedPaymentBadgeClass : normalizedStatus === "paid" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{deleted ? "Deleted" : formatOptionLabel(expense.status, EXPENSE_STATUS_OPTIONS)}</Badge></div><p className="mt-1 text-sm font-semibold text-slate-500">{formatOptionLabel(expense.category, EXPENSE_CATEGORY_OPTIONS)}{expense.vendor ? <>{" · "}{expense.vendor}</> : null}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-bold text-slate-500"><span>{formatFinanceDate(expense.date)}</span><span>{paymentCount} payment{paymentCount === 1 ? "" : "s"}</span>{expense.inventoryItemId ? <span className="text-violet-700">Inventory linked</span> : null}</div></div></div>
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid grid-cols-3 gap-4 sm:min-w-[330px]"><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Price</p><p className="mt-1 font-black text-slate-950">{formatCurrency(totalPrice)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Paid</p><p className="mt-1 font-black text-emerald-600">{formatCurrency(totalPaid)}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Balance</p><p className={`mt-1 font-black ${balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>{formatCurrency(balance)}</p></div></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => openExpenseSnapshot(expense)}><Eye className="mr-1 h-3.5 w-3.5" />View</Button>{!deleted ? <Button size="sm" onClick={() => openExpensePaymentModal(expense)} className="bg-violet-600 hover:bg-violet-700"><Plus className="mr-1 h-3.5 w-3.5" />Payment</Button> : null}<DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="h-9 w-9" aria-label="More expense actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{deleted ? <DropdownMenuItem onClick={() => handleRestoreExpense(expense)}><RotateCcw className="mr-2 h-4 w-4" />Restore expense</DropdownMenuItem> : <><DropdownMenuItem onClick={() => openExpenseModal("edit", expense)}><Edit className="mr-2 h-4 w-4" />Edit expense</DropdownMenuItem>{canDeleteExpenses ? <DropdownMenuItem onClick={() => openExpenseDeleteDialog(expense)} className="text-red-700"><Trash2 className="mr-2 h-4 w-4" />Delete expense</DropdownMenuItem> : null}</>}</DropdownMenuContent></DropdownMenu></div></div></div>
-                            <div className="mt-5 border-t border-slate-100 pt-4"><div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-wider"><span className="text-slate-500">Payment progress</span><span className={balance > 0 ? "text-amber-700" : "text-emerald-700"}>{Math.round(paidPercent)}% paid</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${paidPercent}%` }} /></div><div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">{latestPayment ? <span className="rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-emerald-800">Latest: {formatCurrency(latestPayment.amount)}{" · "}{formatOptionLabel(latestPayment.method, PAYMENT_METHOD_OPTIONS)}{" · "}{formatFinanceDate(latestPayment.date)}</span> : <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-500">No payments yet</span>}{paymentRows.slice(0, 3).map((payment) => <span key={payment.id} className="inline-flex items-center gap-1 rounded-lg bg-violet-50 px-2 py-1 text-violet-700"><span className="h-1.5 w-1.5 rounded-full bg-violet-500" />{formatFinanceDate(payment.date)} · {formatCurrency(payment.amount)}</span>)}{paymentCount > 3 ? <span className="text-violet-700">+{paymentCount - 3} more</span> : null}</div></div>
+                            <ExpenseTimelinePaymentHistory expense={expense} payments={paymentRows} canManage={canDeleteExpenses} onCreate={() => openExpensePaymentModal(expense)} onView={(payment) => openExpenseSnapshot(expense, payment.id)} onEdit={(payment) => openExpensePaymentEditModal(expense, payment)} onDelete={(payment) => void handleDeleteExpensePayment(expense, payment)} onRestore={(payment) => void handleRestoreExpensePayment(expense, payment)} />
                           </div></article>;
                         })}
                       </div>
@@ -4180,9 +4258,11 @@ export function FinanceView() {
         originalInventoryQuantity={selectedExpense?.inventoryQuantity}
         totalPaid={selectedExpense ? getExpenseTotalPaid(selectedExpense) : 0}
         balance={selectedExpense ? getExpenseBalance(selectedExpense) : Number(expenseForm.price) || 0}
+        initialPayment={expenseInitialPayment}
         onCreateInventoryItem={() => openInventoryModal("create")}
         onOpenChange={(open) => !open && closeExpenseModal()}
         onFormChange={handleExpenseFormChange}
+        onInitialPaymentChange={setExpenseInitialPayment}
         onSave={() => void handleSaveExpense()}
         onSaveAndAddPayment={() => void handleSaveExpense(false, undefined, true)}
       />
@@ -4191,10 +4271,12 @@ export function FinanceView() {
         onOpenChange={(open) => {
           if (!open) {
             setExpenseSnapshot(null);
+            setExpenseSnapshotPaymentId("");
             resetFinanceHistory();
           }
         }}
         currentExpense={expenseSnapshot}
+        selectedPaymentId={expenseSnapshotPaymentId}
         historyLogs={financeHistoryLogs}
         isHistoryLoading={isFinanceHistoryLoading}
         historyError={financeHistoryError}
