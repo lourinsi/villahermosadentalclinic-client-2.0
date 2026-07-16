@@ -10,6 +10,9 @@ import {
   getBookingHistoryNotes,
   getBookingHistoryPaymentStatusChange,
   getBookingPaymentAdjustment,
+  getBookingTreatmentsValue,
+  getBookingTreatmentNotesValue,
+  getBookingToothNumbersValue,
   isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName,
   normalizeBookingHistoryStatus,
@@ -291,10 +294,26 @@ const getHistoryDetail = (log: BookingHistoryLog, userRole?: string) => {
     (log.newState?.date && log.newState.date !== log.previousState?.date) ||
     (log.newState?.time && log.newState.time !== log.previousState?.time)
   );
+  const previousTreatments = getBookingTreatmentsValue(log.previousState);
+  const nextTreatments = getBookingTreatmentsValue(log.newState);
+  const treatmentsChanged = Boolean(
+    previousTreatments.length !== nextTreatments.length ||
+    previousTreatments.some((treatment, index) => {
+      const nextTreatment = nextTreatments[index];
+      return (
+        !nextTreatment ||
+        String(treatment.type) !== String(nextTreatment.type) ||
+        String(treatment.customType || "") !== String(nextTreatment.customType || "")
+      );
+    })
+  );
   const treatmentChanged = Boolean(
+    treatmentsChanged ||
     (log.newState?.type && log.previousState && String(log.newState.type) !== String(log.previousState.type)) ||
     (log.newState?.customType && log.previousState && String(log.newState.customType) !== String(log.previousState.customType))
   );
+  const treatmentNotesChanged = getBookingTreatmentNotesValue(log.previousState) !== getBookingTreatmentNotesValue(log.newState);
+  const toothNumbersChanged = getBookingToothNumbersValue(log.previousState) !== getBookingToothNumbersValue(log.newState);
   const doctorChanged = getHistoryDoctorChange(log).changed;
   const statusChanged = Boolean(log.newState?.status && log.newState.status !== log.previousState?.status);
 
@@ -321,6 +340,8 @@ const getHistoryDetail = (log: BookingHistoryLog, userRole?: string) => {
   if (scheduleChanged) details.push("Schedule changed");
   if (doctorChanged) details.push("Doctor changed");
   if (treatmentChanged) details.push("Treatment changed");
+  if (treatmentNotesChanged) details.push("Treatment notes updated");
+  if (toothNumbersChanged) details.push("Tooth numbers updated");
 
   const prev = log.previousState;
   const next = log.newState;

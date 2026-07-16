@@ -88,6 +88,7 @@ interface ConfirmAppointmentModalProps {
   // Appointment details
   appointmentType: string;
   customAppointmentTypeName?: string;
+  serviceSummary?: string;
   selectedDate: Date;
   selectedTime: string;
   duration: string;
@@ -151,6 +152,7 @@ export function ConfirmAppointmentModal({
   doctorAvatar,
   appointmentType,
   customAppointmentTypeName,
+  serviceSummary,
   selectedDate,
   selectedTime,
   duration,
@@ -247,7 +249,7 @@ export function ConfirmAppointmentModal({
   }, [customRepeatDate, repeatOption, selectedDate]);
 
   const repeatDateLabel = computedRepeatTarget ? formatWordyDate(computedRepeatTarget) : undefined;
-  const treatmentName = appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType;
+  const treatmentName = serviceSummary ?? (appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType);
   const toothNumbersText = String(toothNumbers || "").trim();
   const treatmentNotesText = String(treatmentNotes || "").trim();
   const paymentDateLabel = paymentAmountNow > 0 ? formatBookingPaymentDateLabel(paymentDate) : "";

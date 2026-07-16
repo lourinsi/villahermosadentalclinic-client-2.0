@@ -52,12 +52,14 @@ import useSharedBookingLogic, {
   formatBookingPaymentDateLabel,
   isBookingPaymentDateDisabled,
   getBookingTreatmentNotesValue,
+  getBookingTreatmentsValue,
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   buildBookingTreatmentNotesPayload,
+  buildBookingTreatmentsPayload,
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
@@ -102,6 +104,12 @@ type BookingModalMemory = {
   notes: string;
   treatmentNotes: string;
   toothNumberEntries: string[];
+  additionalTreatmentSections: {
+    appointmentType?: string;
+    customAppointmentTypeName?: string;
+    treatmentNotes: string;
+    toothNumberEntries: string[];
+  }[];
   selectedDate: string;
   selectedTime: string;
   paymentMethod: string;
@@ -152,6 +160,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [notes, setNotes] = useState<string>("");
   const [treatmentNotes, setTreatmentNotes] = useState<string>("");
   const [toothNumberEntries, setToothNumberEntries] = useState<string[]>([""]);
+  const [additionalTreatmentSections, setAdditionalTreatmentSections] = useState<{
+    appointmentType?: string;
+    customAppointmentTypeName?: string;
+    treatmentNotes: string;
+    toothNumberEntries: string[];
+  }[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(getBookingDefaultDate(defaultDate));
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
@@ -177,6 +191,109 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (current.length <= 1) return [""];
       return current.filter((_, entryIndex) => entryIndex !== index);
     });
+  }, []);
+
+  const handleAddAdditionalTreatmentSection = useCallback(() => {
+    setAdditionalTreatmentSections((current) => [
+      ...current,
+      { appointmentType: "", customAppointmentTypeName: "", treatmentNotes: "", toothNumberEntries: [""] },
+    ]);
+  }, []);
+
+  const handleRemoveAdditionalTreatmentSection = useCallback((index: number) => {
+    setAdditionalTreatmentSections((current) => current.filter((_, sectionIndex) => sectionIndex !== index));
+  }, []);
+
+  const handleUpdateAdditionalTreatmentService = useCallback((sectionIndex: number, value: string) => {
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, currentIndex) =>
+        currentIndex === sectionIndex
+          ? {
+              ...section,
+              appointmentType: value,
+              customAppointmentTypeName: value === "Other" ? section.customAppointmentTypeName : "",
+            }
+          : section
+      )
+    );
+  }, []);
+
+  const handleUpdateAdditionalTreatmentCustomTypeName = useCallback((sectionIndex: number, value: string) => {
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, currentIndex) =>
+        currentIndex === sectionIndex
+          ? { ...section, customAppointmentTypeName: value }
+          : section
+      )
+    );
+  }, []);
+
+  const selectedAdditionalTreatmentNames = useMemo(
+    () => additionalTreatmentSections
+      .map((section) => section.appointmentType)
+      .filter((value): value is string => Boolean(value)),
+    [additionalTreatmentSections]
+  );
+
+  const isTreatmentOptionDisabled = useCallback(
+    (optionName: string, sectionIndex?: number) => {
+      if (optionName === "Other") return false;
+      const section = additionalTreatmentSections[sectionIndex ?? -1];
+      const currentSectionValue = section?.appointmentType || "";
+      if (optionName === currentSectionValue) return false;
+      if (appointmentType === optionName) return true;
+      return additionalTreatmentSections.some(
+        (sec, currentIndex) =>
+          currentIndex !== sectionIndex && sec.appointmentType === optionName
+      );
+    },
+    [appointmentType, additionalTreatmentSections]
+  );
+
+  const handleUpdateAdditionalTreatmentNotes = useCallback((index: number, value: string) => {
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, sectionIndex) =>
+        sectionIndex === index ? { ...section, treatmentNotes: value } : section
+      )
+    );
+  }, []);
+
+  const handleUpdateAdditionalTreatmentToothNumber = useCallback((sectionIndex: number, entryIndex: number, value: string) => {
+    const sanitizedValue = sanitizeToothNumberEntry(value);
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, currentIndex) => {
+        if (currentIndex !== sectionIndex) return section;
+        return {
+          ...section,
+          toothNumberEntries: section.toothNumberEntries.map((entry, index) =>
+            index === entryIndex ? sanitizedValue : entry
+          ),
+        };
+      })
+    );
+  }, []);
+
+  const handleAddAdditionalTreatmentToothNumber = useCallback((sectionIndex: number) => {
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, currentIndex) =>
+        currentIndex === sectionIndex
+          ? { ...section, toothNumberEntries: [...section.toothNumberEntries, ""] }
+          : section
+      )
+    );
+  }, []);
+
+  const handleRemoveAdditionalTreatmentToothNumber = useCallback((sectionIndex: number, entryIndex: number) => {
+    setAdditionalTreatmentSections((current) =>
+      current.map((section, currentIndex) => {
+        if (currentIndex !== sectionIndex) return section;
+        const updatedEntries = section.toothNumberEntries.filter((_, index) => index !== entryIndex);
+        return {
+          ...section,
+          toothNumberEntries: updatedEntries.length > 0 ? updatedEntries : [""],
+        };
+      })
+    );
   }, []);
 
   // New states for two-step flow
@@ -1237,8 +1354,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Notes from history remain visible in the AppointmentHistoryView below,
       // but they are not auto-copied into the editable notes field.
       setNotes('');
-      setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
-      setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
+      const existingTreatments = getBookingTreatmentsValue(appointmentToEdit);
+      if (existingTreatments.length > 0) {
+        const [firstTreatment, ...remainingTreatments] = existingTreatments;
+        setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
+        setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
+        setAdditionalTreatmentSections(
+          [
+            ...remainingTreatments.map((treatment: any) => ({
+              appointmentType: getAppointmentTypeName(treatment.type, treatment.customType),
+              customAppointmentTypeName: treatment.type === 6 ? String(treatment.customType || "") : "",
+              treatmentNotes: treatment.treatmentNotes || "",
+              toothNumberEntries: getBookingToothNumberEntries(treatment.toothNumbers),
+            })),
+          ]
+        );
+      } else {
+        setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
+        setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
+        setAdditionalTreatmentSections([]);
+      }
       setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
       setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment, including older snapshots that used doctorName.
@@ -1272,6 +1407,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setNotes('');
       setTreatmentNotes('');
       setToothNumberEntries(['']);
+      setAdditionalTreatmentSections([]);
       setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
       setSelectedTime(getBookingCreateTime(defaultTime));
       setAmountToPay('0');
@@ -1326,6 +1462,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       notes,
       treatmentNotes,
       toothNumberEntries,
+      additionalTreatmentSections,
       selectedDate: formatDateToYYYYMMDD(selectedDate),
       selectedTime,
       paymentMethod,
@@ -1346,7 +1483,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       customAppointmentTypeName,
       customPrice,
       customRepeatDate,
-      discount,
+        discount,
       duration,
       isRescheduling,
       modalStep,
@@ -1363,6 +1500,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       statusChangedByUser,
       toothNumberEntries,
       treatmentNotes,
+      additionalTreatmentSections,
     ]
   );
 
@@ -1378,6 +1516,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setNotes(memory.notes || "");
     setTreatmentNotes(memory.treatmentNotes || "");
     setToothNumberEntries(Array.isArray(memory.toothNumberEntries) && memory.toothNumberEntries.length > 0 ? memory.toothNumberEntries : [""]);
+    setAdditionalTreatmentSections(
+      Array.isArray(memory.additionalTreatmentSections)
+        ? memory.additionalTreatmentSections
+        : []
+    );
     setSelectedDate(parseLocalDateOnly(memory.selectedDate) || getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
     setSelectedTime(memory.selectedTime || "");
     setPaymentMethod(memory.paymentMethod || "");
@@ -1638,14 +1781,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     targetDoctor,
     targetPatientRecord,
     bookingDuration: followUpDuration,
-    treatmentNotesUpdate: followUpTreatmentNotesUpdate,
+    treatmentPayload,
   }: {
     followUpDate: Date;
     followUpStatus: string;
     targetDoctor: string;
     targetPatientRecord?: any;
     bookingDuration: number;
-    treatmentNotesUpdate: any;
+    treatmentPayload: any;
   }) => {
     const followUpDateStr = formatDateToYYYYMMDD(followUpDate);
     const followUpPayload: any = {
@@ -1660,7 +1803,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       price: finalPrice,
       discount: Number(discount) || 0,
       notes: buildFollowUpAppointmentNotes(notes, selectedDate, followUpDate),
-      ...followUpTreatmentNotesUpdate,
+      ...treatmentPayload,
       status: followUpStatus as any,
       paymentStatus: "unpaid",
       paymentMethod: "",
@@ -1734,6 +1877,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const bookingDuration = normalizeBookingDuration(duration);
       const treatmentNotesUpdate = buildBookingTreatmentNotesPayload(treatmentNotes, toothNumbers);
+      const treatmentSectionsPayload = buildBookingTreatmentsPayload([
+        {
+          type: getAppointmentTypeIndex(appointmentType),
+          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+          treatmentNotes: treatmentNotes,
+          toothNumbers: toothNumbers,
+        },
+        ...additionalTreatmentSections.map((section) => ({
+          type: getAppointmentTypeIndex(section.appointmentType || appointmentType),
+          customType: section.appointmentType === "Other" ? section.customAppointmentTypeName : undefined,
+          treatmentNotes: section.treatmentNotes,
+          toothNumbers: Array.isArray(section.toothNumberEntries) ? section.toothNumberEntries.filter(Boolean).join(', ') : undefined,
+        })),
+      ]);
+      const treatmentPayload = {
+        ...treatmentNotesUpdate,
+        ...treatmentSectionsPayload,
+      };
       const originalAppointmentNotes = repeatTargetDate
         ? buildRepeatAppointmentNotes(notes, selectedDate, repeatTargetDate)
         : notes;
@@ -1803,7 +1964,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes: originalAppointmentNotes,
-              ...treatmentNotesUpdate,
+              ...treatmentPayload,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               paymentMethod: paymentMethodPayload,
@@ -1825,7 +1986,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               price: finalPrice,
               discount: Number(discount) || 0,
               notes: originalAppointmentNotes,
-              ...treatmentNotesUpdate,
+              ...treatmentPayload,
               status: updateAppointmentStatus as any,
               paymentStatus: updatePaymentStatus as any,
               paymentMethod: paymentMethodPayload,
@@ -1887,7 +2048,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               targetDoctor: selectedDoctorForBooking,
               targetPatientRecord: selectedPatientRecord,
               bookingDuration,
-              treatmentNotesUpdate,
+              treatmentPayload,
             });
           }
         }
@@ -1932,7 +2093,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               ...bookingDoctorPayload,
               notes: originalAppointmentNotes,
-              ...treatmentNotesUpdate,
+              ...treatmentPayload,
               price: finalPrice,
               discount: Number(discount) || 0,
               status: autoStatus as any,
@@ -1962,7 +2123,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
-                ...treatmentNotesUpdate,
+                ...treatmentPayload,
                 // Include status/payment info so the public endpoint can persist non-cart bookings
                 status: autoStatus,
                 paymentStatus: paymentStatus,
@@ -2005,7 +2166,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   ...bookingDoctorPayload,
                   notes: originalAppointmentNotes,
-                  ...treatmentNotesUpdate,
+                  ...treatmentPayload,
                   price: finalPrice,
                   discount: Number(discount) || 0,
                   status: autoStatus as any,
@@ -2028,7 +2189,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 ...bookingDoctorPayload,
                 notes: originalAppointmentNotes,
-                ...treatmentNotesUpdate,
+                ...treatmentPayload,
                 price: finalPrice,
                 discount: Number(discount) || 0,
                 status: autoStatus as any,
@@ -2053,7 +2214,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             price: finalPrice,
             discount: Number(discount) || 0,
             notes: originalAppointmentNotes,
-            ...treatmentNotesUpdate,
+            ...treatmentPayload,
             status: autoStatus as any,
             paymentStatus: paymentStatus as any,
             paymentMethod: paymentMethodPayload,
@@ -2087,7 +2248,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               targetDoctor: selectedDoctorForBooking,
               targetPatientRecord: selectedPatientRecord,
               bookingDuration,
-              treatmentNotesUpdate,
+              treatmentPayload,
             });
           }
         }
@@ -2648,6 +2809,146 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       disabled={isPatientReadonly}
                       textareaClassName="min-h-[100px]"
                     />
+
+                    <div className="space-y-4 pt-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="text-sm font-bold text-gray-700">Additional Treatment Sections</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAddAdditionalTreatmentSection}
+                          disabled={isPatientReadonly}
+                        >
+                          Add treatment
+                        </Button>
+                      </div>
+
+                      {additionalTreatmentSections.length > 0 && (
+                        <div className="space-y-4">
+                          {additionalTreatmentSections.map((section, sectionIndex) => (
+                            <div key={sectionIndex} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                              <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                                <span className="text-sm font-semibold text-gray-700">Treatment {sectionIndex + 2}</span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleRemoveAdditionalTreatmentSection(sectionIndex)}
+                                  disabled={isPatientReadonly}
+                                  aria-label={`Remove treatment ${sectionIndex + 2}`}
+                                  className="text-red-500 hover:bg-red-50"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+
+                              <div className="space-y-2 pb-3">
+                                <Label className="text-sm font-bold text-gray-700">Treatment Service</Label>
+                                <Select
+                                  value={section.appointmentType || ""}
+                                  onValueChange={(value) => handleUpdateAdditionalTreatmentService(sectionIndex, value)}
+                                  disabled={isPatientReadonly}
+                                >
+                                  <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                                    <SelectValue placeholder="Select service" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {serviceOptions
+                                      .filter((service) => service.isActive !== false)
+                                      .map((service) => {
+                                        const disabled = isTreatmentOptionDisabled(service.label, sectionIndex);
+                                        return (
+                                          <SelectItem
+                                            key={service.id}
+                                            value={service.label}
+                                            disabled={disabled}
+                                            className={disabled ? "opacity-50" : ""}
+                                          >
+                                            <span className="mr-2">{service.icon || "🦷"}</span>
+                                            {service.label}
+                                          </SelectItem>
+                                        );
+                                      })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {section.appointmentType === "Other" && (
+                                <div className="space-y-2 pb-3">
+                                  <Label className="text-sm font-bold text-gray-700">Custom Treatment Name *</Label>
+                                  <Input
+                                    type="text"
+                                    value={section.customAppointmentTypeName || ""}
+                                    onChange={(e: any) => handleUpdateAdditionalTreatmentCustomTypeName(sectionIndex, e.target.value)}
+                                    placeholder="e.g., Denture Fitting, Implant Consultation"
+                                    className="h-11 rounded-lg border-gray-200"
+                                    disabled={isPatientReadonly}
+                                  />
+                                </div>
+                              )}
+
+                              <CompactNotesField
+                                id={`booking-additional-treatment-notes-${sectionIndex}`}
+                                label="Treatment Notes"
+                                placeholder="Add notes for this treatment"
+                                value={section.treatmentNotes}
+                                onChange={(value) => handleUpdateAdditionalTreatmentNotes(sectionIndex, value)}
+                                disabled={isPatientReadonly}
+                                textareaClassName="min-h-[90px]"
+                              />
+
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                  <Label className="text-sm font-bold text-gray-700">Tooth No./s</Label>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => handleAddAdditionalTreatmentToothNumber(sectionIndex)}
+                                    disabled={isPatientReadonly}
+                                    aria-label="Add tooth number"
+                                    className="h-8 w-8 rounded-full border-blue-100 text-blue-600 hover:border-blue-200 hover:bg-blue-50"
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {section.toothNumberEntries.map((toothNumber, entryIndex) => (
+                                    <div key={entryIndex} className="flex items-center gap-1">
+                                      <Input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={toothNumber}
+                                        onBeforeInput={preventNonWholeNumberInput}
+                                        onChange={(e: any) => handleUpdateAdditionalTreatmentToothNumber(sectionIndex, entryIndex, e.target.value)}
+                                        placeholder="e.g. 18"
+                                        className="h-11 w-24 rounded-lg border-gray-200 text-center font-bold placeholder:font-normal placeholder:text-gray-400"
+                                        disabled={isPatientReadonly}
+                                      />
+                                      {section.toothNumberEntries.length > 1 && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleRemoveAdditionalTreatmentToothNumber(sectionIndex, entryIndex)}
+                                          disabled={isPatientReadonly}
+                                          aria-label={`Remove tooth number ${entryIndex + 1}`}
+                                          className="h-8 w-8 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -3161,6 +3462,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         doctorName={displayDoctor}
         appointmentType={appointmentType}
         customAppointmentTypeName={customAppointmentTypeName}
+        serviceSummary={[appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType]
+          .concat(additionalTreatmentSections
+            .filter((section) => section.appointmentType)
+            .map((section) =>
+              section.appointmentType === "Other"
+                ? section.customAppointmentTypeName || "Other"
+                : section.appointmentType || "Other"
+            )
+          )
+          .filter(Boolean)
+          .join(" • ")}
         selectedDate={selectedDate}
         selectedTime={selectedTime}
         duration={duration}

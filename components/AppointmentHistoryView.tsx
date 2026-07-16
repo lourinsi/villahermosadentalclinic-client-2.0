@@ -41,6 +41,8 @@ import {
   getBookingTreatmentNotesValue,
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
+  getBookingTreatmentsValue,
+  buildBookingTreatmentsPayload,
   normalizeBookingDuration,
   normalizeBookingToothNumbers,
   normalizeBookingPaymentMethod,
@@ -54,7 +56,7 @@ import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appoi
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { SelectDoctorModal } from "./SelectDoctorModal";
-import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
@@ -525,6 +527,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [selectedTreatmentPrice, setSelectedTreatmentPrice] = useState("");
   const [selectedTreatmentDuration, setSelectedTreatmentDuration] = useState("30");
   const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
+  const [selectedTreatmentSections, setSelectedTreatmentSections] = useState<SelectTreatmentModalSection[] | null>(null);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { effectiveRole } = useAdminViewMode();
@@ -970,7 +973,15 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     fallback: String(resolvedLogDate),
     includeTime: !isDateOnlyLog,
   });
-  const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
+  const latestStateForComparison = latestComparisonSnapshot ? getComparableSnapshotState(latestComparisonSnapshot) : null;
+  const displayedBookingTreatments = getBookingTreatmentsValue(displayedSnapshot);
+  const latestBookingTreatments = getBookingTreatmentsValue(latestStateForComparison);
+  const primaryDisplayedTreatment = displayedBookingTreatments[0];
+  const latestPrimaryBookingTreatment = latestBookingTreatments[0];
+  const typeName = resolveAppointmentTypeName(
+    primaryDisplayedTreatment?.type ?? displayedSnapshot.type ?? displayedSnapshot.serviceType,
+    primaryDisplayedTreatment?.customType ?? displayedSnapshot.customType
+  );
   const patientName = getAppointmentPatientDisplayName(displayedSnapshot, patientRecord);
   const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
   const snapshotPatientDob =
@@ -1199,7 +1210,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? `\u20b1${Number(displayedBalanceNumeric).toLocaleString()}`
     : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : "\u20b10");
 
-  const latestStateForComparison = latestComparisonSnapshot ? getComparableSnapshotState(latestComparisonSnapshot) : null;
   const normalizeNumberComparison = (value: unknown) => {
     const numeric = parseCurrencyNumber(value);
     return numeric === null ? normalizeComparableText(value) : String(numeric);
@@ -1501,8 +1511,20 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const latestDoctorDisplayName = latestStateForComparison ? resolveDoctorDisplayNameFromSnapshot(latestStateForComparison) : "";
   const latestTimeLabel = latestStateForComparison ? formatAppointmentTimeRange(latestStateForComparison.time, latestStateForComparison.duration) : "";
   const displayedTimeLabel = formatAppointmentTimeRange(displayedSnapshot.time, displayedSnapshot.duration);
-  const latestHasTreatment = Boolean(latestStateForComparison && (latestStateForComparison.type !== undefined || latestStateForComparison.customType));
-  const latestTreatmentName = latestHasTreatment ? resolveAppointmentTypeName(latestStateForComparison.type, latestStateForComparison.customType) : "";
+  const latestHasTreatment = Boolean(
+    latestStateForComparison &&
+    (
+      latestPrimaryBookingTreatment?.type !== undefined ||
+      latestStateForComparison.type !== undefined ||
+      latestStateForComparison.customType
+    )
+  );
+  const latestTreatmentName = latestHasTreatment
+    ? resolveAppointmentTypeName(
+        latestPrimaryBookingTreatment?.type ?? latestStateForComparison.type ?? latestStateForComparison.serviceType,
+        latestPrimaryBookingTreatment?.customType ?? latestStateForComparison.customType
+      )
+    : "";
   const latestTotalPaidAmount = latestBalanceNumeric !== null && latestEffectivePrice !== null
     ? Math.max(0, Number(latestEffectivePrice) - Number(latestBalanceNumeric))
     : null;
@@ -1511,18 +1533,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? latestStateForComparison.notes || (latestStateForComparison.status === 'cancelled' ? latestStateForComparison.cancellationReason || "" : "")
     : undefined;
   const displayedNotesText = displayedNotesComparisonText || "No additional notes provided for this snapshot.";
-  const displayedTreatmentNotesComparisonText = getBookingTreatmentNotesValue(displayedSnapshot);
-  const latestTreatmentNotesComparisonText = latestStateForComparison
-    ? getBookingTreatmentNotesValue(latestStateForComparison)
-    : undefined;
+  const displayedAppointmentTreatmentNotes = getBookingTreatmentNotesValue(displayedSnapshot);
+  const latestAppointmentTreatmentNotes = latestStateForComparison ? getBookingTreatmentNotesValue(latestStateForComparison) : undefined;
+  const displayedTreatmentNotesComparisonText =
+    displayedAppointmentTreatmentNotes || primaryDisplayedTreatment?.treatmentNotes?.trim() || "";
+  const latestTreatmentNotesComparisonText =
+    latestAppointmentTreatmentNotes ||
+    (latestPrimaryBookingTreatment?.treatmentNotes?.trim() ? latestPrimaryBookingTreatment.treatmentNotes : undefined);
   const displayedTreatmentNotesText = displayedTreatmentNotesComparisonText || "No treatment notes provided for this snapshot.";
-  const displayedToothNumbersText = getBookingToothNumbersValue(displayedSnapshot);
-  const latestToothNumbersText = latestStateForComparison
-    ? getBookingToothNumbersValue(latestStateForComparison)
-    : undefined;
+  const displayedAppointmentToothNumbers = getBookingToothNumbersValue(displayedSnapshot);
+  const latestAppointmentToothNumbers = latestStateForComparison ? getBookingToothNumbersValue(latestStateForComparison) : undefined;
+  const displayedToothNumbersText =
+    displayedAppointmentToothNumbers ||
+    (primaryDisplayedTreatment?.toothNumbers ? normalizeBookingToothNumbers(primaryDisplayedTreatment.toothNumbers) : "");
+  const latestToothNumbersText =
+    latestAppointmentToothNumbers ||
+    (latestPrimaryBookingTreatment?.toothNumbers ? normalizeBookingToothNumbers(latestPrimaryBookingTreatment.toothNumbers) : undefined);
   const activeTreatmentOptions = treatmentOptions.filter((option) => option.isActive !== false);
   const selectedTreatmentOption = activeTreatmentOptions.find((option) => option.id === selectedTreatmentId) || null;
   const isCustomSelectedTreatment = selectedTreatmentOption?.id === OTHER_APPOINTMENT_TYPE_INDEX;
+  const additionalDisplayedTreatments = displayedBookingTreatments.slice(1);
 
   const statusCurrentChange = createCurrentFieldChange(
     "status",
@@ -1708,6 +1738,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       if (state?.type === undefined && !state?.customType && !state?.serviceType) return "Not set";
       return resolveAppointmentTypeName(state?.type ?? state?.serviceType, state?.customType);
     };
+    const treatmentSummary = (state: any) => {
+      const treatments = getBookingTreatmentsValue(state);
+      if (treatments.length > 0) {
+        return treatments
+          .map((treatment) => resolveAppointmentTypeName(treatment.type, treatment.customType))
+          .filter(Boolean)
+          .join(" • ") || "Not set";
+      }
+      return treatment(state);
+    };
     const totalPaid = (state: any) => {
       const explicit = firstDefined(state, ["totalPaid", "paid", "amountPaid"]);
       if (explicit !== undefined) return explicit;
@@ -1754,15 +1794,81 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         return time ? formatAppointmentTimeRange(time, duration) : "Not set";
       }
     );
+    const treatmentIdentityKey = (treatment: any) => {
+      const appointmentType = resolveAppointmentTypeName(treatment?.type ?? treatment?.serviceType, treatment?.customType);
+      const toothNumbers = normalizeBookingToothNumbers(treatment?.toothNumbers ?? treatment?.tooth_numbers);
+      const notes = String(treatment?.treatmentNotes ?? treatment?.treatment_notes ?? "").trim();
+      return `${normalizeComparableText(appointmentType)}|${normalizeComparableText(toothNumbers)}|${normalizeComparableText(notes)}`;
+    };
+    const treatmentLabel = (treatment: any) => {
+      const appointmentType = resolveAppointmentTypeName(treatment?.type ?? treatment?.serviceType, treatment?.customType);
+      const toothNumbers = normalizeBookingToothNumbers(treatment?.toothNumbers ?? treatment?.tooth_numbers);
+      return toothNumbers ? `${appointmentType} - Tooth # ${toothNumbers}` : appointmentType;
+    };
+    const treatmentListSummary = (state: any) => {
+      const treatments = getBookingTreatmentsValue(state);
+      if (treatments.length > 0) {
+        return treatments.map((treatment) => treatmentLabel(treatment)).join(" • ");
+      }
+      return treatment(state);
+    };
+    const treatmentsWithKeys = (state: any) =>
+      getBookingTreatmentsValue(state).map((treatment) => ({
+        key: treatmentIdentityKey(treatment),
+        label: treatmentLabel(treatment),
+      }));
+    const previousTreatments = treatmentsWithKeys(previous);
+    const selectedTreatments = treatmentsWithKeys(selected);
+    const countTreatmentKeys = (items: { key: string; label: string }[]) => {
+      return items.reduce((acc, item) => {
+        if (!item.key) return acc;
+        acc.set(item.key, (acc.get(item.key) || 0) + 1);
+        return acc;
+      }, new Map<string, number>());
+    };
+    const normalizeTreatmentDiff = (
+      fromItems: { key: string; label: string }[],
+      toItems: { key: string; label: string }[]
+    ) => {
+      const fromCounts = countTreatmentKeys(fromItems);
+      const toCounts = countTreatmentKeys(toItems);
+      const uniqueKeys = Array.from(new Set([...fromItems.map((item) => item.key), ...toItems.map((item) => item.key)]));
+      const diffs: string[] = [];
+
+      for (const key of uniqueKeys) {
+        const fromCount = fromCounts.get(key) || 0;
+        const toCount = toCounts.get(key) || 0;
+        const item = toItems.find((t) => t.key === key) || fromItems.find((t) => t.key === key);
+        const label = item?.label || "";
+        const countDiff = toCount - fromCount;
+
+        if (countDiff > 0) {
+          for (let i = 0; i < countDiff; i += 1) {
+            diffs.push(label);
+          }
+        }
+      }
+
+      return diffs;
+    };
+    const addedTreatments = normalizeTreatmentDiff(previousTreatments, selectedTreatments);
+    const removedTreatments = normalizeTreatmentDiff(selectedTreatments, previousTreatments);
+
     addChange(
       "Service / treatment",
-      treatment(previous),
-      treatment(selected),
+      treatmentListSummary(previous),
+      treatmentListSummary(selected),
       readable,
       normalizeComparableText,
-      `${previous.type ?? previous.serviceType ?? ""}|${previous.customType || ""}`,
-      `${selected.type ?? selected.serviceType ?? ""}|${selected.customType || ""}`
+      treatmentListSummary(previous),
+      treatmentListSummary(selected)
     );
+    if (addedTreatments.length > 0) {
+      addChange("Added treatment services", "None", addedTreatments.join(", "), readable, normalizeComparableText, "", addedTreatments.join(", "));
+    }
+    if (removedTreatments.length > 0) {
+      addChange("Removed treatment services", removedTreatments.join(", "), "None", readable, normalizeComparableText, removedTreatments.join(", "), "");
+    }
     addChange("Tooth numbers", getBookingToothNumbersValue(previous), getBookingToothNumbersValue(selected));
     addChange("Treatment notes", getBookingTreatmentNotesValue(previous), getBookingTreatmentNotesValue(selected));
     addChange("Remarks / notes", previous.notes, selected.notes);
@@ -1813,7 +1919,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     snapshotState !== "historical" &&
     currentFieldChanges.some(Boolean)
   );
-  const showsLogSnapshotState = isPastSnapshot || hasLaterChanges;
+  const showsLogSnapshotState = isPastSnapshot;
+  const showLatestSnapshotAction = isPastSnapshot || hasLaterChanges;
   const stateLabel = showsLogSnapshotState ? "Log" : "Current";
   const stateBadgeClass = showsLogSnapshotState
     ? "border-amber-200 bg-amber-50 text-amber-700"
@@ -1822,7 +1929,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const timestampPrefix = showsLogSnapshotState ? "Logged on" : "Current as of";
   const stateTooltipText = isPastSnapshot
     ? 'Older log. Use "Latest" for current details.'
-    : 'This log has later changes. Use "Latest" for current details.';
+    : hasLaterChanges
+    ? 'This snapshot has later changes. Use "Latest" for current details.'
+    : 'This snapshot is current.';
 
   const patientChanged = isPatientChange(displayedSnapshot);
   const changeTag = patientChanged ? "Patient Changed" : "";
@@ -1843,6 +1952,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canOpenPatientChoice = Boolean(canSelectAppointmentPatient || canGoToPatient);
   const canAssignDoctor = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeSchedule = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
+  const canChangeTreatment = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const canChangeStatus = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
   const selectedScheduleDisplayDate = selectedScheduleDate || resolveScheduleDateValue(displayedSnapshot?.date);
   const repeatSourceDate = resolveScheduleDateValue(displayedSnapshot?.date);
@@ -1866,16 +1976,31 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     String(selectedScheduleTime || "").trim() &&
     !isSavingScheduleChange
   );
-  const canChangeTreatment = Boolean(canUseSnapshotActions && !showsLogSnapshotState);
+  const isTreatmentSectionValid = (section: SelectTreatmentModalSection) => {
+    const selectedId = section.selectedTreatmentId;
+    if (selectedId === undefined || selectedId === null) return false;
+    const option = activeTreatmentOptions.find((t) => t.id === selectedId);
+    if (!option) return false;
+    if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return false;
+    const priceValue = Number(section.selectedPrice ?? option.price ?? 0);
+    if (!Number.isFinite(priceValue) || priceValue < 0) return false;
+    if (!String(section.selectedDuration ?? "").trim()) return false;
+    return true;
+  };
+
   const canSaveTreatmentChange = Boolean(
     canChangeTreatment &&
-    selectedTreatmentOption &&
-    (!isCustomSelectedTreatment || customTreatmentName.trim()) &&
-    Number.isFinite(Number(selectedTreatmentPrice)) &&
-    Number(selectedTreatmentPrice) >= 0 &&
-    Boolean(selectedTreatmentDuration) &&
     !isSavingTreatmentChange &&
-    !isLoadingTreatmentOptions
+    !isLoadingTreatmentOptions &&
+    (
+      selectedTreatmentSections
+        ? selectedTreatmentSections.length > 0 && selectedTreatmentSections.every(isTreatmentSectionValid)
+        : selectedTreatmentOption &&
+          (!isCustomSelectedTreatment || customTreatmentName.trim()) &&
+          Number.isFinite(Number(selectedTreatmentPrice)) &&
+          Number(selectedTreatmentPrice) >= 0 &&
+          Boolean(selectedTreatmentDuration)
+    )
   );
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
   const canShowSnapshotActions = Boolean(
@@ -2373,6 +2498,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setSelectedTreatmentPrice("");
     setSelectedTreatmentDuration("30");
     setTreatmentToothNumberEntries([""]);
+    setSelectedTreatmentSections(null);
   };
 
   const openChangeTreatmentModal = () => {
@@ -2383,31 +2509,69 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
     const normalizeTreatmentLabel = (value: unknown) =>
       String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const numericType =
-      typeof displayedSnapshot?.type === "number"
-        ? displayedSnapshot.type
-        : typeof displayedSnapshot?.type === "string" && displayedSnapshot.type.trim()
-          ? Number(displayedSnapshot.type)
-          : NaN;
-    const normalizedCurrentName = normalizeTreatmentLabel(typeName);
-    const matchedTreatment = activeTreatmentOptions.find((option) =>
-      option.id === numericType ||
-      normalizeTreatmentLabel(option.label) === normalizedCurrentName ||
-      normalizeTreatmentLabel(option.value) === normalizedCurrentName
-    );
-    const nextSelectedTreatmentId = matchedTreatment?.id ?? OTHER_APPOINTMENT_TYPE_INDEX;
-    const currentPrice = pickNumericValue(displayedSnapshot.price, displayedBasePrice, matchedTreatment?.price) ?? 0;
-    const currentDuration = normalizeBookingDuration(displayedSnapshot.duration || matchedTreatment?.duration || 30);
 
-    setSelectedTreatmentId(nextSelectedTreatmentId);
-    setCustomTreatmentName(
-      nextSelectedTreatmentId === OTHER_APPOINTMENT_TYPE_INDEX
-        ? String(displayedSnapshot.customType || typeName || "").trim()
-        : ""
-    );
-    setSelectedTreatmentPrice(String(Math.max(0, Number(currentPrice) || 0)));
-    setSelectedTreatmentDuration(String(currentDuration));
-    setTreatmentToothNumberEntries(getBookingToothNumberEntries(displayedToothNumbersText));
+    const appointmentToothNumberEntries = getBookingToothNumberEntries(getBookingToothNumbersValue(displayedSnapshot));
+    const nextSections = displayedBookingTreatments.length > 0
+      ? displayedBookingTreatments.map((bookingTreatment, index) => {
+          const treatmentType: string | number | undefined = bookingTreatment.type ?? displayedSnapshot?.type;
+          const treatmentCustomType = bookingTreatment.customType ?? displayedSnapshot?.customType;
+          const sectionTypeName = resolveAppointmentTypeName(
+            treatmentType,
+            treatmentCustomType
+          );
+          const numericType =
+            typeof treatmentType === "number"
+              ? treatmentType
+              : typeof treatmentType === "string" && String(treatmentType).trim()
+                ? Number(treatmentType)
+                : NaN;
+          const normalizedSectionName = normalizeTreatmentLabel(sectionTypeName);
+          const matchedTreatment = activeTreatmentOptions.find((option) =>
+            option.id === numericType ||
+            normalizeTreatmentLabel(option.label) === normalizedSectionName ||
+            normalizeTreatmentLabel(option.value) === normalizedSectionName
+          );
+          const nextSelectedTreatmentId = matchedTreatment?.id ?? OTHER_APPOINTMENT_TYPE_INDEX;
+          const currentPrice = pickNumericValue(
+            bookingTreatment.price,
+            displayedSnapshot.price,
+            displayedBasePrice,
+            matchedTreatment?.price
+          ) ?? 0;
+          const currentDuration = normalizeBookingDuration(
+            bookingTreatment.duration ?? displayedSnapshot.duration ?? matchedTreatment?.duration ?? 30
+          );
+
+          return {
+            selectedTreatmentId: nextSelectedTreatmentId,
+            currentTreatmentLabel: index === 0 ? typeName : sectionTypeName,
+            customTreatmentName:
+              nextSelectedTreatmentId === OTHER_APPOINTMENT_TYPE_INDEX
+                ? String(bookingTreatment.customType || sectionTypeName || "").trim()
+                : "",
+            selectedPrice: String(Math.max(0, Number(currentPrice) || 0)),
+            selectedDuration: String(currentDuration),
+            toothNumberEntries: appointmentToothNumberEntries,
+          };
+        })
+      : [
+          {
+            selectedTreatmentId: selectedTreatmentId ?? OTHER_APPOINTMENT_TYPE_INDEX,
+            currentTreatmentLabel: typeName,
+            customTreatmentName: customTreatmentName.trim(),
+            selectedPrice: selectedTreatmentPrice,
+            selectedDuration: selectedTreatmentDuration,
+            toothNumberEntries: treatmentToothNumberEntries,
+          },
+        ];
+
+    const firstSection = nextSections[0];
+    setSelectedTreatmentId(firstSection.selectedTreatmentId ?? null);
+    setCustomTreatmentName(firstSection.customTreatmentName || "");
+    setSelectedTreatmentPrice(String(firstSection.selectedPrice ?? ""));
+    setSelectedTreatmentDuration(String(firstSection.selectedDuration ?? "30"));
+    setTreatmentToothNumberEntries(firstSection.toothNumberEntries || [""]);
+    setSelectedTreatmentSections(nextSections);
     setIsChangeTreatmentOpen(true);
   };
 
@@ -2417,45 +2581,75 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       return;
     }
 
-    if (!selectedTreatmentOption) {
+    const sections = selectedTreatmentSections && selectedTreatmentSections.length > 0
+      ? selectedTreatmentSections
+      : [{
+          selectedTreatmentId,
+          customTreatmentName,
+          selectedPrice: selectedTreatmentPrice,
+          selectedDuration: selectedTreatmentDuration,
+          toothNumberEntries: treatmentToothNumberEntries,
+        }];
+
+    if (sections.length === 0) {
       toast.error("Please select a treatment");
       return;
     }
 
-    const isCustomTreatment = selectedTreatmentOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
-    const customType = isCustomTreatment ? customTreatmentName.trim() : "";
-    if (isCustomTreatment && !customType) {
-      toast.error("Custom treatment name is required");
+    const invalidSection = sections.find((section) => {
+      const selectedId = section.selectedTreatmentId;
+      if (selectedId === undefined || selectedId === null) return true;
+      const option = activeTreatmentOptions.find((t) => t.id === selectedId);
+      if (!option) return true;
+      if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return true;
+      const priceValue = Number(section.selectedPrice ?? option.price ?? 0);
+      if (!Number.isFinite(priceValue) || priceValue < 0) return true;
+      if (!String(section.selectedDuration ?? "").trim()) return true;
+      return false;
+    });
+
+    if (invalidSection) {
+      toast.error("Please complete all treatment sections before saving");
       return;
     }
 
-    const nextPrice = Number(selectedTreatmentPrice);
-    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
-      toast.error("Enter a valid treatment price");
-      return;
-    }
+    const updatedTreatments = sections.map((section) => {
+      const selectedOption = activeTreatmentOptions.find((option) => option.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0, duration: 30 };
+      const isCustomTreatment = selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
+      const customType = isCustomTreatment ? String(section.customTreatmentName || "").trim() : undefined;
+      const priceValue = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+      return {
+        type: selectedOption.id,
+        customType: isCustomTreatment ? customType : undefined,
+        duration: normalizeBookingDuration(section.selectedDuration ?? selectedOption.duration ?? 30),
+        price: Math.max(0, priceValue),
+      };
+    });
 
-    const nextDuration = normalizeBookingDuration(selectedTreatmentDuration || selectedTreatmentOption.duration || displayedSnapshot.duration || 30);
-    const nextToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
+    const appointmentToothNumbers = normalizeBookingToothNumbers(sections[0]?.toothNumberEntries);
+    const firstUpdatedTreatment = updatedTreatments[0];
+    const payload: Partial<Appointment> = {
+      type: firstUpdatedTreatment.type,
+      customType: firstUpdatedTreatment.customType,
+      duration: firstUpdatedTreatment.duration,
+      price: firstUpdatedTreatment.price,
+      ...buildBookingTreatmentsPayload(updatedTreatments),
+      toothNumbers: appointmentToothNumbers,
+    };
 
     setIsSavingTreatmentChange(true);
     try {
-      const updated = await updateAppointment(String(appointmentId), {
-        type: selectedTreatmentOption.id,
-        customType: isCustomTreatment ? customType : undefined,
-        duration: nextDuration,
-        price: Math.max(0, nextPrice),
-        toothNumbers: nextToothNumbers,
-      } as Partial<Appointment>);
+      const updated = await updateAppointment(String(appointmentId), payload as Partial<Appointment>);
 
       setDisplayedSnapshot((current: any) => ({
         ...current,
         ...updated,
-        type: updated?.type ?? selectedTreatmentOption.id,
-        customType: isCustomTreatment ? customType : updated?.customType,
-        duration: updated?.duration ?? nextDuration,
-        price: updated?.price ?? Math.max(0, nextPrice),
-        toothNumbers: updated?.toothNumbers ?? nextToothNumbers,
+        type: updated?.type ?? firstUpdatedTreatment.type,
+        customType: firstUpdatedTreatment.customType ?? updated?.customType,
+        duration: updated?.duration ?? firstUpdatedTreatment.duration,
+        price: updated?.price ?? firstUpdatedTreatment.price,
+        toothNumbers: updated?.toothNumbers ?? appointmentToothNumbers ?? current.toothNumbers,
+        treatments: updated?.treatments ?? current.treatments ?? updatedTreatments,
       }));
       setLatestComparisonSnapshot(null);
       try {
@@ -3116,17 +3310,29 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-xs">Service</Label>
+                            {displayedToothNumbersText ? (
+                              <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 ring-1 ring-violet-100">
+                                Tooth # {displayedToothNumbersText}
+                              </span>
+                            ) : null}
                             <CurrentChangeIndicator change={serviceCurrentChange} />
                           </div>
-                          <p className="mt-0.5 truncate text-lg font-black leading-tight text-slate-950">{typeName}</p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <span className="inline-flex max-w-full items-center rounded-full bg-violet-50 px-3 py-2 text-sm font-black text-violet-700 ring-1 ring-violet-100">
+                              {typeName}
+                            </span>
+                            {additionalDisplayedTreatments.map((treatment, index) => (
+                              <span
+                                key={`${treatment.type || 'extra'}-${index}`}
+                                className="inline-flex max-w-full items-center rounded-full bg-violet-50 px-3 py-2 text-sm font-black text-violet-700 ring-1 ring-violet-100"
+                              >
+                                {resolveAppointmentTypeName(treatment.type, treatment.customType)}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                       <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-                        {displayedToothNumbersText ? (
-                          <span className="inline-flex max-w-full items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 ring-1 ring-violet-100">
-                            Tooth # {displayedToothNumbersText}
-                          </span>
-                        ) : null}
                         <Button
                           type="button"
                           variant="outline"
@@ -3729,26 +3935,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         title="Change Treatment"
         description={patientName ? `${typeName} for ${patientName}` : typeName}
         treatments={activeTreatmentOptions}
-        selectedTreatmentId={selectedTreatmentId}
-        currentTreatmentLabel={typeName}
-        customTreatmentName={customTreatmentName}
-        selectedPrice={selectedTreatmentPrice}
-        selectedDuration={selectedTreatmentDuration}
-        toothNumberEntries={treatmentToothNumberEntries}
-        onCustomTreatmentNameChange={setCustomTreatmentName}
-        onSelectedPriceChange={setSelectedTreatmentPrice}
-        onSelectedDurationChange={setSelectedTreatmentDuration}
-        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
-        onTreatmentSelect={(treatment) => {
-          setSelectedTreatmentId(treatment.id);
-          setSelectedTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
-          setSelectedTreatmentDuration(String(normalizeBookingDuration(treatment.duration || 30)));
-          if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
-            setCustomTreatmentName("");
-          } else if (!customTreatmentName.trim()) {
-            setCustomTreatmentName(typeName);
-          }
-        }}
+        treatmentSections={selectedTreatmentSections ?? undefined}
+        onTreatmentSectionsChange={setSelectedTreatmentSections}
+        allowAddTreatment={true}
+        allowRemoveTreatment={true}
         onSave={handleSaveTreatmentChange}
         onCancel={() => closeChangeTreatmentModal()}
         isSaving={isSavingTreatmentChange}
