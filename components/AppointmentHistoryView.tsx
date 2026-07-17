@@ -528,6 +528,23 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [selectedTreatmentDuration, setSelectedTreatmentDuration] = useState("30");
   const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [selectedTreatmentSections, setSelectedTreatmentSections] = useState<SelectTreatmentModalSection[] | null>(null);
+  const [localTreatmentNotes, setLocalTreatmentNotes] = useState<string>("");
+  const [localRemarks, setLocalRemarks] = useState<string>("");
+  const [isSavingChanges, setIsSavingChanges] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (displayedSnapshot) {
+      setLocalTreatmentNotes(getBookingTreatmentNotesValue(displayedSnapshot) || "");
+      setLocalRemarks(displayedSnapshot.notes || "");
+    } else {
+      setLocalTreatmentNotes("");
+      setLocalRemarks("");
+    }
+  }, [displayedSnapshot]);
+
+  const isNotesDirty = localRemarks !== (displayedSnapshot?.notes || "");
+  const isTreatmentNotesDirty = localTreatmentNotes !== (getBookingTreatmentNotesValue(displayedSnapshot) || "");
+  const isDirty = isNotesDirty || isTreatmentNotesDirty;
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { effectiveRole } = useAdminViewMode();
@@ -583,6 +600,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setSelectedTreatmentPrice("");
       setSelectedTreatmentDuration("30");
       setTreatmentToothNumberEntries([""]);
+      setLocalTreatmentNotes("");
+      setLocalRemarks("");
+      setIsSavingChanges(false);
     }
   }, [open]);
 
@@ -2086,6 +2106,45 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     } catch (error) {
       console.error("[AppointmentHistoryView] Failed to update status:", error);
       toast.error("Failed to update status");
+    }
+  };
+
+  const handleSaveChanges = async () => {
+    if (!displayedAppointmentId) {
+      toast.error("No appointment ID available");
+      return;
+    }
+
+    setIsSavingChanges(true);
+    try {
+      const updated = await updateAppointment(String(displayedAppointmentId), {
+        notes: localRemarks,
+        treatmentNotes: localTreatmentNotes,
+      } as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        notes: updated?.notes ?? localRemarks,
+        treatmentNotes: updated?.treatmentNotes ?? localTreatmentNotes,
+      }));
+      setLatestComparisonSnapshot(null);
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(displayedAppointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Appointment notes saved");
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to save changes:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save changes");
+    } finally {
+      setIsSavingChanges(false);
     }
   };
 
@@ -3655,8 +3714,17 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <Label className="text-sm font-black uppercase tracking-wide">Treatment Notes</Label>
                   <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
                 </div>
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 transition-colors">
+                  {showsLogSnapshotState ? (
+                    <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                  ) : (
+                    <textarea
+                      value={localTreatmentNotes}
+                      onChange={(e) => setLocalTreatmentNotes(e.target.value)}
+                      placeholder="Enter treatment notes..."
+                      className="w-full min-h-[5rem] max-h-32 bg-transparent resize-none border-0 p-0 text-sm font-semibold leading-6 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sm:text-base sm:leading-7 sleek-scrollbar"
+                    />
+                  )}
                 </div>
               </section>
 
@@ -3682,8 +3750,17 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <Label className="text-sm font-black uppercase tracking-wide">Remarks</Label>
                   <CurrentChangeIndicator change={notesCurrentChange} />
                 </div>
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                  <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 transition-colors">
+                  {showsLogSnapshotState ? (
+                    <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                  ) : (
+                    <textarea
+                      value={localRemarks}
+                      onChange={(e) => setLocalRemarks(e.target.value)}
+                      placeholder="Enter remarks..."
+                      className="w-full min-h-[5rem] max-h-32 bg-transparent resize-none border-0 p-0 text-sm font-semibold leading-6 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sm:text-base sm:leading-7 sleek-scrollbar"
+                    />
+                  )}
                 </div>
               </section>
             </div>
@@ -3704,7 +3781,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             {canRestoreNotification ? (
               <Button className="h-11 w-full rounded-xl bg-violet-600 text-sm font-black text-white shadow-sm transition-all hover:bg-violet-700 active:scale-95 sm:h-12" onClick={async () => { await onRestoreNotification?.(restoreNotificationId!); onOpenChange(false); }}><RefreshCw className="mr-2 h-4 w-4" />Restore</Button>
             ) : null}
-            <div className="flex justify-center">
+            <div className="flex justify-center gap-3">
+              {isDirty && (
+                <Button
+                  onClick={handleSaveChanges}
+                  disabled={isSavingChanges}
+                  className="h-12 min-w-[13rem] rounded-[1.35rem] bg-violet-600 px-8 text-base font-black text-white shadow-[0_10px_24px_rgba(124,58,237,0.15)] transition-all hover:bg-violet-700 active:scale-95 sm:h-14 sm:min-w-[15rem]"
+                >
+                  {isSavingChanges ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="mr-2 h-5 w-5" />
+                      Save Changes
+                    </>
+                  )}
+                </Button>
+              )}
               <Button onClick={() => onOpenChange(false)} variant="outline" className="h-12 min-w-[13rem] rounded-[1.35rem] border-violet-100 bg-violet-50/40 px-8 text-base font-black text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.10)] transition-all hover:bg-violet-50 hover:text-violet-800 sm:h-14 sm:min-w-[15rem]">Close</Button>
             </div>
           </DialogFooter>
