@@ -1243,8 +1243,6 @@ export function getBookingTreatmentNotesValue(appointment?: any) {
 export interface BookingTreatment {
   type: number;
   customType?: string;
-  treatmentNotes?: string;
-  toothNumbers?: string;
   price?: number;
   duration?: number;
 }
@@ -1258,8 +1256,6 @@ export function normalizeBookingTreatment(value?: unknown): BookingTreatment | u
   return {
     type: Number.isFinite(type) ? type : 0,
     customType: String(section.customType ?? section.custom_type ?? '').trim() || undefined,
-    treatmentNotes: normalizeBookingTreatmentNotes(section.treatmentNotes ?? section.treatment_notes),
-    toothNumbers: normalizeBookingToothNumbers(section.toothNumbers ?? section.tooth_numbers),
     price: Number.isFinite(rawPrice) ? rawPrice : undefined,
     duration: Number.isFinite(rawDuration) ? rawDuration : undefined,
   };

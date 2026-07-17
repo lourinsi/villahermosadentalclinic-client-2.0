@@ -1187,6 +1187,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // finalPrice is the base price (before discount) - used in payment calculations
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (servicePriceByName[appointmentType] || 0);
   const finalPrice = Number(customPrice) > 0 ? Number(customPrice) : basePrice;
+  const allSelectedTreatmentNames = [
+    appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType
+  ]
+    .concat(
+      additionalTreatmentSections
+        .filter((section) => section.appointmentType)
+        .map((section) =>
+          section.appointmentType === "Other"
+            ? section.customAppointmentTypeName || "Other"
+            : section.appointmentType || "Other"
+        )
+    )
+    .filter(Boolean)
+    .join(", ") || "Selected Treatment";
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -1881,14 +1895,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         {
           type: getAppointmentTypeIndex(appointmentType),
           customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-          treatmentNotes: treatmentNotes,
-          toothNumbers: toothNumbers,
         },
         ...additionalTreatmentSections.map((section) => ({
           type: getAppointmentTypeIndex(section.appointmentType || appointmentType),
           customType: section.appointmentType === "Other" ? section.customAppointmentTypeName : undefined,
-          treatmentNotes: section.treatmentNotes,
-          toothNumbers: Array.isArray(section.toothNumberEntries) ? section.toothNumberEntries.filter(Boolean).join(', ') : undefined,
         })),
       ]);
       const treatmentPayload = {
@@ -3130,7 +3140,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="bg-gray-50 p-4 rounded-lg space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Service:</span>
-                    <span className="font-medium">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType || 'Other'}</span>
+                    <span className="font-medium">{allSelectedTreatmentNames}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Tooth No./s:</span>

@@ -1556,19 +1556,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const displayedAppointmentTreatmentNotes = getBookingTreatmentNotesValue(displayedSnapshot);
   const latestAppointmentTreatmentNotes = latestStateForComparison ? getBookingTreatmentNotesValue(latestStateForComparison) : undefined;
   const displayedTreatmentNotesComparisonText =
-    displayedAppointmentTreatmentNotes || primaryDisplayedTreatment?.treatmentNotes?.trim() || "";
+    displayedAppointmentTreatmentNotes || "";
   const latestTreatmentNotesComparisonText =
-    latestAppointmentTreatmentNotes ||
-    (latestPrimaryBookingTreatment?.treatmentNotes?.trim() ? latestPrimaryBookingTreatment.treatmentNotes : undefined);
+    latestAppointmentTreatmentNotes || undefined;
   const displayedTreatmentNotesText = displayedTreatmentNotesComparisonText || "No treatment notes provided for this snapshot.";
   const displayedAppointmentToothNumbers = getBookingToothNumbersValue(displayedSnapshot);
   const latestAppointmentToothNumbers = latestStateForComparison ? getBookingToothNumbersValue(latestStateForComparison) : undefined;
   const displayedToothNumbersText =
-    displayedAppointmentToothNumbers ||
-    (primaryDisplayedTreatment?.toothNumbers ? normalizeBookingToothNumbers(primaryDisplayedTreatment.toothNumbers) : "");
+    displayedAppointmentToothNumbers || "";
   const latestToothNumbersText =
-    latestAppointmentToothNumbers ||
-    (latestPrimaryBookingTreatment?.toothNumbers ? normalizeBookingToothNumbers(latestPrimaryBookingTreatment.toothNumbers) : undefined);
+    latestAppointmentToothNumbers || undefined;
   const activeTreatmentOptions = treatmentOptions.filter((option) => option.isActive !== false);
   const selectedTreatmentOption = activeTreatmentOptions.find((option) => option.id === selectedTreatmentId) || null;
   const isCustomSelectedTreatment = selectedTreatmentOption?.id === OTHER_APPOINTMENT_TYPE_INDEX;
@@ -1816,9 +1813,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     );
     const treatmentIdentityKey = (treatment: any) => {
       const appointmentType = resolveAppointmentTypeName(treatment?.type ?? treatment?.serviceType, treatment?.customType);
-      const toothNumbers = normalizeBookingToothNumbers(treatment?.toothNumbers ?? treatment?.tooth_numbers);
-      const notes = String(treatment?.treatmentNotes ?? treatment?.treatment_notes ?? "").trim();
-      return `${normalizeComparableText(appointmentType)}|${normalizeComparableText(toothNumbers)}|${normalizeComparableText(notes)}`;
+      return normalizeComparableText(appointmentType);
     };
     const treatmentLabel = (treatment: any) => {
       const appointmentType = resolveAppointmentTypeName(treatment?.type ?? treatment?.serviceType, treatment?.customType);
@@ -2610,7 +2605,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 : "",
             selectedPrice: String(Math.max(0, Number(currentPrice) || 0)),
             selectedDuration: String(currentDuration),
-            toothNumberEntries: appointmentToothNumberEntries,
           };
         })
       : [
@@ -2620,7 +2614,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             customTreatmentName: customTreatmentName.trim(),
             selectedPrice: selectedTreatmentPrice,
             selectedDuration: selectedTreatmentDuration,
-            toothNumberEntries: treatmentToothNumberEntries,
           },
         ];
 
@@ -2629,7 +2622,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setCustomTreatmentName(firstSection.customTreatmentName || "");
     setSelectedTreatmentPrice(String(firstSection.selectedPrice ?? ""));
     setSelectedTreatmentDuration(String(firstSection.selectedDuration ?? "30"));
-    setTreatmentToothNumberEntries(firstSection.toothNumberEntries || [""]);
+    setTreatmentToothNumberEntries(appointmentToothNumberEntries || [""]);
     setSelectedTreatmentSections(nextSections);
     setIsChangeTreatmentOpen(true);
   };
@@ -2647,7 +2640,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           customTreatmentName,
           selectedPrice: selectedTreatmentPrice,
           selectedDuration: selectedTreatmentDuration,
-          toothNumberEntries: treatmentToothNumberEntries,
         }];
 
     if (sections.length === 0) {
@@ -2685,7 +2677,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       };
     });
 
-    const appointmentToothNumbers = normalizeBookingToothNumbers(sections[0]?.toothNumberEntries);
+    const appointmentToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
     const firstUpdatedTreatment = updatedTreatments[0];
     const payload: Partial<Appointment> = {
       type: firstUpdatedTreatment.type,
@@ -4033,6 +4025,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         treatments={activeTreatmentOptions}
         treatmentSections={selectedTreatmentSections ?? undefined}
         onTreatmentSectionsChange={setSelectedTreatmentSections}
+        toothNumberEntries={treatmentToothNumberEntries}
+        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
         allowAddTreatment={true}
         allowRemoveTreatment={true}
         onSave={handleSaveTreatmentChange}

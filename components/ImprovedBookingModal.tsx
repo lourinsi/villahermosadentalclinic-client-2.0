@@ -2234,9 +2234,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === appointmentType);
-  const selectedTreatmentName = appointmentType === "Other"
-    ? customAppointmentTypeName || "Custom Treatment"
-    : appointmentType || "Selected Treatment";
+  const selectedTreatmentName = [
+    appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType
+  ]
+    .concat(
+      additionalTreatmentSections
+        .filter((section) => section.appointmentType)
+        .map((section) =>
+          section.appointmentType === "Other"
+            ? section.customAppointmentTypeName || "Other"
+            : section.appointmentType || "Other"
+        )
+    )
+    .filter(Boolean)
+    .join(", ") || "Selected Treatment";
   const selectedTreatmentDuration = normalizeBookingDuration(duration);
   const selectedTreatmentBasePrice = Number(customPrice === "0" ? finalPrice : customPrice) || 0;
   const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
@@ -2546,8 +2557,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         {
           type: getAppointmentTypeIndex(appointmentType),
           customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-          treatmentNotes: treatmentNotes,
-          toothNumbers: toothNumbers,
         },
         ...additionalTreatmentSections
           .filter((section) => section.appointmentType)

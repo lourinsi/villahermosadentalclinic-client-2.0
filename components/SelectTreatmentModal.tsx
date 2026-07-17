@@ -32,7 +32,6 @@ export type SelectTreatmentModalSection = {
   customTreatmentName?: string;
   selectedPrice?: string | number;
   selectedDuration?: string | number;
-  toothNumberEntries?: string[];
 };
 
 type SelectTreatmentModalProps = {
@@ -118,7 +117,6 @@ export function SelectTreatmentModal({
             customTreatmentName,
             selectedPrice,
             selectedDuration: selectedDurationInput,
-            toothNumberEntries,
           },
         ];
   const isMultiSectionMode = Array.isArray(treatmentSections);
@@ -134,7 +132,7 @@ export function SelectTreatmentModal({
       onCustomTreatmentNameChange?.(firstSection.customTreatmentName || "");
       onSelectedPriceChange?.(String(firstSection.selectedPrice ?? ""));
       onSelectedDurationChange?.(String(firstSection.selectedDuration ?? "30"));
-      onToothNumberEntriesChange?.(firstSection.toothNumberEntries || [""]);
+      onToothNumberEntriesChange?.(toothNumberEntries || [""]);
       if (firstSection.selectedTreatmentId !== undefined && firstSection.selectedTreatmentId !== null) {
         const treatment = treatments.find((option) => option.id === firstSection.selectedTreatmentId);
         if (treatment) onTreatmentSelect?.(treatment);
@@ -200,7 +198,6 @@ export function SelectTreatmentModal({
         customTreatmentName: "",
         selectedPrice: "0",
         selectedDuration: "30",
-        toothNumberEntries: [""],
       },
     ]);
   };
@@ -251,14 +248,18 @@ export function SelectTreatmentModal({
   const selectedPriceValue = getSectionPriceValue(activeSection);
   const selectedPriceNumber = Number(selectedPriceValue) || 0;
   const selectedDuration = getSectionDuration(activeSection);
-  const sectionToothNumberEntries =
-    activeSection?.toothNumberEntries && activeSection.toothNumberEntries.length > 0
-      ? activeSection.toothNumberEntries
-      : [""];
+  const treatmentLabels = sections.map((section) => {
+    const sectionTreatment = getSectionTreatment(section);
+    const isCustom = sectionTreatment?.id === OTHER_APPOINTMENT_TYPE_INDEX;
+    if (isCustom) {
+      return section.customTreatmentName?.trim() || sectionTreatment?.label || "Custom Treatment";
+    }
+    return sectionTreatment?.label || "No treatment selected";
+  });
   const resolvedToothNumberEntries =
     toothNumberEntries && toothNumberEntries.length > 0
       ? toothNumberEntries
-      : sectionToothNumberEntries;
+      : [""];
   const filledToothNumbers = resolvedToothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
   const isCustomTreatment = isSectionCustomTreatment(activeSection);
   const canEditToothNumbers = Boolean(onToothNumberEntriesChange || onTreatmentSectionsChange);
@@ -270,16 +271,6 @@ export function SelectTreatmentModal({
 
     if (onToothNumberEntriesChange) {
       onToothNumberEntriesChange(normalizedEntries);
-      return;
-    }
-
-    if (onTreatmentSectionsChange) {
-      const nextSections = sections.map((section, index) =>
-        index === 0
-          ? { ...section, toothNumberEntries: normalizedEntries }
-          : section
-      );
-      onTreatmentSectionsChange(nextSections);
     }
   };
 
@@ -527,9 +518,7 @@ export function SelectTreatmentModal({
                 Treatment Summary
               </div>
               <p className="mt-3 text-xs font-black uppercase tracking-widest text-slate-400">Selected Service</p>
-              <p className="mt-1 text-lg font-black text-slate-950">
-                {isCustomTreatment ? customTreatmentName.trim() || selectedTreatment?.label || "Custom Treatment" : selectedTreatment?.label || "No treatment selected"}
-              </p>
+              <p className="mt-1 text-lg font-black text-slate-950">{treatmentLabels.join(", ")}</p>
 
               {showToothNumberField ? (
                 <div className="mt-5 border-t border-slate-100 pt-4">
