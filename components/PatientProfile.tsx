@@ -1436,7 +1436,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const { refreshPatients, appointments, refreshAppointments, openCreateModal, updateAppointment, refreshTrigger } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const { effectiveRole } = useAdminViewMode();
-  const [activeTab, setActiveTab] = useState("info");
+  const [activeTab, setActiveTab] = useState("history");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
   const canSeeDeletedAppointments = effectiveRole === "admin";
@@ -1527,7 +1527,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const rawPatientIdForBooking = patient.id || loadedPatient.id;
   const patientIdForBooking = rawPatientIdForBooking ? String(rawPatientIdForBooking) : undefined;
   useEffect(() => {
-    setActiveTab("info");
+    setActiveTab("history");
   }, [patient.id]);
 
   const normalizeQuestionnaireAnswers = React.useCallback((data: any): Record<string, boolean> => {
