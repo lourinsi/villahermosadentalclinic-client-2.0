@@ -4839,35 +4839,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     ) : (
                                       <div className="truncate text-sm font-semibold text-slate-500 mt-0.5">{doctorName}</div>
                                     )}
+                                     {getBookingToothNumbersValue(appointment) ? (
+                                       <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                         <span className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50/50 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-100/50">
+                                           Tooth {getBookingToothNumbersValue(appointment)}
+                                         </span>
+                                       </div>
+                                     ) : null}
 
-                                    {bookingTreatments.length > 0 ? (
-                                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                        {bookingTreatments.map((t, idx) => {
-                                          const name = getAppointmentTypeName(t.type, t.customType) || String(t.type || 'Treatment');
-                                          return (
-                                            <span key={idx} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50/50 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-100/50">
-                                              <span>{name}</span>
-                                            </span>
-                                          );
-                                        })}
-                                        {getBookingToothNumbersValue(appointment) && (
-                                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50/50 px-2.5 py-1 text-[10px] font-black text-violet-800 ring-1 ring-violet-100/50">
-                                            Tooth {getBookingToothNumbersValue(appointment)}
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50/50 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-100/50">
-                                          <span>{serviceName}</span>
-                                          {getBookingToothNumbersValue(appointment) && (
-                                            <span className="rounded bg-violet-100 px-1 py-0.5 text-[10px] font-black text-violet-800">
-                                              Tooth {getBookingToothNumbersValue(appointment)}
-                                            </span>
-                                          )}
-                                        </span>
-                                      </div>
-                                    )}
 
                                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
                                       <span className="inline-flex items-center gap-1">
