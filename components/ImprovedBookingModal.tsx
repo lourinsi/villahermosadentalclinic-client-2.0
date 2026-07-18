@@ -25,7 +25,6 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
   ALLOWED_BOOKING_DURATIONS,
-  DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   getPastAppointmentStatusOptions,
   findNextAvailableBookingSlot,
@@ -568,14 +567,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     });
     return prices;
   }, [serviceOptions]);
-  const serviceDurationByName = useMemo(() => {
-    const durations: Record<string, number> = { ...appointmentTypeDurations };
-    serviceOptions.forEach((service) => {
-      durations[service.label] = Number(service.duration) || 30;
-    });
-    return durations;
-  }, [serviceOptions]);
-
   const selectedAdditionalTreatmentNames = useMemo(
     () => additionalTreatmentSections
       .map((section) => section.appointmentType)
@@ -1329,17 +1320,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   const patientConflictSet = useMemo(() => computePatientConflicts(), [computePatientConflicts]);
 
-  // Update duration when appointment type changes - always reset to default when type changes
-  useEffect(() => {
-    if (!appointmentType) {
-      setDuration("");
-      return;
-    }
-    // Always set default duration when appointment type changes
-    const defaultDur = normalizeBookingDuration(serviceDurationByName[appointmentType]);
-    setDuration(String(defaultDur));
-  }, [appointmentType, serviceDurationByName]);
-
   useEffect(() => {
     autoPreselectedScheduleRef.current = null;
     setSelectedDate(getBookingDefaultDate(defaultDate));
@@ -1395,7 +1375,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       selectedPatient,
       defaultPatientId,
       patientId,
-      appointmentTypeDurations: serviceDurationByName,
+      appointmentTypeDurations: {},
     });
 
     if (autoPreselect.type === "skip") return;
@@ -1405,8 +1385,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (autoPreselect.type === "preserve_schedule") return;
 
     if (autoPreselect.type === "wait_for_doctor") {
-      const selectedAppointmentType = appointmentType || autoPreselect.defaultAppointmentType;
-      const durationToSearch = String(normalizeBookingDuration(serviceDurationByName[selectedAppointmentType]));
+      const durationToSearch = String(normalizeBookingDuration(duration));
       const patientToSearch = patientId || selectedPatient || defaultPatientId || undefined;
       const doctorPoolKey = doctors.map((doctor) => doctor.id || doctor.name).join(",");
       const searchKey = [
@@ -1517,7 +1496,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     publicBlockingAppointments,
     doctors,
     getExplicitPreselectDoctor,
-    serviceDurationByName,
+    duration,
   ]);
 
   useEffect(() => {
@@ -2248,7 +2227,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     )
     .filter(Boolean)
     .join(", ") || "Selected Treatment";
-  const selectedTreatmentDuration = normalizeBookingDuration(duration);
   const selectedTreatmentBasePrice = Number(customPrice === "0" ? finalPrice : customPrice) || 0;
   const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
   const filledToothNumbers = toothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
@@ -3486,7 +3464,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
-                <SelectScheduleModal>
+                <SelectScheduleModal
+                  selectedDuration={duration}
+                  onDurationChange={canManagePricing ? (value) => setDuration(String(normalizeBookingDuration(value))) : undefined}
+                >
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <CalendarIcon className="h-7 w-7" />
@@ -3549,6 +3530,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <p className="text-sm font-bold text-gray-400 mt-1">{selectedTime ? 'Confirmed Slot' : 'Please select'}</p>
                       </div>
                     </button>
+                    <div className="rounded-[2.5rem] border-2 border-gray-100 bg-white p-8 shadow-sm">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                        <Clock className="h-8 w-8" />
+                      </div>
+                      <p className="mt-6 text-[10px] font-black uppercase tracking-widest text-blue-600">Appointment Duration</p>
+                      {canManagePricing ? (
+                        <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))}>
+                          <SelectTrigger className="mt-1 h-auto min-h-0 border-0 bg-transparent px-0 py-0 text-left text-3xl font-black text-gray-900 shadow-none focus:ring-0 focus:ring-offset-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-xl">
+                            {ALLOWED_BOOKING_DURATIONS.map((minutes) => (
+                              <SelectItem key={minutes} value={String(minutes)}>{minutes} mins</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="mt-1 text-3xl font-black text-gray-900">{duration} mins</p>
+                      )}
+                    </div>
                   </div>
                 </SelectScheduleModal>
               )}
@@ -3713,11 +3714,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                 <p className="truncate text-sm font-black text-gray-900 sm:text-base">{selectedTreatmentName}</p>
                                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold text-gray-500">
                                   <span className="inline-flex items-center gap-1.5">
-                                    <Clock className="h-4 w-4 text-blue-600" />
-                                    {selectedTreatmentDuration} mins
-                                  </span>
-                                  <span className="text-gray-300">-</span>
-                                  <span className="inline-flex items-center gap-1.5">
                                     <Tag className="h-4 w-4 text-blue-600" />
                                     <span className="text-[0.72em]">{"\u20b1"}</span>{selectedTreatmentBasePrice.toLocaleString()}
                                   </span>
@@ -3730,7 +3726,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </SelectTrigger>
                         <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
                           {bookingTreatmentOptions.map((t) => {
-                            const optionDuration = normalizeBookingDuration(serviceDurationByName[t.name]);
                             const optionPrice = servicePriceByName[t.name] || 0;
                             const disabled = isTreatmentOptionDisabled(t.name);
 
@@ -3750,7 +3745,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     <span className="block text-xs font-semibold text-gray-500">
                                       {t.name === "Other"
                                         ? "Custom treatment"
-                                        : `${optionDuration} mins${optionPrice ? ` - \u20b1${optionPrice.toLocaleString()}` : ""}`}
+                                        : optionPrice ? `\u20b1${optionPrice.toLocaleString()}` : "No default price"}
                                     </span>
                                   </span>
                                 </div>
@@ -3839,7 +3834,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                   </SelectTrigger>
                                   <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
                                     {bookingTreatmentOptions.map((t) => {
-                                      const optionDuration = normalizeBookingDuration(serviceDurationByName[t.name]);
                                       const optionPrice = servicePriceByName[t.name] || 0;
                                       const disabled = isTreatmentOptionDisabled(t.name, sectionIndex);
 
@@ -3859,7 +3853,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                               <span className="block text-xs font-semibold text-gray-500">
                                                 {t.name === "Other"
                                                   ? "Custom treatment"
-                                                  : `${optionDuration} mins${optionPrice ? ` - ₱${optionPrice.toLocaleString()}` : ""}`}
+                                                  : optionPrice ? `₱${optionPrice.toLocaleString()}` : "No default price"}
                                               </span>
                                             </span>
                                           </div>
@@ -4011,29 +4005,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
 
                     <div className="space-y-2.5 p-3.5 sm:space-y-3 sm:p-5">
-                      <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                            <Clock className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-gray-500">Duration</p>
-                            {canManagePricing ? (
-                              <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))}>
-                                <SelectTrigger className="mt-0.5 h-auto min-h-0 border-0 bg-transparent px-0 py-0 text-left text-lg font-black text-gray-900 shadow-none focus:ring-0 focus:ring-offset-0">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="rounded-xl">
-                                  {ALLOWED_BOOKING_DURATIONS.map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <p className="mt-0.5 text-lg font-black text-gray-900">{duration} mins</p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
                       <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">

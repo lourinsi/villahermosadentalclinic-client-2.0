@@ -1489,7 +1489,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
   const [customVisitTreatmentName, setCustomVisitTreatmentName] = useState("");
   const [visitTreatmentPrice, setVisitTreatmentPrice] = useState("");
-  const [visitTreatmentDuration, setVisitTreatmentDuration] = useState("30");
   const [visitTreatmentToothNumberEntries, setVisitTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [similarVisitTreatmentPrompt, setSimilarVisitTreatmentPrompt] = useState<{
     input: string;
@@ -2513,7 +2512,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       getAppointmentTypeName(numericType, (sourceAppointment as any).customType) ||
       String((sourceAppointment as any).type || "");
     const currentPrice = Number((sourceAppointment as any).price ?? selectedService?.price ?? 0);
-    const currentDuration = normalizeBookingDuration((sourceAppointment as any).duration || selectedService?.duration || 30);
 
     setUpdateTreatmentAppointment(sourceAppointment);
     setSelectedVisitTreatmentId(selectedId);
@@ -2523,7 +2521,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         : ""
     );
     setVisitTreatmentPrice(String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0));
-    setVisitTreatmentDuration(String(currentDuration));
     setVisitTreatmentToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(sourceAppointment)));
     setSimilarVisitTreatmentPrompt(null);
   };
@@ -2535,7 +2532,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setSelectedVisitTreatmentId(null);
     setCustomVisitTreatmentName("");
     setVisitTreatmentPrice("");
-    setVisitTreatmentDuration("30");
     setVisitTreatmentToothNumberEntries([""]);
     setSimilarVisitTreatmentPrompt(null);
   };
@@ -2575,7 +2571,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return;
     }
 
-    const nextDuration = normalizeBookingDuration(visitTreatmentDuration || selectedTreatment.duration || (updateTreatmentAppointment as any).duration || 30);
+    const nextDuration = normalizeBookingDuration((updateTreatmentAppointment as any).duration || 30);
     const nextToothNumbers = normalizeBookingToothNumbers(visitTreatmentToothNumberEntries);
 
     setIsUpdatingVisitTreatment(true);
@@ -3718,8 +3714,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     selectedVisitTreatment &&
     (!selectedVisitTreatment || selectedVisitTreatment.id !== OTHER_APPOINTMENT_TYPE_INDEX || customVisitTreatmentName.trim()) &&
     Number.isFinite(visitTreatmentPriceNumber) &&
-    visitTreatmentPriceNumber >= 0 &&
-    Boolean(visitTreatmentDuration)
+    visitTreatmentPriceNumber >= 0
   );
   const assignDoctorActionLabel = assignDoctorAppointment && getVisitDoctorName(assignDoctorAppointment)
     ? "Change Doctor"
@@ -5609,16 +5604,13 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           currentTreatmentLabel={updateTreatmentCurrentLabel}
           customTreatmentName={customVisitTreatmentName}
           selectedPrice={visitTreatmentPrice}
-          selectedDuration={visitTreatmentDuration}
           toothNumberEntries={visitTreatmentToothNumberEntries}
           onCustomTreatmentNameChange={setCustomVisitTreatmentName}
           onSelectedPriceChange={setVisitTreatmentPrice}
-          onSelectedDurationChange={setVisitTreatmentDuration}
           onToothNumberEntriesChange={setVisitTreatmentToothNumberEntries}
           onTreatmentSelect={(treatment) => {
             setSelectedVisitTreatmentId(treatment.id);
             setVisitTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
-            setVisitTreatmentDuration(String(normalizeBookingDuration(treatment.duration || 30)));
             if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
               setCustomVisitTreatmentName("");
             } else if (!customVisitTreatmentName.trim()) {

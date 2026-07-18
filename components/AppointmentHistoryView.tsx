@@ -525,7 +525,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
   const [customTreatmentName, setCustomTreatmentName] = useState("");
   const [selectedTreatmentPrice, setSelectedTreatmentPrice] = useState("");
-  const [selectedTreatmentDuration, setSelectedTreatmentDuration] = useState("30");
   const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [selectedTreatmentSections, setSelectedTreatmentSections] = useState<SelectTreatmentModalSection[] | null>(null);
   const [localTreatmentNotes, setLocalTreatmentNotes] = useState<string>("");
@@ -598,7 +597,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       setSelectedTreatmentId(null);
       setCustomTreatmentName("");
       setSelectedTreatmentPrice("");
-      setSelectedTreatmentDuration("30");
       setTreatmentToothNumberEntries([""]);
       setLocalTreatmentNotes("");
       setLocalRemarks("");
@@ -1999,7 +1997,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return false;
     const priceValue = Number(section.selectedPrice ?? option.price ?? 0);
     if (!Number.isFinite(priceValue) || priceValue < 0) return false;
-    if (!String(section.selectedDuration ?? "").trim()) return false;
     return true;
   };
 
@@ -2013,8 +2010,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         : selectedTreatmentOption &&
           (!isCustomSelectedTreatment || customTreatmentName.trim()) &&
           Number.isFinite(Number(selectedTreatmentPrice)) &&
-          Number(selectedTreatmentPrice) >= 0 &&
-          Boolean(selectedTreatmentDuration)
+          Number(selectedTreatmentPrice) >= 0
     )
   );
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
@@ -2550,7 +2546,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setSelectedTreatmentId(null);
     setCustomTreatmentName("");
     setSelectedTreatmentPrice("");
-    setSelectedTreatmentDuration("30");
     setTreatmentToothNumberEntries([""]);
     setSelectedTreatmentSections(null);
   };
@@ -2592,10 +2587,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             displayedBasePrice,
             matchedTreatment?.price
           ) ?? 0;
-          const currentDuration = normalizeBookingDuration(
-            bookingTreatment.duration ?? displayedSnapshot.duration ?? matchedTreatment?.duration ?? 30
-          );
-
           return {
             selectedTreatmentId: nextSelectedTreatmentId,
             currentTreatmentLabel: index === 0 ? typeName : sectionTypeName,
@@ -2604,7 +2595,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 ? String(bookingTreatment.customType || sectionTypeName || "").trim()
                 : "",
             selectedPrice: String(Math.max(0, Number(currentPrice) || 0)),
-            selectedDuration: String(currentDuration),
           };
         })
       : [
@@ -2613,7 +2603,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             currentTreatmentLabel: typeName,
             customTreatmentName: customTreatmentName.trim(),
             selectedPrice: selectedTreatmentPrice,
-            selectedDuration: selectedTreatmentDuration,
           },
         ];
 
@@ -2621,7 +2610,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setSelectedTreatmentId(firstSection.selectedTreatmentId ?? null);
     setCustomTreatmentName(firstSection.customTreatmentName || "");
     setSelectedTreatmentPrice(String(firstSection.selectedPrice ?? ""));
-    setSelectedTreatmentDuration(String(firstSection.selectedDuration ?? "30"));
     setTreatmentToothNumberEntries(appointmentToothNumberEntries || [""]);
     setSelectedTreatmentSections(nextSections);
     setIsChangeTreatmentOpen(true);
@@ -2639,7 +2627,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           selectedTreatmentId,
           customTreatmentName,
           selectedPrice: selectedTreatmentPrice,
-          selectedDuration: selectedTreatmentDuration,
         }];
 
     if (sections.length === 0) {
@@ -2655,7 +2642,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return true;
       const priceValue = Number(section.selectedPrice ?? option.price ?? 0);
       if (!Number.isFinite(priceValue) || priceValue < 0) return true;
-      if (!String(section.selectedDuration ?? "").trim()) return true;
       return false;
     });
 
@@ -2664,15 +2650,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       return;
     }
 
+    const appointmentDuration = normalizeBookingDuration(displayedSnapshot?.duration || 30);
     const updatedTreatments = sections.map((section) => {
-      const selectedOption = activeTreatmentOptions.find((option) => option.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0, duration: 30 };
+      const selectedOption = activeTreatmentOptions.find((option) => option.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
       const isCustomTreatment = selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
       const customType = isCustomTreatment ? String(section.customTreatmentName || "").trim() : undefined;
       const priceValue = Number(section.selectedPrice ?? selectedOption.price ?? 0);
       return {
         type: selectedOption.id,
         customType: isCustomTreatment ? customType : undefined,
-        duration: normalizeBookingDuration(section.selectedDuration ?? selectedOption.duration ?? 30),
+        duration: appointmentDuration,
         price: Math.max(0, priceValue),
       };
     });
@@ -2682,7 +2669,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const payload: Partial<Appointment> = {
       type: firstUpdatedTreatment.type,
       customType: firstUpdatedTreatment.customType,
-      duration: firstUpdatedTreatment.duration,
+      duration: appointmentDuration,
       price: firstUpdatedTreatment.price,
       ...buildBookingTreatmentsPayload(updatedTreatments),
       toothNumbers: appointmentToothNumbers,
@@ -2697,7 +2684,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         ...updated,
         type: updated?.type ?? firstUpdatedTreatment.type,
         customType: firstUpdatedTreatment.customType ?? updated?.customType,
-        duration: updated?.duration ?? firstUpdatedTreatment.duration,
+        duration: updated?.duration ?? appointmentDuration,
         price: updated?.price ?? firstUpdatedTreatment.price,
         toothNumbers: updated?.toothNumbers ?? appointmentToothNumbers ?? current.toothNumbers,
         treatments: updated?.treatments ?? current.treatments ?? updatedTreatments,
