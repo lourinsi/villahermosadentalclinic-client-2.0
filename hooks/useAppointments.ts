@@ -26,6 +26,7 @@ export interface Appointment {
   notes: string;
   treatmentNotes?: string;
   toothNumbers?: string;
+  treatments?: any[];
   serviceType?: string;
   // Status is flexible to accept any value from the backend JSON configuration
   status: string;

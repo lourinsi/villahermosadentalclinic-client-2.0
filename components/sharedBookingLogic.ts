@@ -1240,6 +1240,49 @@ export function getBookingTreatmentNotesValue(appointment?: any) {
   return "";
 }
 
+export interface BookingTreatment {
+  type: number;
+  customType?: string;
+  price?: number;
+  duration?: number;
+}
+
+export function normalizeBookingTreatment(value?: unknown): BookingTreatment | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const section = value as Record<string, unknown>;
+  const type = Number(section.type);
+  const rawPrice = Number(section.price ?? section.amount ?? section.cost ?? section.totalPrice ?? section.basePrice ?? section.price);
+  const rawDuration = Number(section.duration ?? section.time ?? section.length ?? section.timeLength ?? 0);
+  return {
+    type: Number.isFinite(type) ? type : 0,
+    customType: String(section.customType ?? section.custom_type ?? '').trim() || undefined,
+    price: Number.isFinite(rawPrice) ? rawPrice : undefined,
+    duration: Number.isFinite(rawDuration) ? rawDuration : undefined,
+  };
+}
+
+export function normalizeBookingTreatments(value?: unknown): BookingTreatment[] {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeBookingTreatment(item))
+      .filter((item): item is BookingTreatment => Boolean(item));
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return normalizeBookingTreatments(parsed);
+      }
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  return [];
+}
+
 export function getBookingToothNumbersValue(appointment?: any) {
   const sources = [
     appointment,
@@ -1268,11 +1311,37 @@ export function getBookingToothNumbersValue(appointment?: any) {
   return "";
 }
 
+export function getBookingTreatmentsValue(appointment?: any): BookingTreatment[] {
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+
+    if (source.treatments) {
+      const normalized = normalizeBookingTreatments(source.treatments);
+      if (normalized.length > 0) return normalized;
+    }
+  }
+
+  return [];
+}
+
 export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toothNumbers?: unknown) {
   return {
     treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),
     toothNumbers: normalizeBookingToothNumbers(toothNumbers),
   };
+}
+
+export function buildBookingTreatmentsPayload(treatments?: unknown) {
+  const normalized = normalizeBookingTreatments(treatments);
+  return normalized.length > 0 ? { treatments: normalized } : {};
 }
 
 export function getProjectedBookingStatus({
