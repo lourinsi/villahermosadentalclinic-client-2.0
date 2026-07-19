@@ -13,6 +13,7 @@ import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useIsMobile } from "./ui/use-mobile";
 
 import { toast } from "sonner";
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -858,23 +859,79 @@ type ExpenseTimelinePaymentHistoryProps = {
 };
 
 const ExpenseTimelinePaymentHistory = ({ expense, payments, canManage, onCreate, onView, onEdit, onDelete, onRestore }: ExpenseTimelinePaymentHistoryProps) => {
+  const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false);
   const rows = [...payments].sort((left, right) => String(right.paymentDate || right.date || right.createdAt || "").localeCompare(String(left.paymentDate || left.date || left.createdAt || "")));
   return (
     <section className="mt-5 border-t border-slate-100 pt-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2"><Wallet className="h-4 w-4 text-violet-600" /><h5 className="text-sm font-black text-slate-950">Payment History</h5><span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-black text-violet-700">{rows.length}</span></div>
-        {!expense.deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-violet-200 text-xs font-black text-violet-700 hover:bg-violet-50" onClick={onCreate}><Plus className="mr-1.5 h-3.5 w-3.5" />Record payment</Button> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {!expense.deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-violet-200 text-xs font-black text-violet-700 hover:bg-violet-50" onClick={onCreate}><Plus className="mr-1.5 h-3.5 w-3.5" />Record payment</Button> : null}
+          {rows.length > 0 ? (
+            <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-violet-200 text-xs font-black text-violet-700 hover:bg-violet-50" onClick={() => setIsPaymentHistoryOpen((current) => !current)}>
+              {isPaymentHistoryOpen ? "Hide payments" : `Show payments (${rows.length})`}
+            </Button>
+          ) : null}
+        </div>
       </div>
-      {rows.length === 0 ? <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">No payments recorded for this expense.</div> : <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="hidden grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid"><span>Payment method</span><span>Amount</span><span>Date</span><span>Reference no.</span><span className="text-right">Actions</span></div>
-        <div className="divide-y divide-slate-100">{rows.map((payment) => { const deleted = Boolean(payment.deleted); const method = formatOptionLabel(payment.method, PAYMENT_METHOD_OPTIONS); const date = payment.paymentDate || payment.date; return <div key={payment.id} className={`grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] md:items-center ${deleted ? "bg-slate-50 text-slate-400" : "bg-white"}`}>
-          <div className="flex min-w-0 items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${deleted ? "bg-slate-100 text-slate-400" : "bg-violet-50 text-violet-700"}`}><CreditCard className="h-4 w-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`truncate font-black ${deleted ? "text-slate-500" : "text-slate-900"}`}>{method}</span><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${deleted ? "bg-slate-200 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>{deleted ? "Deleted" : "Payment"}</span></div>{payment.notes ? <p className="mt-0.5 line-clamp-1 text-xs font-medium text-slate-500">{payment.notes}</p> : null}</div></div>
-          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span><span className={`font-black ${deleted ? "text-slate-500" : "text-emerald-600"}`}>{formatCurrency(payment.amount)}</span></div>
-          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span><span className="font-bold text-slate-700">{formatFinanceDate(date)}</span></div>
-          <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span><span className="font-mono text-xs font-bold text-slate-600">{payment.transactionId ? `Ref: ${payment.transactionId}` : "—"}</span></div>
-          <div className="flex items-center justify-end gap-1.5"><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onView(payment)} title="View payment"><Eye className="h-3.5 w-3.5" /></Button>{canManage ? deleted ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-emerald-200 px-2 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-50" onClick={() => onRestore(payment)}><RotateCcw className="mr-1 h-3.5 w-3.5" />Restore</Button> : <><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onEdit(payment)} title="Edit payment"><Edit className="h-3.5 w-3.5" /></Button><Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-red-100 text-red-600 hover:bg-red-50" onClick={() => onDelete(payment)} title="Delete payment"><Trash2 className="h-3.5 w-3.5" /></Button></> : null}</div>
-        </div>; })}</div>
-      </div>}
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">No payments recorded for this expense.</div>
+      ) : isPaymentHistoryOpen ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="hidden grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid"><span>Payment method</span><span>Amount</span><span>Date</span><span>Reference no.</span><span className="text-right">Actions</span></div>
+          <div className="divide-y divide-slate-100">
+            {rows.map((payment) => {
+              const deleted = Boolean(payment.deleted);
+              const method = formatOptionLabel(payment.method, PAYMENT_METHOD_OPTIONS);
+              const date = payment.paymentDate || payment.date;
+
+              return (
+                <div
+                  key={payment.id}
+                  className={`grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.15fr)_110px_150px_minmax(130px,0.8fr)_132px] md:items-center ${deleted ? "bg-slate-50 text-slate-400" : "bg-white"}`}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${deleted ? "bg-slate-100 text-slate-400" : "bg-violet-50 text-violet-700"}`}><CreditCard className="h-4 w-4" /></div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`truncate font-black ${deleted ? "text-slate-500" : "text-slate-900"}`}>{method}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${deleted ? "bg-slate-200 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>{deleted ? "Deleted" : "Payment"}</span>
+                      </div>
+                      {payment.notes ? <p className="mt-0.5 line-clamp-1 text-xs font-medium text-slate-500">{payment.notes}</p> : null}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span><span className={`font-black ${deleted ? "text-slate-500" : "text-emerald-600"}`}>{formatCurrency(payment.amount)}</span></div>
+                  <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span><span className="font-bold text-slate-700">{formatFinanceDate(date)}</span></div>
+                  <div className="flex items-center justify-between gap-3 md:block"><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span><span className="font-mono text-xs font-bold text-slate-600">{payment.transactionId ? `Ref: ${payment.transactionId}` : "—"}</span></div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onView(payment)} title="View payment">
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    {canManage ? (
+                      deleted ? (
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl border-emerald-200 px-2 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-50" onClick={() => onRestore(payment)}>
+                          <RotateCcw className="mr-1 h-3.5 w-3.5" />Restore
+                        </Button>
+                      ) : (
+                        <>
+                          <Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50" onClick={() => onEdit(payment)} title="Edit payment">
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-xl border-red-100 text-red-600 hover:bg-red-50" onClick={() => onDelete(payment)} title="Delete payment">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">Payment history hidden.</div>
+      )}
     </section>
   );
 };
@@ -904,6 +961,14 @@ export function FinanceView() {
   const [expensePaymentTransactionId, setExpensePaymentTransactionId] = useState("");
   const [expensePaymentNotes, setExpensePaymentNotes] = useState("");
   const [expenseViewMode, setExpenseViewMode] = useState<"history" | "list">("list");
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    if (typeof isMobile === "boolean") {
+      setExpenseViewMode(isMobile ? "history" : "list");
+    }
+  }, [isMobile]);
+
   const [expenseOverpaymentAction, setExpenseOverpaymentAction] = useState<"save" | "payment" | null>(null);
   const [expenseOverpaymentAdjustedPrice, setExpenseOverpaymentAdjustedPrice] = useState("");
   const [expenseOverpaymentLoadingAction, setExpenseOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);

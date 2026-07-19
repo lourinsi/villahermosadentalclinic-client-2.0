@@ -9,6 +9,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
+import { useIsMobile } from "./ui/use-mobile";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -2121,12 +2122,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     appointmentId?: string;
   } | null>(null);
 
+  const isMobile = useIsMobile();
+
   // New state for filters
   const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
   const [historySearchFilter, setHistorySearchFilter] = useState('');
   const [historyViewMode, setHistoryViewMode] = useState<'history' | 'list'>('list');
+  const [historyPaymentHistoryOpenByAppointment, setHistoryPaymentHistoryOpenByAppointment] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (typeof isMobile === 'boolean') {
+      setHistoryViewMode(isMobile ? 'history' : 'list');
+    }
+  }, [isMobile]);
 
   // Snapshot states
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
@@ -5095,137 +5105,158 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </div>
 
                               {visitTransactions.length > 0 ? (
-                                <div className="mt-4 border-t border-slate-100 pt-4">
-                                  <div className="mb-3 flex items-center gap-2">
-                                    <PaymentIcon className="h-4 w-4 text-violet-600" />
-                                    <h4 className="text-sm font-black text-slate-950">Payment History</h4>
-                                  </div>
-                                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                    <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
-                                      <span>Payment Method</span>
-                                      <span>Amount</span>
-                                      <span>Date</span>
-                                      <span>Reference No.</span>
-                                      <span className="text-right">Actions</span>
-                                    </div>
-                                    <div className="divide-y divide-slate-100">
-                                      {visitTransactions.map((txn) => {
-                                        const transactionKey = getPaymentTransactionKey(txn);
-                                        const paymentDisplay = getTransactionPaymentDisplay(txn);
-                                        const methodLabel = normalizeBookingPaymentMethod(txn.method);
-                                        const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
-                                        const referenceNo = String(txn.transactionId || txn.id || "N/A");
-                                        const editablePaymentId = getEditablePaymentId(txn);
-                                        const restorablePaymentId = getRestorablePaymentId(txn);
-                                        const isCashPayment = methodLabel.toLowerCase() === "cash";
-                                        const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
-                                        const isCancelledPayment =
-                                          appointmentStatus === "cancelled" ||
-                                          isAppointmentCancelledStatusTransaction(txn);
-                                        const isInactivePayment = isDeletedPayment || isCancelledPayment;
-
-                                        return (
-                                          <div
-                                            key={transactionKey}
-                                            className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
-                                              }`}
-                                          >
-                                            <div className="flex min-w-0 items-center gap-3">
-                                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isCashPayment ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-700"}`}>
-                                                {getPaymentMethodIcon(methodLabel)}
-                                              </div>
-                                              <div className="min-w-0">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                  <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
-                                                  <span className="font-semibold text-slate-400">-</span>
-                                                  <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
-                                                    <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
-                                                  </span>
-                                                  {paymentDisplay.label ? (
-                                                    <PaymentTransactionStatusBadge
-                                                      display={paymentDisplay}
-                                                      className="rounded-full px-2.5 py-0.5 text-xs"
-                                                      showIcon={false}
-                                                    />
-                                                  ) : null}
-                                                </div>
-                                                {txn.notes ? (
-                                                  <p className="mt-1 line-clamp-2 text-xs font-medium text-slate-500">{txn.notes}</p>
-                                                ) : null}
-                                              </div>
-                                            </div>
-
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                              <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
-                                                <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
-                                              </span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
-                                              <span className="font-bold text-slate-700">{txnDate}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span>
-                                              <span className="font-mono text-xs font-bold text-slate-600">Ref: {referenceNo}</span>
-                                            </div>
-                                            <div className="flex items-center justify-end gap-2">
-                                              <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="icon"
-                                                className="h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
-                                                onClick={() => handleOpenTransactionSnapshot(txn)}
-                                                title="View payment snapshot"
-                                              >
-                                                <Eye className="h-4 w-4" />
-                                                <span className="sr-only">View payment snapshot</span>
-                                              </Button>
-                                              {!isDeletedPayment ? (
-                                                <>
-                                                  <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
-                                                    onClick={() => handleEditPaymentTransaction(txn)}
-                                                    title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                                  >
-                                                    <Edit className="h-4 w-4" />
-                                                    <span className="sr-only">Edit payment</span>
-                                                  </Button>
-                                                  <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className={`h-9 w-9 rounded-xl border-red-100 text-red-600 hover:bg-red-50 ${editablePaymentId ? "" : "opacity-60"}`}
-                                                    onClick={() => requestDeletePaymentTransaction(txn)}
-                                                    title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
-                                                  >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    <span className="sr-only">Delete payment</span>
-                                                  </Button>
-                                                </>
-                                              ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
-                                                <Button
-                                                  type="button"
-                                                  variant="outline"
-                                                  size="sm"
-                                                  className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-50"
-                                                  onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
-                                                  title="Restore payment"
-                                                >
-                                                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                                                  Restore
-                                                </Button>
-                                              ) : null}
-                                            </div>
+                                (() => {
+                                  const isPaymentHistoryOpen = historyPaymentHistoryOpenByAppointment[appointmentId] ?? false;
+                                  return (
+                                    <div className="mt-4 border-t border-slate-100 pt-4">
+                                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <PaymentIcon className="h-4 w-4 text-violet-600" />
+                                          <h4 className="text-sm font-black text-slate-950">Payment History</h4>
+                                        </div>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 rounded-xl border-slate-200 text-xs font-black text-slate-700 hover:bg-slate-50"
+                                          onClick={() => setHistoryPaymentHistoryOpenByAppointment((prev) => ({
+                                            ...prev,
+                                            [appointmentId]: !isPaymentHistoryOpen,
+                                          }))}
+                                        >
+                                          {isPaymentHistoryOpen ? "Hide payments" : `Show payments (${visitTransactions.length})`}
+                                        </Button>
+                                      </div>
+                                      {isPaymentHistoryOpen ? (
+                                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                          <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
+                                            <span>Payment Method</span>
+                                            <span>Amount</span>
+                                            <span>Date</span>
+                                            <span>Reference No.</span>
+                                            <span className="text-right">Actions</span>
                                           </div>
-                                        );
-                                      })}
+                                          <div className="divide-y divide-slate-100">
+                                            {visitTransactions.map((txn) => {
+                                              const transactionKey = getPaymentTransactionKey(txn);
+                                              const paymentDisplay = getTransactionPaymentDisplay(txn);
+                                              const methodLabel = normalizeBookingPaymentMethod(txn.method);
+                                              const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
+                                              const referenceNo = String(txn.transactionId || txn.id || "N/A");
+                                              const editablePaymentId = getEditablePaymentId(txn);
+                                              const restorablePaymentId = getRestorablePaymentId(txn);
+                                              const isCashPayment = methodLabel.toLowerCase() === "cash";
+                                              const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                                              const isCancelledPayment =
+                                                appointmentStatus === "cancelled" ||
+                                                isAppointmentCancelledStatusTransaction(txn);
+                                              const isInactivePayment = isDeletedPayment || isCancelledPayment;
+
+                                              return (
+                                                <div
+                                                  key={transactionKey}
+                                                  className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                                    }`}
+                                                >
+                                                  <div className="flex min-w-0 items-center gap-3">
+                                                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isCashPayment ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-700"}`}>
+                                                      {getPaymentMethodIcon(methodLabel)}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
+                                                        <span className="font-semibold text-slate-400">-</span>
+                                                        <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
+                                                          <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                                        </span>
+                                                        {paymentDisplay.label ? (
+                                                          <PaymentTransactionStatusBadge
+                                                            display={paymentDisplay}
+                                                            className="rounded-full px-2.5 py-0.5 text-xs"
+                                                            showIcon={false}
+                                                          />
+                                                        ) : null}
+                                                      </div>
+                                                      {txn.notes ? (
+                                                        <p className="mt-1 line-clamp-2 text-xs font-medium text-slate-500">{txn.notes}</p>
+                                                      ) : null}
+                                                    </div>
+                                                  </div>
+
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
+                                                    <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
+                                                      <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
+                                                    <span className="font-bold text-slate-700">{txnDate}</span>
+                                                  </div>
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span>
+                                                    <span className="font-mono text-xs font-bold text-slate-600">Ref: {referenceNo}</span>
+                                                  </div>
+                                                  <div className="flex items-center justify-end gap-2">
+                                                    <Button
+                                                      type="button"
+                                                      variant="outline"
+                                                      size="icon"
+                                                      className="h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
+                                                      onClick={() => handleOpenTransactionSnapshot(txn)}
+                                                      title="View payment snapshot"
+                                                    >
+                                                      <Eye className="h-4 w-4" />
+                                                      <span className="sr-only">View payment snapshot</span>
+                                                    </Button>
+                                                    {!isDeletedPayment ? (
+                                                      <>
+                                                        <Button
+                                                          type="button"
+                                                          variant="outline"
+                                                          size="icon"
+                                                          className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                          onClick={() => handleEditPaymentTransaction(txn)}
+                                                          title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                                        >
+                                                          <Edit className="h-4 w-4" />
+                                                          <span className="sr-only">Edit payment</span>
+                                                        </Button>
+                                                        <Button
+                                                          type="button"
+                                                          variant="outline"
+                                                          size="icon"
+                                                          className={`h-9 w-9 rounded-xl border-red-100 text-red-600 hover:bg-red-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                          onClick={() => requestDeletePaymentTransaction(txn)}
+                                                          title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
+                                                        >
+                                                          <Trash2 className="h-4 w-4" />
+                                                          <span className="sr-only">Delete payment</span>
+                                                        </Button>
+                                                      </>
+                                                    ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                                      <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-50"
+                                                        onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
+                                                        title="Restore payment"
+                                                      >
+                                                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                                        Restore
+                                                      </Button>
+                                                    ) : null}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      ) : null}
                                     </div>
-                                  </div>
-                                </div>
+                                  );
+                                })()
                               ) : null}
                             </div>
                           </div>
@@ -5283,9 +5314,17 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 <TableCell className="max-w-xs truncate">{treatmentNames}</TableCell>
                                 <TableCell className="max-w-[10rem] truncate">{doctorName || "Unassigned"}</TableCell>
                                 <TableCell>
-                                  <Badge className={isDeletedAppointment ? deletedPaymentBadgeClass : "bg-slate-100 text-slate-700"}>
-                                    {isDeletedAppointment ? "Deleted" : appointmentStatus}
-                                  </Badge>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <AppointmentStatusSelect
+                                      value={isDeletedAppointment ? "deleted" : String(appointment.status || "")}
+                                      statuses={APPOINTMENT_STATUSES}
+                                      includeDeleted={effectiveRole === "admin"}
+                                      onChange={(nextStatus) => handleVisitStatusChange(appointment, nextStatus)}
+                                      badgeClassName="font-medium"
+                                    />
+                                    <span className="text-slate-400">/</span>
+                                    {getPaymentStatusBadge(String(appointment.paymentStatus || "unpaid"))}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="font-medium">{formatPatientHistoryCurrency(appointment.price)}</TableCell>
                                 <TableCell className="font-medium text-emerald-700">{formatPatientHistoryCurrency(appointment.totalPaid)}</TableCell>
