@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "./ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "./ui/select";
@@ -190,6 +191,76 @@ export interface Patient {
 }
 
 const PHYSICIAN_INFORMATION_QUESTION_ID = "baseline_physician_information";
+
+const GENERAL_MEDICAL_INFO_IDS = new Set([
+  "baseline_good_health",
+  "baseline_under_medical_treatment",
+  "baseline_serious_illness_or_operation",
+  "baseline_hospitalized",
+  "baseline_medication",
+  "baseline_tobacco",
+  "baseline_alcohol_or_drugs"
+]);
+
+const ALLERGY_IDS = new Set([
+  "baseline_allergy_local_anesthetic",
+  "baseline_allergy_penicillin_antibiotics",
+  "baseline_allergy_sulfa",
+  "baseline_allergy_aspirin",
+  "baseline_allergy_latex",
+  "baseline_allergy_others"
+]);
+
+const WOMEN_ONLY_IDS = new Set([
+  "baseline_pregnant",
+  "baseline_nursing",
+  "baseline_birth_control"
+]);
+
+const OTHER_MEDICAL_IDS = new Set([
+  "baseline_bleeding_time",
+  "baseline_blood_type",
+  "baseline_blood_pressure"
+]);
+
+const MEDICAL_CONDITION_IDS = new Set([
+  "baseline_condition_high_blood_pressure",
+  "baseline_condition_low_blood_pressure",
+  "baseline_condition_epilepsy_convulsions",
+  "baseline_condition_aids_hiv",
+  "baseline_condition_sexually_transmitted_disease",
+  "baseline_condition_stomach_troubles_ulcers",
+  "baseline_condition_fainting_seizure",
+  "baseline_condition_rapid_weight_loss",
+  "baseline_condition_radiation_therapy",
+  "baseline_condition_joint_replacement_implant",
+  "baseline_condition_heart_surgery",
+  "baseline_condition_heart_attack",
+  "baseline_condition_thyroid_problem",
+  "baseline_condition_heart_disease",
+  "baseline_condition_heart_murmur",
+  "baseline_condition_hepatitis_liver_disease",
+  "baseline_condition_rheumatic_fever",
+  "baseline_condition_hay_fever_allergies",
+  "baseline_condition_respiratory_problems",
+  "baseline_condition_hepatitis_jaundice",
+  "baseline_condition_tuberculosis",
+  "baseline_condition_swollen_ankles",
+  "baseline_condition_kidney_disease",
+  "baseline_condition_diabetes",
+  "baseline_condition_chest_pain",
+  "baseline_condition_stroke",
+  "baseline_condition_cancer_tumors",
+  "baseline_condition_anemia",
+  "baseline_condition_angina",
+  "baseline_condition_asthma",
+  "baseline_condition_emphysema",
+  "baseline_condition_bleeding_problems",
+  "baseline_condition_blood_diseases",
+  "baseline_condition_head_injuries",
+  "baseline_condition_arthritis_rheumatism",
+  "baseline_condition_other"
+]);
 
 type PhysicianInformationState = {
   name: string;
@@ -1506,6 +1577,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [savedQuestionnaireAnswers, setSavedQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
+  const [savedPatientQuestionnaireData, setSavedPatientQuestionnaireData] = useState<Record<string, any>>({});
   const [physicianInformation, setPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
   const [savedPhysicianInformation, setSavedPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
   const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
@@ -1576,6 +1648,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       setQuestionnaireQuestions(questionsResult.questions.filter((question) => question.isActive !== false));
       setPatientQuestionnaireData(questionnaireData);
+      setSavedPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -1601,9 +1674,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const questionnaireHasChanges = React.useMemo(
     () =>
       JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers) ||
+      JSON.stringify(patientQuestionnaireData) !== JSON.stringify(savedPatientQuestionnaireData) ||
       JSON.stringify(physicianInformationComparable(physicianInformation)) !==
       JSON.stringify(physicianInformationComparable(savedPhysicianInformation)),
-    [physicianInformation, questionnaireAnswers, savedPhysicianInformation, savedQuestionnaireAnswers]
+    [physicianInformation, patientQuestionnaireData, questionnaireAnswers, savedPatientQuestionnaireData, savedPhysicianInformation, savedQuestionnaireAnswers]
   );
 
   const consentFormHasChanges = React.useMemo(
@@ -1640,6 +1714,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const updatePhysicianInformation = (field: PhysicianInformationField, value: string) => {
     setPhysicianInformation((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setIsModified(true);
+  };
+
+  const updateQuestionnaireDataField = (field: string, value: string) => {
+    setPatientQuestionnaireData((current) => ({
       ...current,
       [field]: value,
     }));
@@ -1699,6 +1781,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextAnswers = normalizeQuestionnaireAnswers(nextData);
       const nextPhysicianInformation = createPhysicianInformationState(nextData);
       setPatientQuestionnaireData(nextData);
+      setSavedPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -1764,6 +1847,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextPhysicianInformation = createPhysicianInformationState(nextData);
       const savedConsent = createConsentFormState(nextData);
       setPatientQuestionnaireData(nextData);
+      setSavedPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -2039,6 +2123,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
+    const questionnaireDataFieldLabels: Record<string, string> = {
+      bleedingTime: "Questionnaire - Bleeding Time",
+      bloodType: "Questionnaire - Blood Type",
+      bloodPressure: "Questionnaire - Blood Pressure",
+      otherConditionsDetails: "Questionnaire - Other medical condition details",
+      otherMedicalCondition: "Questionnaire - Other medical condition",
+      allergyOthersDetails: "Questionnaire - Additional allergy details",
+    };
+
+    Object.entries(questionnaireDataFieldLabels).forEach(([fieldKey, label]) => {
+      const oldValue = savedPatientQuestionnaireData[fieldKey];
+      const newValue = patientQuestionnaireData[fieldKey];
+      if (toComparableValue(oldValue) !== toComparableValue(newValue)) {
+        changes[label] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
     const physicianFieldLabels: Record<PhysicianInformationField, string> = {
       name: "Questionnaire - Name of Physician",
       officeAddress: "Questionnaire - Physician Office Address",
@@ -2093,10 +2197,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     consentForm,
     formData,
     originalLoadedData,
+    patientQuestionnaireData,
     physicianInformation,
     questionnaireAnswers,
     questionnaireQuestions,
     savedConsentForm,
+    savedPatientQuestionnaireData,
     savedPhysicianInformation,
     savedQuestionnaireAnswers,
   ]);
@@ -3229,6 +3335,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setQuestionnaireAnswers(draft.questionnaireAnswers || {});
       setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
       setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
+      setSavedPatientQuestionnaireData(draft.savedPatientQuestionnaireData || draft.patientQuestionnaireData || {});
       setPhysicianInformation(createPhysicianInformationState(draft.physicianInformation || draft.patientQuestionnaireData || {}));
       setSavedPhysicianInformation(createPhysicianInformationState(draft.savedPhysicianInformation || draft.patientQuestionnaireData || {}));
       setQuestionnaireQuestions(draft.questionnaireQuestions || []);
@@ -4366,95 +4473,432 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsContent>
 
             <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-              <Card className={cardClass}>
-                <CardHeader className={cardHeaderClass}>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
-                      <ClipboardList className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="text-base font-bold text-slate-900">Questionnaire</CardTitle>
-                      <p className="mt-1 text-sm font-medium text-slate-500">Patient questionnaire responses</p>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-5 sm:p-6">
-                  {isLoadingQuestionnaire ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+              {isLoadingQuestionnaire ? (
+                <Card className={cardClass}>
+                  <CardContent className="p-8 text-center text-sm font-semibold text-slate-500">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-violet-600" />
                       Loading questionnaire...
                     </div>
-                  ) : questionnaireQuestions.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
-                      No questionnaire questions have been saved yet.
+                  </CardContent>
+                </Card>
+              ) : questionnaireQuestions.length === 0 ? (
+                <Card className={cardClass}>
+                  <CardContent className="p-8 text-center text-sm font-semibold text-slate-500">
+                    No questionnaire questions have been saved yet.
+                  </CardContent>
+                </Card>
+              ) : (() => {
+                const generalMedicalQuestions = questionnaireQuestions.filter(q => q.id === PHYSICIAN_INFORMATION_QUESTION_ID || GENERAL_MEDICAL_INFO_IDS.has(q.id));
+                const allergyQuestions = questionnaireQuestions.filter(q => ALLERGY_IDS.has(q.id));
+                const medicalConditionQuestions = questionnaireQuestions.filter(q => MEDICAL_CONDITION_IDS.has(q.id));
+                const otherMedicalQuestions = questionnaireQuestions.filter(q => OTHER_MEDICAL_IDS.has(q.id));
+                const womenOnlyQuestions = questionnaireQuestions.filter(q => WOMEN_ONLY_IDS.has(q.id));
+
+                const baselineAllKnownIds = new Set([
+                  PHYSICIAN_INFORMATION_QUESTION_ID,
+                  ...GENERAL_MEDICAL_INFO_IDS,
+                  ...ALLERGY_IDS,
+                  ...MEDICAL_CONDITION_IDS,
+                  ...OTHER_MEDICAL_IDS,
+                  ...WOMEN_ONLY_IDS
+                ]);
+                const additionalQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id));
+
+                const qPhysician = questionnaireQuestions.find(q => q.id === PHYSICIAN_INFORMATION_QUESTION_ID);
+                const qGoodHealth = questionnaireQuestions.find(q => q.id === "baseline_good_health");
+                const qUnderTreatment = questionnaireQuestions.find(q => q.id === "baseline_under_medical_treatment");
+                const qSeriousIllness = questionnaireQuestions.find(q => q.id === "baseline_serious_illness_or_operation");
+                const qHospitalized = questionnaireQuestions.find(q => q.id === "baseline_hospitalized");
+                const qMedication = questionnaireQuestions.find(q => q.id === "baseline_medication");
+                const qTobacco = questionnaireQuestions.find(q => q.id === "baseline_tobacco");
+                const qDrugs = questionnaireQuestions.find(q => q.id === "baseline_alcohol_or_drugs");
+
+                const qPregnant = questionnaireQuestions.find(q => q.id === "baseline_pregnant");
+                const qNursing = questionnaireQuestions.find(q => q.id === "baseline_nursing");
+                const qBirthControl = questionnaireQuestions.find(q => q.id === "baseline_birth_control");
+
+                const renderRowToggle = (question: QuestionnaireQuestion | undefined, detailKey?: string, detailLabel?: string, detailPlaceholder?: string) => {
+                  if (!question) return null;
+                  const checked = Boolean(questionnaireAnswers[question.id]);
+                  return (
+                    <div key={question.id} className="space-y-2 py-3 border-b border-slate-100 last:border-b-0">
+                      <div className="flex items-start justify-between gap-4">
+                        <span className="text-sm font-semibold text-slate-800 leading-tight">{question.text}</span>
+                        <ToggleGroup
+                          type="single"
+                          value={checked ? "yes" : "no"}
+                          onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                          disabled={isSavingQuestionnaire}
+                          aria-label={`Answer ${question.text}`}
+                          className="h-9 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-1"
+                          variant="outline"
+                          size="sm"
+                        >
+                          <ToggleGroupItem value="yes" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                            Yes
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value="no" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                            No
+                          </ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+
+                      {checked && detailKey && (
+                        <div className="mt-2 pl-4 border-l-2 border-violet-100">
+                          {detailLabel && (
+                            <Label className="text-xs font-bold text-slate-500 mb-1 block">{detailLabel}</Label>
+                          )}
+                          <Input
+                            value={patientQuestionnaireData[detailKey] || ""}
+                            onChange={(e) => updateQuestionnaireDataField(detailKey, e.target.value)}
+                            placeholder={detailPlaceholder || "Specify details..."}
+                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                            disabled={isSavingQuestionnaire}
+                          />
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {questionnaireQuestions.map((question) => {
-                        const checkboxId = `patient-questionnaire-${question.id}`;
-                        const checked = Boolean(questionnaireAnswers[question.id]);
-                        const isPhysicianInformationQuestion = question.id === PHYSICIAN_INFORMATION_QUESTION_ID;
+                  );
+                };
 
-                        if (isPhysicianInformationQuestion) {
-                          return (
-                            <div
-                              key={question.id}
-                              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
-                            >
-                              <label htmlFor={checkboxId} className="flex min-h-8 cursor-pointer items-start gap-3">
-                                <Checkbox
-                                  id={checkboxId}
-                                  checked={checked}
-                                  onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
-                                  disabled={isSavingQuestionnaire}
-                                  className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
-                                />
-                                <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
-                              </label>
+                return (
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 items-start">
+                    {/* Left & Middle Column */}
+                    <div className="space-y-6 lg:col-span-2">
+                      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        {/* 1. GENERAL MEDICAL INFORMATION */}
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              1. General Medical Information
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 space-y-1">
+                            {/* Physician Information Question */}
+                            {qPhysician && (() => {
+                              const checked = Boolean(questionnaireAnswers[qPhysician.id]);
+                              const checkboxId = `patient-questionnaire-${qPhysician.id}`;
+                              return (
+                                <div key={qPhysician.id} className="space-y-2 py-3 border-b border-slate-100">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <span className="text-sm font-semibold text-slate-800 leading-tight">{qPhysician.text}</span>
+                                    <ToggleGroup
+                                      type="single"
+                                      value={checked ? "yes" : "no"}
+                                      onValueChange={(value) => handleQuestionnaireAnswerChange(qPhysician.id, value === "yes")}
+                                      disabled={isSavingQuestionnaire}
+                                      aria-label={`Answer ${qPhysician.text}`}
+                                      className="h-9 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-1"
+                                      variant="outline"
+                                      size="sm"
+                                    >
+                                      <ToggleGroupItem value="yes" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        Yes
+                                      </ToggleGroupItem>
+                                      <ToggleGroupItem value="no" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        No
+                                      </ToggleGroupItem>
+                                    </ToggleGroup>
+                                  </div>
 
-                              {checked && (
-                                <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
-                                  {PHYSICIAN_INFORMATION_FIELDS.map((field) => (
-                                    <div key={field.id} className="space-y-1.5">
-                                      <Label htmlFor={`${checkboxId}-${field.id}`} className="text-xs font-semibold text-slate-600">
-                                        {field.label}
-                                      </Label>
-                                      <Input
-                                        id={`${checkboxId}-${field.id}`}
-                                        value={physicianInformation[field.id]}
-                                        onChange={(event) => updatePhysicianInformation(field.id, event.target.value)}
-                                        disabled={isSavingQuestionnaire}
-                                        placeholder={field.placeholder}
-                                        className="h-10 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
-                                      />
+                                  {checked && (
+                                    <div className="mt-3 grid gap-3 pl-4 border-l-2 border-violet-100 pt-1">
+                                      {PHYSICIAN_INFORMATION_FIELDS.map((field) => (
+                                        <div key={field.id} className="space-y-1">
+                                          <Label htmlFor={`${checkboxId}-${field.id}`} className="text-xs font-bold text-slate-500">
+                                            {field.label}
+                                          </Label>
+                                          <Input
+                                            id={`${checkboxId}-${field.id}`}
+                                            value={physicianInformation[field.id]}
+                                            onChange={(event) => updatePhysicianInformation(field.id, event.target.value)}
+                                            disabled={isSavingQuestionnaire}
+                                            placeholder={field.placeholder}
+                                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                                          />
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        }
+                              );
+                            })()}
 
-                        return (
-                          <label
-                            key={question.id}
-                            htmlFor={checkboxId}
-                            className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
-                          >
-                            <Checkbox
-                              id={checkboxId}
-                              checked={checked}
-                              onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
-                              disabled={isSavingQuestionnaire}
-                              className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
-                            />
-                            <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
-                          </label>
-                        );
-                      })}
+                            {/* Standard General Medical Questions */}
+                            {renderRowToggle(qGoodHealth)}
+                            {renderRowToggle(qUnderTreatment, "underMedicalTreatmentDetails", "If so, what is the condition being treated?", "Specify condition...")}
+                            {renderRowToggle(qSeriousIllness, "seriousIllnessOrOperationDetails", "If so, what illness or operation?", "Specify illness or operation...")}
+                            {renderRowToggle(qHospitalized, "hospitalizedDetails", "If so, when and why?", "Specify when and why...")}
+                            {renderRowToggle(qMedication, "medicationDetails", "If so, please specify.", "Specify medication details...")}
+                            {renderRowToggle(qTobacco)}
+                            {renderRowToggle(qDrugs)}
+                          </CardContent>
+                        </Card>
+
+                        {/* 2. ALLERGIES */}
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              2. Allergies
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 space-y-4">
+                            <p className="text-xs font-semibold text-slate-500">
+                              Are you allergic to any of the following? Check which apply:
+                            </p>
+                            <div className="grid grid-cols-1 gap-4">
+                              {allergyQuestions.map((question) => {
+                                const checked = Boolean(questionnaireAnswers[question.id]);
+                                const isOthers = question.id === "baseline_allergy_others";
+                                return (
+                                  <div key={question.id} className="flex items-start gap-3">
+                                    <Checkbox
+                                      id={`allergy-${question.id}`}
+                                      checked={checked}
+                                      onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                      disabled={isSavingQuestionnaire}
+                                      className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500 mt-0.5"
+                                    />
+                                    <div className="grid gap-1.5 leading-none w-full">
+                                      <Label
+                                        htmlFor={`allergy-${question.id}`}
+                                        className="text-sm font-semibold text-slate-700 cursor-pointer"
+                                      >
+                                        {isOthers ? "Other (Specify)" : question.text.replace(/Are you allergic to /i, "").replace(/\?/g, "").trim()}
+                                      </Label>
+                                      {isOthers && checked && (
+                                        <div className="mt-2 w-full pl-1">
+                                          <Input
+                                            value={patientQuestionnaireData.allergyOthersDetails || ""}
+                                            onChange={(e) => updateQuestionnaireDataField("allergyOthersDetails", e.target.value)}
+                                            placeholder="Specify other allergies..."
+                                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                                            disabled={isSavingQuestionnaire}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* 3. MEDICAL CONDITIONS (HISTORY) */}
+                      <Card className={cardClass}>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                            3. Medical Conditions (History)
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-5 space-y-4">
+                          <p className="text-xs font-semibold text-slate-500">
+                            Do you have or have you had any of the following? Check which apply:
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5">
+                            {medicalConditionQuestions.map((question) => {
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center gap-3">
+                                  <Checkbox
+                                    id={`condition-${question.id}`}
+                                    checked={checked}
+                                    onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                  />
+                                  <Label
+                                    htmlFor={`condition-${question.id}`}
+                                    className="text-sm font-semibold text-slate-700 cursor-pointer leading-tight"
+                                  >
+                                    {question.text.replace(/Have you had /i, "").replace(/\?/g, "").trim()}
+                                  </Label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </CardContent>
+                      </Card>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+
+                    {/* Right Column */}
+                    <div className="space-y-6 lg:col-span-1">
+                      {/* 4. OTHER MEDICAL DETAILS */}
+                      <Card className={cardClass}>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                            4. Other Medical Details
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-5 space-y-5">
+                          {/* Bleeding Time */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Bleeding Time</Label>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="0.1"
+                              value={patientQuestionnaireData.bleedingTime || ""}
+                              onChange={(e) => updateQuestionnaireDataField("bleedingTime", e.target.value)}
+                              placeholder="Enter bleeding time"
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Blood Type */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Blood Type</Label>
+                            <Select
+                              value={patientQuestionnaireData.bloodType || ""}
+                              onValueChange={(value) => updateQuestionnaireDataField("bloodType", value)}
+                              disabled={isSavingQuestionnaire}
+                            >
+                              <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200">
+                                <SelectValue placeholder="Select blood type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {[
+                                  "A+",
+                                  "A-",
+                                  "B+",
+                                  "B-",
+                                  "AB+",
+                                  "AB-",
+                                  "O+",
+                                  "O-",
+                                  "Unknown",
+                                ].map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {type}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Blood Pressure */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Blood Pressure</Label>
+                            <Input
+                              value={patientQuestionnaireData.bloodPressure || ""}
+                              onChange={(e) => updateQuestionnaireDataField("bloodPressure", e.target.value)}
+                              placeholder="Specify blood pressure (e.g. 120/80)"
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Other medical condition textarea */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Have you had any other medical condition?</Label>
+                            <Textarea
+                              value={patientQuestionnaireData.otherConditionsDetails || ""}
+                              onChange={(e) => updateQuestionnaireDataField("otherConditionsDetails", e.target.value)}
+                              placeholder="Enter details of other conditions..."
+                              className="min-h-[100px] rounded-lg border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200 text-sm"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Women Only Section */}
+                          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                            <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                              For women only:
+                            </p>
+                            
+                            {[
+                              { question: qPregnant, label: "Are you pregnant?" },
+                              { question: qNursing, label: "Are you nursing?" },
+                              { question: qBirthControl, label: "Are you taking birth control pills?" }
+                            ].map(({ question, label }) => {
+                              if (!question) return null;
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center justify-between gap-4 py-1.5 border-b border-slate-100 last:border-b-0 last:pb-0">
+                                  <span className="text-xs font-semibold text-slate-700 leading-tight">{label}</span>
+                                  <ToggleGroup
+                                    type="single"
+                                    value={checked ? "yes" : "no"}
+                                    onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      Yes
+                                    </ToggleGroupItem>
+                                    <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      No
+                                    </ToggleGroupItem>
+                                  </ToggleGroup>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Bottom extra medical condition input */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Have you had any other medical condition?</Label>
+                            <Input
+                              value={patientQuestionnaireData.otherMedicalCondition || ""}
+                              onChange={(e) => updateQuestionnaireDataField("otherMedicalCondition", e.target.value)}
+                              placeholder="Specify here..."
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Additional questions if they are dynamic */}
+                    {additionalQuestions.length > 0 && (
+                      <div className="col-span-full mt-4">
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              Additional Questionnaire Questions
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {additionalQuestions.map((question) => {
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center justify-between gap-4 p-3 rounded-lg border border-slate-100 bg-slate-50/30">
+                                  <span className="text-xs font-semibold text-slate-700">{question.text}</span>
+                                  <ToggleGroup
+                                    type="single"
+                                    value={checked ? "yes" : "no"}
+                                    onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      Yes
+                                    </ToggleGroupItem>
+                                    <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      No
+                                    </ToggleGroupItem>
+                                  </ToggleGroup>
+                                </div>
+                              );
+                            })}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </TabsContent>
 
             <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">

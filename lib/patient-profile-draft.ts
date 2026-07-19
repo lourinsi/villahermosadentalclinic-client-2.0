@@ -17,6 +17,7 @@ export type PatientProfileDraft = {
   questionnaireAnswers: Record<string, boolean>;
   savedQuestionnaireAnswers: Record<string, boolean>;
   patientQuestionnaireData: Record<string, any>;
+  savedPatientQuestionnaireData?: Record<string, any>;
   physicianInformation?: Record<string, any>;
   savedPhysicianInformation?: Record<string, any>;
   questionnaireQuestions: Array<{
