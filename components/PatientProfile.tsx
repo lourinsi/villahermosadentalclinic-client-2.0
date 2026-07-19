@@ -5712,11 +5712,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Time</TableHead>
+                            <TableHead>Date &amp; Time</TableHead>
                             <TableHead>Tooth No.</TableHead>
                             <TableHead>Service</TableHead>
-                            <TableHead>Provider</TableHead>
+                            <TableHead>Doctor</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Total</TableHead>
                             <TableHead>Paid</TableHead>
@@ -5747,16 +5746,52 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             const toothNumbers = getBookingToothNumbersValue(appointment);
                             const patientDisplayName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Patient";
                             const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
+                            const editableAppointment = originalAppointment || appointment;
                             const canRestoreAppointment = isDeletedAppointment && effectiveRole === "admin";
                             const isDoctorUnassigned = !doctorName;
 
                             return (
                               <TableRow key={appointmentId} className={isDeletedAppointment ? deletedPaymentRowClass : undefined}>
-                                <TableCell>{formatPatientLogDate(appointment.date)}</TableCell>
-                                <TableCell>{appointmentTime}</TableCell>
+                                <TableCell className="whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && openRescheduleModal(editableAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`Edit schedule for ${treatmentNames}: ${formatPatientLogDate(appointment.date)} at ${appointmentTime}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <Calendar className="h-4 w-4 shrink-0 text-violet-600" />
+                                    <span className="min-w-0">
+                                      <span className="block font-semibold text-slate-900">{formatPatientLogDate(appointment.date)}</span>
+                                      <span className="block text-xs font-medium text-slate-500">{appointmentTime}</span>
+                                    </span>
+                                  </button>
+                                </TableCell>
                                 <TableCell>{toothNumbers || "—"}</TableCell>
-                                <TableCell className="max-w-xs truncate">{treatmentNames}</TableCell>
-                                <TableCell className="max-w-[10rem] truncate">{doctorName || "Unassigned"}</TableCell>
+                                <TableCell className="max-w-xs whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && openUpdateTreatmentModal(editableAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`Edit treatment for ${treatmentNames}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <ClipboardList className="h-4 w-4 shrink-0 text-violet-600" />
+                                    <span className="truncate font-medium text-slate-900">{treatmentNames}</span>
+                                  </button>
+                                </TableCell>
+                                <TableCell className="max-w-[10rem] whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && setAssignDoctorAppointment(editableAppointment as HistoryAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`${doctorName ? "Change" : "Assign"} doctor for ${treatmentNames}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
+                                    <span className="truncate font-medium text-slate-900">{doctorName || "Unassigned"}</span>
+                                  </button>
+                                </TableCell>
                                 <TableCell>
                                   <div className="flex flex-wrap items-center gap-2">
                                     <AppointmentStatusSelect

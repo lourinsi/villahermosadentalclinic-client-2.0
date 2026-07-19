@@ -43,6 +43,10 @@ const getAppointmentFetchOptions = (): RequestInit => {
 const normalizeDoctorName = (doctor?: string) =>
   String(doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
 
+// Keep the cache fallback referentially stable. A new empty array on every render
+// would recreate `fetchAppointments`, causing the modal's sync effects to loop.
+const EMPTY_CACHED_APPOINTMENTS: Appointment[] = [];
+
 export function TimePickerModal({
   open,
   onOpenChange,
@@ -56,7 +60,7 @@ export function TimePickerModal({
   patientId,
   dateSelectionMode = "standard",
   appointmentSource = "server",
-  cachedAppointments = [],
+  cachedAppointments = EMPTY_CACHED_APPOINTMENTS,
   selectionDisabled = false,
 }: TimePickerModalProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
