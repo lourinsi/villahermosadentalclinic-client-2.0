@@ -1376,6 +1376,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       defaultPatientId,
       patientId,
       appointmentTypeDurations: {},
+      selectedDuration: duration,
     });
 
     if (autoPreselect.type === "skip") return;

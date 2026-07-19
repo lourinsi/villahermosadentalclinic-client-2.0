@@ -828,6 +828,7 @@ export function getBookingAutoPreselectConfig({
   defaultPatientId,
   patientId,
   appointmentTypeDurations,
+  selectedDuration,
   defaultAppointmentType = "Routine Cleaning",
 }: {
   isEditing: boolean;
@@ -840,6 +841,7 @@ export function getBookingAutoPreselectConfig({
   defaultPatientId?: string | null;
   patientId?: string | null;
   appointmentTypeDurations: AppointmentTypeDurations;
+  selectedDuration?: string | number | null;
   defaultAppointmentType?: string;
 }): AutoPreselectConfig {
   if (isEditing) return { type: "skip" };
@@ -853,7 +855,9 @@ export function getBookingAutoPreselectConfig({
   }
 
   const selectedAppointmentType = appointmentType || defaultAppointmentType;
-  const durationToSearch = String(normalizeBookingDuration(appointmentTypeDurations[selectedAppointmentType]));
+  const durationToSearch = String(
+    normalizeBookingDuration(selectedDuration ?? appointmentTypeDurations[selectedAppointmentType])
+  );
 
   return {
     type: "search",
