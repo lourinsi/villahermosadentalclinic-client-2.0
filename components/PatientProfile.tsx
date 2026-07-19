@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "./ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
@@ -2125,6 +2126,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
   const [historySearchFilter, setHistorySearchFilter] = useState('');
+  const [historyViewMode, setHistoryViewMode] = useState<'history' | 'list'>('list');
 
   // Snapshot states
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
@@ -4681,20 +4683,32 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <CardHeader className="border-b border-slate-100 px-4 py-5 sm:px-6">
                   <div className="flex flex-col gap-5">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <CardTitle className="text-2xl font-black text-slate-950">Treatment History</CardTitle>
                         <p className="mt-1 text-sm font-medium text-slate-500">All past appointments and treatments</p>
                       </div>
-                      <Button
-                        size="sm"
-                        type="button"
-                        onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
-                        className="h-10 rounded-xl bg-violet-600 px-4 font-bold text-white shadow-md shadow-violet-100 hover:bg-violet-700"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Appointment
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2 justify-end">
+                        <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Treatment history view">
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setHistoryViewMode("history")} className={`h-8 rounded-lg px-3 text-xs font-black ${historyViewMode === "history" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>
+                            <History className="mr-1.5 h-3.5 w-3.5" />
+                            History
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setHistoryViewMode("list")} className={`h-8 rounded-lg px-3 text-xs font-black ${historyViewMode === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>
+                            <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
+                            List
+                          </Button>
+                        </div>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
+                          className="h-10 rounded-xl bg-violet-600 px-4 font-bold text-white shadow-md shadow-violet-100 hover:bg-violet-700"
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          New Appointment
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
@@ -4821,8 +4835,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                    historyViewMode === "history" ? (
+                      <div className="space-y-3">
+                        {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                         const appointmentId = String(appointment.id || `apt-${index}`);
                         const appointmentBalance = Number((appointment as any).balance);
                         const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
@@ -4932,7 +4947,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                          </span>
                                        </div>
                                      ) : null}
-
 
                                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
                                       <span className="inline-flex items-center gap-1">
@@ -5218,7 +5232,123 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         );
                       })}
                     </div>
-                  )}
+                  ) : historyViewMode === "list" ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Time</TableHead>
+                            <TableHead>Tooth No.</TableHead>
+                            <TableHead>Service</TableHead>
+                            <TableHead>Provider</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Total</TableHead>
+                            <TableHead>Paid</TableHead>
+                            <TableHead>Balance</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                            const appointmentId = String(appointment.id || `apt-${index}`);
+                            const appointmentTime = formatPatientHistoryTime(appointment.date, (appointment as any).time);
+                            const doctorName = getVisitDoctorName(appointment);
+                            const isDeletedAppointment = isSoftDeletedAppointment(appointment);
+                            const appointmentStatus = normalizeAppointmentStatus(String(appointment.status || ""));
+                            const bookingTreatments = getBookingTreatmentsValue(appointment);
+                            const treatmentNames = bookingTreatments.length > 0
+                              ? bookingTreatments.map(t => getAppointmentTypeName(t.type, t.customType) || String(t.type || 'Treatment')).join(", ")
+                              : String(appointment.type || "Appointment");
+                            const appointmentBalance = Number((appointment as any).balance);
+                            const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
+                            const storedDisplayedBalance = Number.isFinite(appointmentBalance)
+                              ? appointmentBalance
+                              : computedOutstandingBalance;
+                            const originalDisplayedBalance = isDeletedAppointment
+                              ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
+                              : storedDisplayedBalance;
+                            const displayedBalance = isDeletedAppointment ? 0 : originalDisplayedBalance;
+                            const toothNumbers = getBookingToothNumbersValue(appointment);
+                            const patientDisplayName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Patient";
+                            const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
+                            const canRestoreAppointment = isDeletedAppointment && effectiveRole === "admin";
+                            const isDoctorUnassigned = !doctorName;
+
+                            return (
+                              <TableRow key={appointmentId} className={isDeletedAppointment ? deletedPaymentRowClass : undefined}>
+                                <TableCell>{formatPatientLogDate(appointment.date)}</TableCell>
+                                <TableCell>{appointmentTime}</TableCell>
+                                <TableCell>{toothNumbers || "—"}</TableCell>
+                                <TableCell className="max-w-xs truncate">{treatmentNames}</TableCell>
+                                <TableCell className="max-w-[10rem] truncate">{doctorName || "Unassigned"}</TableCell>
+                                <TableCell>
+                                  <Badge className={isDeletedAppointment ? deletedPaymentBadgeClass : "bg-slate-100 text-slate-700"}>
+                                    {isDeletedAppointment ? "Deleted" : appointmentStatus}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="font-medium">{formatPatientHistoryCurrency(appointment.price)}</TableCell>
+                                <TableCell className="font-medium text-emerald-700">{formatPatientHistoryCurrency(appointment.totalPaid)}</TableCell>
+                                <TableCell className={`font-medium ${displayedBalance > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                                  {formatPatientHistoryCurrency(displayedBalance)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex flex-wrap justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleOpenSnapshot(appointment)}
+                                    >
+                                      View
+                                    </Button>
+                                    {!isDeletedAppointment && displayedBalance > 0 ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (patient.id) {
+                                            openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
+                                          }
+                                        }}
+                                      >
+                                        Pay
+                                      </Button>
+                                    ) : null}
+                                    <AppointmentActionsMenu
+                                      actions={createVisitHistoryActions(
+                                        {
+                                          onViewDetails: () => handleOpenSnapshot(appointment),
+                                          onViewHistory: () => handleOpenBookingHistory(appointment),
+                                          onRecordPayment: !isDeletedAppointment && displayedBalance > 0 && patient.id ? () => openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId) : undefined,
+                                          onRestoreAppointment: canRestoreAppointment ? () => handleRestoreVisitAppointment(appointment) : undefined,
+                                          onReschedule: originalAppointment && !isDeletedAppointment ? () => openRescheduleModal(originalAppointment) : undefined,
+                                          onUpdateTreatment: originalAppointment && !isDeletedAppointment ? () => openUpdateTreatmentModal(originalAppointment) : undefined,
+                                          onAssignDoctor: originalAppointment && !isDeletedAppointment ? () => setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment) : undefined,
+                                        },
+                                        {
+                                          canRestoreAppointment,
+                                          canReschedule: Boolean(originalAppointment && !isDeletedAppointment),
+                                          canUpdateTreatment: Boolean(originalAppointment && !isDeletedAppointment),
+                                          canAssignDoctor: Boolean(originalAppointment && !isDeletedAppointment),
+                                          isDoctorUnassigned,
+                                        }
+                                      )}
+                                      triggerVariant="outline"
+                                      triggerSize="icon"
+                                      triggerIcon={<MoreVertical className="h-4 w-4" />}
+                                      ariaLabel="Visit actions"
+                                    />
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null)}
                 </CardContent>
               </Card>
             </TabsContent>

@@ -903,7 +903,7 @@ export function FinanceView() {
   const [selectedExpensePayment, setSelectedExpensePayment] = useState<ExpensePayment | null>(null);
   const [expensePaymentTransactionId, setExpensePaymentTransactionId] = useState("");
   const [expensePaymentNotes, setExpensePaymentNotes] = useState("");
-  const [expenseViewMode, setExpenseViewMode] = useState<"history" | "list">("history");
+  const [expenseViewMode, setExpenseViewMode] = useState<"history" | "list">("list");
   const [expenseOverpaymentAction, setExpenseOverpaymentAction] = useState<"save" | "payment" | null>(null);
   const [expenseOverpaymentAdjustedPrice, setExpenseOverpaymentAdjustedPrice] = useState("");
   const [expenseOverpaymentLoadingAction, setExpenseOverpaymentLoadingAction] = useState<"keep" | "adjust" | null>(null);
