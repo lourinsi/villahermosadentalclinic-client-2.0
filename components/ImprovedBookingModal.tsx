@@ -63,6 +63,7 @@ import useSharedBookingLogic, {
   getBookingDoctorInitials as getDoctorInitials,
   buildBookingTreatmentNotesPayload,
   buildBookingTreatmentsPayload,
+  getBookingTreatmentsCatalogPrice,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
   isPastAppointmentSchedule,
@@ -2228,7 +2229,23 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     )
     .filter(Boolean)
     .join(", ") || "Selected Treatment";
-  const selectedTreatmentBasePrice = Number(customPrice === "0" ? finalPrice : customPrice) || 0;
+  // Catalog base price is the sum of the main selected service plus any additional sections
+  const mainBase = appointmentType === "Other" ? Number(customPrice === "0" ? finalPrice : customPrice) : (servicePriceByName[appointmentType] || 0);
+  const selectedTreatmentBasePrice = Math.max(
+    0,
+    getBookingTreatmentsCatalogPrice(
+      [
+        { price: mainBase, label: appointmentType },
+        ...additionalTreatmentSections.map((section) => ({
+          price:
+            section.appointmentType === "Other"
+              ? undefined
+              : servicePriceByName[section.appointmentType || ""] || 0,
+          label: section.appointmentType,
+        })),
+      ]
+    )
+  );
   const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
   const filledToothNumbers = toothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
   const treatmentNotesCount = treatmentNotes.length;
@@ -3973,6 +3990,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
                       >
                         <p className="text-sm font-semibold text-gray-700">Estimated Cost</p>
+                        <p className="text-xs font-semibold text-gray-500">Catalog Price</p>
+                        <p className="mt-1 text-sm font-black text-gray-900">&#8369;{selectedTreatmentBasePrice.toLocaleString()}</p>
                         {hasDiscount && !isPriceEditable && (
                           <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{finalPrice.toLocaleString()}</p>
                         )}

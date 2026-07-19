@@ -2,6 +2,7 @@
 
 import type { FormEvent, ReactNode } from "react";
 import { ClipboardList, Loader2, Plus, Tag, X } from "lucide-react";
+import { getBookingTreatmentsCatalogPrice } from "./sharedBookingLogic";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -420,7 +421,14 @@ export function SelectTreatmentModal({
               </div>
             );
           })}
-
+          {allowAddTreatment ? (
+            <div className="rounded-xl border border-dashed border-blue-100 bg-white p-4 text-center shadow-sm">
+              <Button type="button" variant="outline" className="rounded-xl" onClick={handleAddTreatment} disabled={isSaving}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add treatment
+              </Button>
+            </div>
+          ) : null}
           {showToothNumberField ? (
             <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">
               <div className="flex items-center justify-between gap-4">
@@ -431,6 +439,7 @@ export function SelectTreatmentModal({
                   #
                 </div>
               </div>
+              
               <div className="mt-3 flex flex-wrap items-center gap-2.5">
                 {resolvedToothNumberEntries.map((toothNumber, index) => (
                   <div key={index} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2.5 shadow-sm">
@@ -472,14 +481,7 @@ export function SelectTreatmentModal({
             </div>
           ) : null}
 
-          {allowAddTreatment ? (
-            <div className="rounded-xl border border-dashed border-blue-100 bg-white p-4 text-center shadow-sm">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={handleAddTreatment} disabled={isSaving}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add treatment
-              </Button>
-            </div>
-          ) : null}
+
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
             <div className="border-b border-slate-100 p-4 sm:p-5 lg:border-b-0 lg:border-r">
@@ -511,7 +513,7 @@ export function SelectTreatmentModal({
                 <Label htmlFor="visit-treatment-price" className="text-xs font-black uppercase tracking-widest text-slate-500">
                   Manual Price
                 </Label>
-                <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
+                  <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
                   <span className="shrink-0 text-xl font-black text-blue-600">{"\u20b1"}</span>
                   <Input
                     id="visit-treatment-price"
@@ -520,8 +522,15 @@ export function SelectTreatmentModal({
                     step={1}
                     inputMode="decimal"
                     value={selectedPriceValue}
-                    onChange={(event) => onSelectedPriceChange?.(event.target.value)}
-                    disabled={!onSelectedPriceChange || isSaving}
+                    onChange={(event) => {
+                      // In multi-section mode, update the first/active section; otherwise call single handler
+                      if (isMultiSectionMode) {
+                        handleSectionSelectedPriceChange(0, event.target.value);
+                      } else {
+                        onSelectedPriceChange?.(event.target.value);
+                      }
+                    }}
+                    disabled={!(onSelectedPriceChange || onTreatmentSectionsChange) || isSaving}
                     className="h-12 border-0 bg-transparent text-right text-3xl font-black text-blue-600 shadow-none focus-visible:ring-0"
                   />
                 </div>
@@ -533,7 +542,14 @@ export function SelectTreatmentModal({
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Catalog Price</p>
                 <p className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
                   <Tag className="h-4 w-4 text-emerald-600" />
-                  {formatTreatmentCurrency(selectedTreatment?.price)}
+                  {formatTreatmentCurrency(
+                    getBookingTreatmentsCatalogPrice(
+                      sections.map((sec) => ({
+                        price: sec.selectedPrice === undefined || sec.selectedPrice === null ? getSectionTreatment(sec)?.price : Number(sec.selectedPrice),
+                        label: getSectionTreatment(sec)?.label,
+                      }))
+                    )
+                  )}
                 </p>
               </div>
               <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 sm:col-span-2">
