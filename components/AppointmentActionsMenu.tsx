@@ -269,3 +269,54 @@ export function createVisitHistoryActions(handlers: {
     },
   ];
 }
+
+/**
+ * Helper function to create requests view overflow menu actions
+ * Used in RequestsView for secondary appointment actions
+ */
+export function createRequestsOverflowActions(handlers: {
+  onChangeTreatment?: () => void;
+  onChangeDoctor?: () => void;
+  onReschedule?: () => void;
+  onViewDetails?: () => void;
+}, state: {
+  canChangeTreatment?: boolean;
+  canChangeDoctor?: boolean;
+  canReschedule?: boolean;
+  isDoctorUnassigned?: boolean;
+} = {}): AppointmentActionConfig[] {
+  return [
+    {
+      id: "change-treatment",
+      label: "Change treatment",
+      icon: <Stethoscope className="h-4 w-4" />,
+      disabled: !state.canChangeTreatment,
+      onSelect: handlers.onChangeTreatment || (() => {}),
+      hidden: !handlers.onChangeTreatment,
+    },
+    {
+      id: "change-doctor",
+      label: state.isDoctorUnassigned ? "Assign Doctor" : "Change Doctor",
+      icon: <Stethoscope className="h-4 w-4" />,
+      disabled: !state.canChangeDoctor,
+      onSelect: handlers.onChangeDoctor || (() => {}),
+      hidden: !handlers.onChangeDoctor,
+    },
+    {
+      id: "reschedule",
+      label: "Reschedule",
+      icon: <CalendarIcon className="h-4 w-4" />,
+      disabled: !state.canReschedule,
+      onSelect: handlers.onReschedule || (() => {}),
+      hidden: !handlers.onReschedule,
+    },
+    {
+      id: "view-details",
+      label: "View Details",
+      icon: <Eye className="h-4 w-4" />,
+      onSelect: handlers.onViewDetails || (() => {}),
+      hidden: !handlers.onViewDetails,
+      separator: true,
+    },
+  ];
+}

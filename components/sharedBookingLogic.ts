@@ -828,6 +828,7 @@ export function getBookingAutoPreselectConfig({
   defaultPatientId,
   patientId,
   appointmentTypeDurations,
+  selectedDuration,
   defaultAppointmentType = "Routine Cleaning",
 }: {
   isEditing: boolean;
@@ -840,6 +841,7 @@ export function getBookingAutoPreselectConfig({
   defaultPatientId?: string | null;
   patientId?: string | null;
   appointmentTypeDurations: AppointmentTypeDurations;
+  selectedDuration?: string | number | null;
   defaultAppointmentType?: string;
 }): AutoPreselectConfig {
   if (isEditing) return { type: "skip" };
@@ -853,7 +855,9 @@ export function getBookingAutoPreselectConfig({
   }
 
   const selectedAppointmentType = appointmentType || defaultAppointmentType;
-  const durationToSearch = String(normalizeBookingDuration(appointmentTypeDurations[selectedAppointmentType]));
+  const durationToSearch = String(
+    normalizeBookingDuration(selectedDuration ?? appointmentTypeDurations[selectedAppointmentType])
+  );
 
   return {
     type: "search",
@@ -1342,6 +1346,22 @@ export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toot
 export function buildBookingTreatmentsPayload(treatments?: unknown) {
   const normalized = normalizeBookingTreatments(treatments);
   return normalized.length > 0 ? { treatments: normalized } : {};
+}
+
+// Compute catalog price for booking treatments. If a priceMap is provided (e.g., from service catalog or APPOINTMENT_PRICES),
+// it will be used to resolve prices for treatment types that do not carry an explicit price value.
+export function getBookingTreatmentsCatalogPrice(treatments?: unknown, priceMap?: Record<string, number>) {
+  const normalized = normalizeBookingTreatments(treatments);
+  return normalized.reduce((sum, t) => {
+    const priceFromSection = Number.isFinite(Number(t.price)) ? Number(t.price) : undefined;
+    if (priceFromSection !== undefined) return sum + priceFromSection;
+    if (priceMap && typeof t.type !== 'undefined') {
+      // priceMap keyed by label/name; callers may pass a map of service label => price
+      const label = String((t as any).label || '').trim();
+      if (label && priceMap[label] !== undefined) return sum + (priceMap[label] || 0);
+    }
+    return sum;
+  }, 0);
 }
 
 export function getProjectedBookingStatus({

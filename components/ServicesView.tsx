@@ -23,7 +23,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useAppointmentTypeOptions, type AppointmentTypeForm } from "@/hooks/useAppointmentTypeOptions";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 import { Check, Loader2, MoreHorizontal, Plus, RefreshCw, Save, Search, Stethoscope, Trash2 } from "lucide-react";
-import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 const emptyForm: AppointmentTypeForm = {
   label: "",
@@ -61,7 +60,6 @@ const toNumber = (value: unknown) => {
 
 const getServiceDraftBase = (service: ServiceCatalogItem): ServiceCatalogItem => ({
   ...service,
-  duration: normalizeBookingDuration(service.duration),
 });
 
 const normalizeServiceNameForMatch = (value: string) =>
@@ -169,8 +167,7 @@ export function ServicesView() {
     return (
       draft.label !== service.label ||
       String(draft.icon || "") !== String(service.icon || "") ||
-      Number(draft.price || 0) !== Number(service.price || 0) ||
-      Number(draft.duration || 0) !== Number(service.duration || 0)
+      Number(draft.price || 0) !== Number(service.price || 0)
     );
   };
 
@@ -186,7 +183,6 @@ export function ServicesView() {
       await saveService({
         ...draft,
         price: Math.max(0, toNumber(draft.price)),
-        duration: normalizeBookingDuration(draft.duration),
       });
       setDrafts((current) => {
         const next = { ...current };
@@ -205,7 +201,6 @@ export function ServicesView() {
     const draft = {
       ...(overrideDraft || newService),
       label: (overrideDraft || newService).label.trim(),
-      duration: normalizeBookingDuration((overrideDraft || newService).duration),
     };
 
     if (!draft.label) {
@@ -227,7 +222,7 @@ export function ServicesView() {
         label: draft.label,
         icon: draft.icon || "🦷",
         price: Math.max(0, toNumber(draft.price)),
-        duration: normalizeBookingDuration(draft.duration),
+        duration: 30,
       });
       setNewService(emptyForm);
       toast.success("Service created");
@@ -280,7 +275,7 @@ export function ServicesView() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">Services</h1>
           <p className="text-sm font-medium text-gray-500">
-            Manage treatments, default booking prices, and service durations.
+            Manage treatments and default booking prices.
           </p>
         </div>
         <Button variant="outline" onClick={() => refresh(true)} disabled={isLoading} className="gap-2">
@@ -297,7 +292,7 @@ export function ServicesView() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_minmax(110px,0.35fr)_minmax(140px,0.45fr)_minmax(150px,0.45fr)_auto] lg:items-end">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_minmax(110px,0.35fr)_minmax(140px,0.45fr)_auto] lg:items-end">
             <div className="space-y-2">
               <Label htmlFor="new-service-name">Treatment Name</Label>
               <Input
@@ -336,24 +331,6 @@ export function ServicesView() {
                 onChange={(event) => setNewService((current) => ({ ...current, price: toNumber(event.target.value) }))}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-service-duration">Duration</Label>
-              <Select
-                value={String(normalizeBookingDuration(newService.duration))}
-                onValueChange={(value) => setNewService((current) => ({ ...current, duration: normalizeBookingDuration(value) }))}
-              >
-                <SelectTrigger id="new-service-duration" className="h-10">
-                  <SelectValue placeholder="Select duration" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALLOWED_BOOKING_DURATIONS.map((duration) => (
-                    <SelectItem key={duration} value={String(duration)}>
-                      {duration} mins
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <Button onClick={() => handleCreate()} disabled={isCreating} className="gap-2 sm:col-span-2 lg:col-span-1">
               {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create
@@ -386,7 +363,6 @@ export function ServicesView() {
                   <TableHead>Service</TableHead>
                   <TableHead className="hidden w-[140px] md:table-cell">Icon</TableHead>
                   <TableHead className="w-[130px] sm:w-[180px]">Default Price</TableHead>
-                  <TableHead className="hidden w-[160px] sm:table-cell">Duration</TableHead>
                   <TableHead className="hidden w-[120px] lg:table-cell">Status</TableHead>
                   <TableHead className="w-[56px] text-right sm:w-[220px]">Action</TableHead>
                 </TableRow>
@@ -394,7 +370,7 @@ export function ServicesView() {
               <TableBody>
                 {visibleOptions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
                       No services found.
                     </TableCell>
                   </TableRow>
@@ -413,7 +389,6 @@ export function ServicesView() {
                         />
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:hidden">
                           <span className="rounded-full bg-gray-100 px-2 py-1">{draft.icon || "Icon"}</span>
-                          <span className="rounded-full bg-gray-100 px-2 py-1 sm:hidden">{normalizeBookingDuration(draft.duration)} min</span>
                           <Badge className="border-none bg-emerald-100 text-emerald-700 lg:hidden">
                             Active
                           </Badge>
@@ -446,23 +421,6 @@ export function ServicesView() {
                           className="h-10"
                         />
                         <p className="mt-1 truncate text-[11px] text-muted-foreground sm:text-xs">{formatCurrency(draft.price)}</p>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <Select
-                          value={String(normalizeBookingDuration(draft.duration))}
-                          onValueChange={(value) => updateDraft(service, { duration: normalizeBookingDuration(value) })}
-                        >
-                          <SelectTrigger className="h-10">
-                            <SelectValue placeholder="Select duration" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ALLOWED_BOOKING_DURATIONS.map((duration) => (
-                              <SelectItem key={duration} value={String(duration)}>
-                                {duration} mins
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </TableCell>
                       <TableCell className="hidden lg:table-cell">
                         <Badge className="border-none bg-emerald-100 text-emerald-700">

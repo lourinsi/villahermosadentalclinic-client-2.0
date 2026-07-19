@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import PatientAvatar from "./PatientAvatar";
-import { 
+import {
   Clock, 
   CheckCircle, 
   XCircle, 
@@ -71,8 +71,10 @@ import {
   AlertDialogTitle,
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import { AppointmentActionsMenu, createRequestsOverflowActions } from "./AppointmentActionsMenu";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import {
@@ -82,6 +84,16 @@ import {
   normalizePaymentStatus,
 } from "@/lib/status-colors";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
+import { useDoctors } from "@/hooks/useDoctors";
+import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
+import { formatDateToYYYYMMDD } from "@/lib/utils";
+import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { SelectDoctorModal } from "./SelectDoctorModal";
+import { DatePickerModal } from "./DatePickerModal";
+import { TimePickerModal } from "./TimePickerModal";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -138,6 +150,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const { openPaymentFor } = usePaymentModal();
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
+  const { options: treatmentOptions } = useAppointmentTypeOptions();
   const canManagePaymentStatuses = effectiveRole === "admin";
   const hideAuditColumns = effectiveRole === "receptionist";
   const [requests, setRequests] = useState<Appointment[]>([]);
@@ -339,6 +353,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // Reject confirmation dialog state
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingRejectAppointment, setPendingRejectAppointment] = useState<Appointment | null>(null);
+  const [patientCellAppointment, setPatientCellAppointment] = useState<Appointment | null>(null);
+  const [scheduleCellAppointment, setScheduleCellAppointment] = useState<Appointment | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<Date | null>(null);
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleDuration, setScheduleDuration] = useState("30");
+  const [isScheduleDatePickerOpen, setIsScheduleDatePickerOpen] = useState(false);
+  const [isScheduleTimePickerOpen, setIsScheduleTimePickerOpen] = useState(false);
+  const [treatmentCellAppointment, setTreatmentCellAppointment] = useState<Appointment | null>(null);
+  const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
+  const [customTreatmentName, setCustomTreatmentName] = useState("");
+  const [treatmentPrice, setTreatmentPrice] = useState("");
+  const [doctorCellAppointment, setDoctorCellAppointment] = useState<Appointment | null>(null);
 
   const getInitials = (name: string) => {
     if (!name) return "P";
@@ -352,6 +378,30 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const getCurrentPatientName = (appointment: Appointment) =>
     getAppointmentPatientDisplayName(appointment);
+
+  const renderRequestOverflowMenu = (request: Appointment, triggerClassName?: string) => (
+    <AppointmentActionsMenu
+      actions={createRequestsOverflowActions(
+        {
+          onChangeTreatment: () => openTreatmentCell(request),
+          onChangeDoctor: () => setDoctorCellAppointment(request),
+          onReschedule: () => openScheduleCell(request),
+          onViewDetails: () => handleViewAppointment(request),
+        },
+        {
+          canChangeTreatment: !isSoftDeletedAppointment(request),
+          canChangeDoctor: !isSoftDeletedAppointment(request),
+          canReschedule: !isSoftDeletedAppointment(request),
+          isDoctorUnassigned: !request.doctor,
+        }
+      )}
+      triggerVariant="ghost"
+      triggerSize="icon"
+      triggerClassName={triggerClassName || "h-8 w-8 text-slate-400 hover:text-slate-900"}
+      triggerIcon={<MoreVertical className="h-4 w-4" />}
+      ariaLabel="Appointment actions"
+    />
+  );
 
   const sortAppointmentsForColumn = (
     items: Appointment[],
@@ -724,6 +774,39 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return normalizedAppointment;
   }, [mergeAppointmentIntoLists]);
 
+  const saveCellAppointment = async (appointment: Appointment, patch: Partial<Appointment>, message: string) => {
+    try {
+      const updated = await updateAppointment(appointment.id, patch);
+      publishAppointmentUpdate(updated);
+      refreshAppointmentLists();
+      toast.success(message);
+    } catch (error) {
+      console.error("[RequestsView] Failed to update appointment cell:", error);
+      toast.error("Unable to update appointment. Please try again.");
+      throw error;
+    }
+  };
+
+  const openScheduleCell = (appointment: Appointment) => {
+    if (isSoftDeletedAppointment(appointment)) return;
+    const date = parseBackendDateToLocal(appointment.date);
+    setScheduleCellAppointment(appointment);
+    setScheduleDate(Number.isNaN(date.getTime()) ? new Date() : date);
+    setScheduleTime(String(appointment.time || ""));
+    setScheduleDuration(String(appointment.duration || 30));
+  };
+
+  const openTreatmentCell = (appointment: Appointment) => {
+    if (isSoftDeletedAppointment(appointment)) return;
+    const type = Number(appointment.type);
+    setTreatmentCellAppointment(appointment);
+    setSelectedTreatmentId(Number.isInteger(type) ? type : OTHER_APPOINTMENT_TYPE_INDEX);
+    setCustomTreatmentName(String(appointment.customType || ""));
+    setTreatmentPrice(String(Number(appointment.price || 0)));
+  };
+
+  const editableCellClass = "-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60";
+
   useEffect(() => {
     const handleAppointmentsUpdated = (event: Event) => {
       const updatedAppointment = (event as CustomEvent<{ appointment?: Appointment }>).detail?.appointment;
@@ -945,7 +1028,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requestDoctorOptions = useMemo(() => {
     return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
   }, [appointments, requests, history]);
-  const pendingRequestColumnCount = hideAuditColumns ? 7 : 9;
+  const pendingRequestColumnCount = 9;
   const historyColumnCount = pendingRequestColumnCount;
   const activeDropdownItemClass = (isActive: boolean) =>
     isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
@@ -967,6 +1050,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     if (Number.isNaN(date.getTime())) return "";
     return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   };
+  const formatPaymentCurrency = (value?: number | string | null) =>
+    `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const getAppointmentIdLabel = (appointment: Appointment) => `ID: ${appointment.id || "N/A"}`;
 
   return (
@@ -1338,6 +1423,23 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <span className="text-sm font-medium text-gray-500">Payment Status</span>
                         </div>
 
+                        <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100 py-3 text-center">
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total</p>
+                            <p className="mt-1 text-sm font-bold text-gray-900">{formatPaymentCurrency(request.price || 0)}</p>
+                          </div>
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Paid</p>
+                            <p className="mt-1 text-sm font-bold text-emerald-700">{formatPaymentCurrency(request.totalPaid || 0)}</p>
+                          </div>
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Balance</p>
+                            <p className={`mt-1 text-sm font-bold ${Math.max(0, Number(request.balance ?? Number(request.price || 0) - Number(request.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                              {formatPaymentCurrency(Math.max(0, Number(request.balance ?? Number(request.price || 0) - Number(request.totalPaid || 0))))}
+                            </p>
+                          </div>
+                        </div>
+
                         {!hideAuditColumns ? (
                           <div className="grid grid-cols-2 border-b border-gray-100 py-4">
                             <div className="flex gap-3 border-r border-gray-100 pr-3">
@@ -1398,25 +1500,25 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               </div>
 
               <div className="hidden overflow-x-auto md:block">
-                <Table className={`${hideAuditColumns ? "min-w-[1000px]" : "min-w-[1320px]"} table-fixed`}>
+                <Table className="min-w-[1180px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
-                      <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
+                      <TableHead className="w-[13%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Date &amp; Time {getSortIcon("date", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[16%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", true)}
                         </div>
                       </TableHead>
                       <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Service {getSortIcon("service", true)}
+                          Treatment {getSortIcon("service", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Schedule {getSortIcon("date", true)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Doctor {getSortIcon("doctor", true)}
                         </div>
@@ -1426,25 +1528,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Status {getSortIcon("status", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("payment")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Payment {getSortIcon("payment", true)}
-                        </div>
-                      </TableHead>
-                      {!hideAuditColumns ? (
-                        <>
-                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("booked")}>
-                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                              Booked {getSortIcon("booked", true)}
-                            </div>
-                          </TableHead>
-                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("updated")}>
-                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                              Last Updated {getSortIcon("updated", true)}
-                            </div>
-                          </TableHead>
-                        </>
-                      ) : null}
+                      <TableHead className="w-[8%] font-bold text-gray-900">Total</TableHead>
+                      <TableHead className="w-[8%] font-bold text-gray-900">Paid</TableHead>
+                      <TableHead className="w-[8%] font-bold text-gray-900">Balance</TableHead>
                       <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1473,37 +1559,37 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         const serviceName = getAppointmentTypeName(request.type, request.customType);
                         return (
                         <TableRow key={request.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
+                          <TableCell className="whitespace-normal">
+                            <button type="button" onClick={() => openScheduleCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit schedule for ${patientName}`} className={editableCellClass}>
+                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
+                              <div className="min-w-0">
+                                <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
+                                <span className="block text-xs font-medium text-gray-500">{formatTimeTo12h(request.time)}</span>
+                              </div>
+                            </button>
+                          </TableCell>
                           <TableCell className="py-5 pr-3 whitespace-normal">
-                            <div className="flex min-w-0 items-center gap-3">
+                            <button type="button" onClick={() => setPatientCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change patient for ${patientName}`} className={editableCellClass}>
                               <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
                                 <div className="mt-1 truncate text-xs font-medium text-gray-500">{getAppointmentIdLabel(request)}</div>
                               </div>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
+                            <button type="button" onClick={() => openTreatmentCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit treatment for ${patientName}`} className={editableCellClass}>
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
                               <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
-                              <div className="min-w-0">
-                              <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
-                                <span className="block text-xs text-gray-500 font-medium">{formatTimeTo12h(request.time)}</span>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => !isSoftDeletedAppointment(request) && setDoctorCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change doctor for ${patientName}`} className={editableCellClass}>
                               <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
                               <span className="font-semibold leading-snug text-gray-900">{request.doctor || "Unassigned"}</span>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <Select
@@ -1519,72 +1605,64 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 ))}
                               </SelectContent>
                             </Select>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            {canManagePaymentStatuses ? (
-                              <Select
-                                value={request.paymentStatus || "unpaid"}
-                                onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
-                              >
-                                <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
-                                  <div className="cursor-pointer">
+                            <div className="mt-1.5">
+                              {canManagePaymentStatuses ? (
+                                <Select
+                                  value={request.paymentStatus || "unpaid"}
+                                  onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
+                                >
+                                  <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
                                     {getPaymentStatusBadge(request.paymentStatus)}
-                                  </div>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PAYMENT_STATUSES.map((status: any) => (
-                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              getPaymentStatusBadge(request.paymentStatus)
-                            )}
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PAYMENT_STATUSES.map((status: any) => (
+                                      <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : getPaymentStatusBadge(request.paymentStatus)}
+                            </div>
                           </TableCell>
-                          {!hideAuditColumns ? (
-                            <>
-                              <TableCell className="whitespace-normal">
-                                <div className="flex items-center gap-3">
-                                  <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
-                                  <div>
-                                    <p className="font-bold text-gray-900">{formatAuditDate(request.createdAt)}</p>
-                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.createdAt)}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="whitespace-normal">
-                                <div className="flex items-center gap-3">
-                                  <Clock className="h-5 w-5 shrink-0 text-blue-600" />
-                                  <div>
-                                    <p className="font-bold text-gray-900">{formatAuditDate(request.updatedAt || request.createdAt)}</p>
-                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(request.updatedAt || request.createdAt)}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                            </>
-                          ) : null}
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => handleApprove(request)}
-                                disabled={!isActionableStatus(request.status)}
-                                className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50 disabled:opacity-40"
-                                title={request.status === "tbd" ? "Mark completed" : "Approve"}
-                              >
-                                <CheckCircle className="h-5 w-5" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => handleReject(request)}
-                                disabled={!isActionableStatus(request.status)}
-                                className="h-10 w-10 rounded-full border border-rose-100 bg-white text-rose-600 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-                                title={request.status === "tbd" ? "Cancel" : "Reject"}
-                              >
-                                <XCircle className="h-5 w-5" />
-                              </Button>
+                          <TableCell className="font-semibold text-gray-900">{formatPaymentCurrency(request.price || 0)}</TableCell>
+                          <TableCell className="font-semibold text-emerald-700">{formatPaymentCurrency(request.totalPaid || 0)}</TableCell>
+                          <TableCell className={`font-semibold ${Math.max(0, Number(request.balance ?? Number(request.price || 0) - Number(request.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                            {formatPaymentCurrency(Math.max(0, Number(request.balance ?? Number(request.price || 0) - Number(request.totalPaid || 0))))}
+                          </TableCell>
+                          <TableCell className="text-center\">
+                            <div className="flex items-center justify-center gap-2\">
+                              {isActionableStatus(request.status) && (
+                                <>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleApprove(request)}
+                                    className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50"
+                                    title={request.status === "tbd" ? "Mark completed" : "Approve"}
+                                  >
+                                    <CheckCircle className="h-5 w-5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleReject(request)}
+                                    className="h-10 w-10 rounded-full border border-rose-100 bg-white text-rose-600 shadow-sm hover:bg-rose-50"
+                                    title={request.status === "tbd" ? "Cancel" : "Reject"}
+                                  >
+                                    <XCircle className="h-5 w-5" />
+                                  </Button>
+                                </>
+                              )}
+                              {canPromptPayment(request) && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleOpenPayment(request)}
+                                  className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50"
+                                  title="Pay now"
+                                >
+                                  <DollarSign className="h-5 w-5" />
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -1594,6 +1672,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               >
                                 <Eye className="h-5 w-5" />
                               </Button>
+                              {renderRequestOverflowMenu(request, "h-10 w-10 rounded-full border border-slate-100 bg-white text-slate-600 shadow-sm hover:bg-slate-50")}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1939,6 +2018,23 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <span className="text-sm font-medium text-gray-500">Payment Status</span>
                         </div>
 
+                        <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100 py-3 text-center">
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total</p>
+                            <p className="mt-1 text-sm font-bold text-gray-900">{formatPaymentCurrency(item.price || 0)}</p>
+                          </div>
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Paid</p>
+                            <p className="mt-1 text-sm font-bold text-emerald-700">{formatPaymentCurrency(item.totalPaid || 0)}</p>
+                          </div>
+                          <div className="px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Balance</p>
+                            <p className={`mt-1 text-sm font-bold ${Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                              {formatPaymentCurrency(Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))))}
+                            </p>
+                          </div>
+                        </div>
+
                         {!hideAuditColumns ? (
                           <div className="grid grid-cols-2 border-b border-gray-100 py-4">
                             <div className="flex gap-3 border-r border-gray-100 pr-3">
@@ -1989,25 +2085,25 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               </div>
 
               <div className="hidden overflow-x-auto md:block">
-                <Table className={`${hideAuditColumns ? "min-w-[1000px]" : "min-w-[1320px]"} table-fixed`}>
+                <Table className="min-w-[1180px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
-                      <TableHead className="w-[15%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
+                      <TableHead className="w-[13%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Date &amp; Time {getSortIcon("date", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[16%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", false)}
                         </div>
                       </TableHead>
                       <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Service {getSortIcon("service", false)}
+                          Treatment {getSortIcon("service", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Schedule {getSortIcon("date", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
+                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Doctor {getSortIcon("doctor", false)}
                         </div>
@@ -2017,25 +2113,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Status {getSortIcon("status", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("payment")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Payment {getSortIcon("payment", false)}
-                        </div>
-                      </TableHead>
-                      {!hideAuditColumns ? (
-                        <>
-                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
-                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                              Booked {getSortIcon("booked", false)}
-                            </div>
-                          </TableHead>
-                          <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("updated")}>
-                            <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                              Last Updated {getSortIcon("updated", false)}
-                            </div>
-                          </TableHead>
-                        </>
-                      ) : null}
+                      <TableHead className="w-[8%] font-bold text-gray-900">Total</TableHead>
+                      <TableHead className="w-[8%] font-bold text-gray-900">Paid</TableHead>
+                      <TableHead className="w-[8%] font-bold text-gray-900">Balance</TableHead>
                       <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2064,37 +2144,37 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         const serviceName = getAppointmentTypeName(item.type, item.customType);
                         return (
                         <TableRow key={item.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
+                          <TableCell className="whitespace-normal">
+                            <button type="button" onClick={() => openScheduleCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit schedule for ${patientName}`} className={editableCellClass}>
+                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
+                              <div className="min-w-0">
+                                <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
+                                <span className="block text-xs font-medium text-gray-500">{formatTimeTo12h(item.time)}</span>
+                              </div>
+                            </button>
+                          </TableCell>
                           <TableCell className="py-5 pr-3 whitespace-normal">
-                            <div className="flex min-w-0 items-center gap-3">
+                            <button type="button" onClick={() => setPatientCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change patient for ${patientName}`} className={editableCellClass}>
                               <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
                                 <div className="mt-1 truncate text-xs font-medium text-gray-500">{getAppointmentIdLabel(item)}</div>
                               </div>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
+                            <button type="button" onClick={() => openTreatmentCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit treatment for ${patientName}`} className={editableCellClass}>
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
                               <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-3">
-                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
-                              <div className="min-w-0">
-                                <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
-                                <span className="block text-xs text-gray-500 font-medium">{formatTimeTo12h(item.time)}</span>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => !isSoftDeletedAppointment(item) && setDoctorCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change doctor for ${patientName}`} className={editableCellClass}>
                               <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
                               <span className="font-semibold leading-snug text-gray-900">{item.doctor || "Unassigned"}</span>
-                            </div>
+                            </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <Select
@@ -2110,50 +2190,29 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 ))}
                               </SelectContent>
                             </Select>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            {canManagePaymentStatuses ? (
-                              <Select
-                                value={item.paymentStatus || "unpaid"}
-                                onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
-                              >
-                                <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
-                                  <div className="cursor-pointer">
+                            <div className="mt-1.5">
+                              {canManagePaymentStatuses ? (
+                                <Select
+                                  value={item.paymentStatus || "unpaid"}
+                                  onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
+                                >
+                                  <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
                                     {getPaymentStatusBadge(item.paymentStatus)}
-                                  </div>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PAYMENT_STATUSES.map((status: any) => (
-                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              getPaymentStatusBadge(item.paymentStatus)
-                            )}
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PAYMENT_STATUSES.map((status: any) => (
+                                      <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : getPaymentStatusBadge(item.paymentStatus)}
+                            </div>
                           </TableCell>
-                          {!hideAuditColumns ? (
-                            <>
-                              <TableCell className="whitespace-normal">
-                                <div className="flex items-center gap-3">
-                                  <CalendarCheck2 className="h-5 w-5 shrink-0 text-emerald-600" />
-                                  <div>
-                                    <p className="font-bold text-gray-900">{formatAuditDate(item.createdAt)}</p>
-                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.createdAt)}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="whitespace-normal">
-                                <div className="flex items-center gap-3">
-                                  <Clock className="h-5 w-5 shrink-0 text-blue-600" />
-                                  <div>
-                                    <p className="font-bold text-gray-900">{formatAuditDate(item.updatedAt || item.createdAt)}</p>
-                                    <p className="text-xs font-medium text-gray-500">{formatAuditTime(item.updatedAt || item.createdAt)}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                            </>
-                          ) : null}
+                          <TableCell className="font-semibold text-gray-900">{formatPaymentCurrency(item.price || 0)}</TableCell>
+                          <TableCell className="font-semibold text-emerald-700">{formatPaymentCurrency(item.totalPaid || 0)}</TableCell>
+                          <TableCell className={`font-semibold ${Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                            {formatPaymentCurrency(Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))))}
+                          </TableCell>
                           <TableCell className="text-center">
                             <div className="flex items-center justify-center gap-2">
                               <Button
@@ -2176,6 +2235,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                   <DollarSign className="h-5 w-5" />
                                 </Button>
                               ) : null}
+                              {renderRequestOverflowMenu(item, "h-10 w-10 rounded-full border border-slate-100 bg-white text-slate-600 shadow-sm hover:bg-slate-50")}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -2269,6 +2329,108 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         onConfirm={confirmReject}
         isProcessing={false}
       />
+      <SelectPatientModal
+        open={Boolean(patientCellAppointment)}
+        onOpenChange={(open) => !open && setPatientCellAppointment(null)}
+        selectedPatientId={String((patientCellAppointment as any)?.patientId || (patientCellAppointment as any)?.patient?.id || "")}
+        selectedPatientName={patientCellAppointment ? getCurrentPatientName(patientCellAppointment) : ""}
+        title="Change Patient"
+        confirmLabel="Save Patient"
+        onConfirm={async (patient: PatientSelectOption) => {
+          if (!patientCellAppointment) return;
+          await saveCellAppointment(patientCellAppointment, {
+            patientId: patient.id,
+            patientName: patient.name,
+            patient: { ...(patientCellAppointment as any).patient, id: patient.id, name: patient.name },
+          } as Partial<Appointment>, "Patient updated");
+          setPatientCellAppointment(null);
+        }}
+      />
+      <SelectScheduleModal
+        open={Boolean(scheduleCellAppointment)}
+        onOpenChange={(open) => !open && setScheduleCellAppointment(null)}
+        title="Edit Schedule"
+        appointmentLabel={scheduleCellAppointment ? getAppointmentTypeName(scheduleCellAppointment.type, scheduleCellAppointment.customType) : ""}
+        doctorLabel={scheduleCellAppointment?.doctor || "Unassigned"}
+        selectedDate={scheduleDate}
+        selectedTime={scheduleTime}
+        selectedDuration={scheduleDuration}
+        onDurationChange={setScheduleDuration}
+        onDateClick={() => setIsScheduleDatePickerOpen(true)}
+        onTimeClick={() => setIsScheduleTimePickerOpen(true)}
+        onSave={async () => {
+          if (!scheduleCellAppointment || !scheduleDate || !scheduleTime) return;
+          await saveCellAppointment(scheduleCellAppointment, {
+            date: formatDateToYYYYMMDD(scheduleDate),
+            time: scheduleTime,
+            duration: Number(scheduleDuration) || 30,
+          }, "Schedule updated");
+          setScheduleCellAppointment(null);
+        }}
+        onCancel={() => setScheduleCellAppointment(null)}
+        canSave={Boolean(scheduleDate && scheduleTime)}
+      />
+      <DatePickerModal
+        open={isScheduleDatePickerOpen}
+        onOpenChange={setIsScheduleDatePickerOpen}
+        selectedDate={scheduleDate}
+        onDateSelect={setScheduleDate}
+        doctorName={scheduleCellAppointment?.doctor || ""}
+        selectedTime={scheduleTime}
+        duration={scheduleDuration}
+        dateSelectionMode="edit"
+        excludeAppointmentId={scheduleCellAppointment ? String(scheduleCellAppointment.id) : null}
+        title="Select Date"
+      />
+      {scheduleDate ? <TimePickerModal
+        open={isScheduleTimePickerOpen}
+        onOpenChange={setIsScheduleTimePickerOpen}
+        selectedDate={scheduleDate}
+        selectedTime={scheduleTime}
+        doctorName={scheduleCellAppointment?.doctor || ""}
+        duration={scheduleDuration}
+        onTimeSelect={setScheduleTime}
+        onDateChange={setScheduleDate}
+        excludeAppointmentId={scheduleCellAppointment ? String(scheduleCellAppointment.id) : undefined}
+        patientId={String((scheduleCellAppointment as any)?.patientId || "") || null}
+        dateSelectionMode="edit"
+      /> : null}
+      <SelectTreatmentModal
+        open={Boolean(treatmentCellAppointment)}
+        onOpenChange={(open) => !open && setTreatmentCellAppointment(null)}
+        title="Update Treatment"
+        treatments={treatmentOptions.filter((option) => option.isActive !== false)}
+        selectedTreatmentId={selectedTreatmentId}
+        currentTreatmentLabel={treatmentCellAppointment ? getAppointmentTypeName(treatmentCellAppointment.type, treatmentCellAppointment.customType) : ""}
+        customTreatmentName={customTreatmentName}
+        selectedPrice={treatmentPrice}
+        onCustomTreatmentNameChange={setCustomTreatmentName}
+        onSelectedPriceChange={setTreatmentPrice}
+        onTreatmentSelect={(treatment) => { setSelectedTreatmentId(treatment.id); setTreatmentPrice(String(treatment.price || 0)); }}
+        onSave={async () => {
+          if (!treatmentCellAppointment || selectedTreatmentId === null) return;
+          const isOther = selectedTreatmentId === OTHER_APPOINTMENT_TYPE_INDEX;
+          if (isOther && !customTreatmentName.trim()) { toast.error("Enter a treatment name"); return; }
+          await saveCellAppointment(treatmentCellAppointment, { type: selectedTreatmentId, customType: isOther ? customTreatmentName.trim() : "", price: Number(treatmentPrice) || 0 } as Partial<Appointment>, "Treatment updated");
+          setTreatmentCellAppointment(null);
+        }}
+        onCancel={() => setTreatmentCellAppointment(null)}
+        canSave={selectedTreatmentId !== null}
+      />
+      <Dialog open={Boolean(doctorCellAppointment)} onOpenChange={(open) => !open && setDoctorCellAppointment(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader><DialogTitle>Assign Doctor</DialogTitle><DialogDescription>Select the dentist for this appointment.</DialogDescription></DialogHeader>
+          <SelectDoctorModal className="max-h-[55vh] overflow-y-auto" onDoctorAdded={() => void reloadDoctors()}>
+            {isLoadingDoctors ? <p className="py-8 text-center text-sm text-slate-500">Loading doctors…</p> : (
+              <div className="space-y-2">{doctors.map((doctor) => <button key={doctor.id} type="button" className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left hover:border-violet-200 hover:bg-violet-50" onClick={async () => {
+                if (!doctorCellAppointment) return;
+                await saveCellAppointment(doctorCellAppointment, { doctor: doctor.name, doctorId: doctor.id, doctorName: doctor.name } as Partial<Appointment>, "Doctor updated");
+                setDoctorCellAppointment(null);
+              }}><span className="font-semibold text-slate-900">{doctor.name}</span><span className="text-xs text-slate-500">{doctor.specialization || "Dentist"}</span></button>)}</div>
+            )}
+          </SelectDoctorModal>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

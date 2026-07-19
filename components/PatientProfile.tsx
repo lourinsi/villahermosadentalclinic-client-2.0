@@ -9,15 +9,18 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
+import { useIsMobile } from "./ui/use-mobile";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "./ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "./ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
@@ -135,6 +138,7 @@ import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
   getBookingTreatmentsValue,
+  buildBookingTreatmentsPayload,
   normalizeBookingDuration,
   normalizeBookingPaymentMethod,
   normalizeBookingToothNumbers,
@@ -143,7 +147,7 @@ import {
 } from "./sharedBookingLogic";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
-import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
 import { AppointmentActionsMenu, createVisitHistoryActions } from "./AppointmentActionsMenu";
 
 export interface Patient {
@@ -187,6 +191,76 @@ export interface Patient {
 }
 
 const PHYSICIAN_INFORMATION_QUESTION_ID = "baseline_physician_information";
+
+const GENERAL_MEDICAL_INFO_IDS = new Set([
+  "baseline_good_health",
+  "baseline_under_medical_treatment",
+  "baseline_serious_illness_or_operation",
+  "baseline_hospitalized",
+  "baseline_medication",
+  "baseline_tobacco",
+  "baseline_alcohol_or_drugs"
+]);
+
+const ALLERGY_IDS = new Set([
+  "baseline_allergy_local_anesthetic",
+  "baseline_allergy_penicillin_antibiotics",
+  "baseline_allergy_sulfa",
+  "baseline_allergy_aspirin",
+  "baseline_allergy_latex",
+  "baseline_allergy_others"
+]);
+
+const WOMEN_ONLY_IDS = new Set([
+  "baseline_pregnant",
+  "baseline_nursing",
+  "baseline_birth_control"
+]);
+
+const OTHER_MEDICAL_IDS = new Set([
+  "baseline_bleeding_time",
+  "baseline_blood_type",
+  "baseline_blood_pressure"
+]);
+
+const MEDICAL_CONDITION_IDS = new Set([
+  "baseline_condition_high_blood_pressure",
+  "baseline_condition_low_blood_pressure",
+  "baseline_condition_epilepsy_convulsions",
+  "baseline_condition_aids_hiv",
+  "baseline_condition_sexually_transmitted_disease",
+  "baseline_condition_stomach_troubles_ulcers",
+  "baseline_condition_fainting_seizure",
+  "baseline_condition_rapid_weight_loss",
+  "baseline_condition_radiation_therapy",
+  "baseline_condition_joint_replacement_implant",
+  "baseline_condition_heart_surgery",
+  "baseline_condition_heart_attack",
+  "baseline_condition_thyroid_problem",
+  "baseline_condition_heart_disease",
+  "baseline_condition_heart_murmur",
+  "baseline_condition_hepatitis_liver_disease",
+  "baseline_condition_rheumatic_fever",
+  "baseline_condition_hay_fever_allergies",
+  "baseline_condition_respiratory_problems",
+  "baseline_condition_hepatitis_jaundice",
+  "baseline_condition_tuberculosis",
+  "baseline_condition_swollen_ankles",
+  "baseline_condition_kidney_disease",
+  "baseline_condition_diabetes",
+  "baseline_condition_chest_pain",
+  "baseline_condition_stroke",
+  "baseline_condition_cancer_tumors",
+  "baseline_condition_anemia",
+  "baseline_condition_angina",
+  "baseline_condition_asthma",
+  "baseline_condition_emphysema",
+  "baseline_condition_bleeding_problems",
+  "baseline_condition_blood_diseases",
+  "baseline_condition_head_injuries",
+  "baseline_condition_arthritis_rheumatism",
+  "baseline_condition_other"
+]);
 
 type PhysicianInformationState = {
   name: string;
@@ -1486,10 +1560,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [rescheduleStatus, setRescheduleStatus] = useState("scheduled");
   const [isRescheduleSaving, setIsRescheduleSaving] = useState(false);
   const [updateTreatmentAppointment, setUpdateTreatmentAppointment] = useState<Appointment | HistoryAppointment | null>(null);
+  const [selectedVisitTreatmentSections, setSelectedVisitTreatmentSections] = useState<SelectTreatmentModalSection[] | null>(null);
   const [selectedVisitTreatmentId, setSelectedVisitTreatmentId] = useState<number | null>(null);
   const [customVisitTreatmentName, setCustomVisitTreatmentName] = useState("");
   const [visitTreatmentPrice, setVisitTreatmentPrice] = useState("");
-  const [visitTreatmentDuration, setVisitTreatmentDuration] = useState("30");
   const [visitTreatmentToothNumberEntries, setVisitTreatmentToothNumberEntries] = useState<string[]>([""]);
   const [similarVisitTreatmentPrompt, setSimilarVisitTreatmentPrompt] = useState<{
     input: string;
@@ -1503,6 +1577,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [savedQuestionnaireAnswers, setSavedQuestionnaireAnswers] = useState<Record<string, boolean>>({});
   const [patientQuestionnaireData, setPatientQuestionnaireData] = useState<Record<string, any>>({});
+  const [savedPatientQuestionnaireData, setSavedPatientQuestionnaireData] = useState<Record<string, any>>({});
   const [physicianInformation, setPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
   const [savedPhysicianInformation, setSavedPhysicianInformation] = useState<PhysicianInformationState>(() => ({ ...EMPTY_PHYSICIAN_INFORMATION }));
   const [isLoadingQuestionnaire, setIsLoadingQuestionnaire] = useState(false);
@@ -1573,6 +1648,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       setQuestionnaireQuestions(questionsResult.questions.filter((question) => question.isActive !== false));
       setPatientQuestionnaireData(questionnaireData);
+      setSavedPatientQuestionnaireData(questionnaireData);
       setQuestionnaireAnswers(answers);
       setSavedQuestionnaireAnswers(answers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -1598,9 +1674,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const questionnaireHasChanges = React.useMemo(
     () =>
       JSON.stringify(questionnaireAnswers) !== JSON.stringify(savedQuestionnaireAnswers) ||
+      JSON.stringify(patientQuestionnaireData) !== JSON.stringify(savedPatientQuestionnaireData) ||
       JSON.stringify(physicianInformationComparable(physicianInformation)) !==
       JSON.stringify(physicianInformationComparable(savedPhysicianInformation)),
-    [physicianInformation, questionnaireAnswers, savedPhysicianInformation, savedQuestionnaireAnswers]
+    [physicianInformation, patientQuestionnaireData, questionnaireAnswers, savedPatientQuestionnaireData, savedPhysicianInformation, savedQuestionnaireAnswers]
   );
 
   const consentFormHasChanges = React.useMemo(
@@ -1637,6 +1714,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const updatePhysicianInformation = (field: PhysicianInformationField, value: string) => {
     setPhysicianInformation((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setIsModified(true);
+  };
+
+  const updateQuestionnaireDataField = (field: string, value: string) => {
+    setPatientQuestionnaireData((current) => ({
       ...current,
       [field]: value,
     }));
@@ -1696,6 +1781,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextAnswers = normalizeQuestionnaireAnswers(nextData);
       const nextPhysicianInformation = createPhysicianInformationState(nextData);
       setPatientQuestionnaireData(nextData);
+      setSavedPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -1761,6 +1847,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       const nextPhysicianInformation = createPhysicianInformationState(nextData);
       const savedConsent = createConsentFormState(nextData);
       setPatientQuestionnaireData(nextData);
+      setSavedPatientQuestionnaireData(nextData);
       setQuestionnaireAnswers(nextAnswers);
       setSavedQuestionnaireAnswers(nextAnswers);
       setPhysicianInformation(nextPhysicianInformation);
@@ -2036,6 +2123,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     });
 
+    const questionnaireDataFieldLabels: Record<string, string> = {
+      bleedingTime: "Questionnaire - Bleeding Time",
+      bloodType: "Questionnaire - Blood Type",
+      bloodPressure: "Questionnaire - Blood Pressure",
+      otherConditionsDetails: "Questionnaire - Other medical condition details",
+      otherMedicalCondition: "Questionnaire - Other medical condition",
+      allergyOthersDetails: "Questionnaire - Additional allergy details",
+    };
+
+    Object.entries(questionnaireDataFieldLabels).forEach(([fieldKey, label]) => {
+      const oldValue = savedPatientQuestionnaireData[fieldKey];
+      const newValue = patientQuestionnaireData[fieldKey];
+      if (toComparableValue(oldValue) !== toComparableValue(newValue)) {
+        changes[label] = {
+          old: oldValue,
+          new: newValue,
+        };
+      }
+    });
+
     const physicianFieldLabels: Record<PhysicianInformationField, string> = {
       name: "Questionnaire - Name of Physician",
       officeAddress: "Questionnaire - Physician Office Address",
@@ -2090,10 +2197,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     consentForm,
     formData,
     originalLoadedData,
+    patientQuestionnaireData,
     physicianInformation,
     questionnaireAnswers,
     questionnaireQuestions,
     savedConsentForm,
+    savedPatientQuestionnaireData,
     savedPhysicianInformation,
     savedQuestionnaireAnswers,
   ]);
@@ -2119,11 +2228,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     appointmentId?: string;
   } | null>(null);
 
+  const isMobile = useIsMobile();
+
   // New state for filters
   const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
   const [historySearchFilter, setHistorySearchFilter] = useState('');
+  const [historyViewMode, setHistoryViewMode] = useState<'history' | 'list'>('list');
+  const [historyPaymentHistoryOpenByAppointment, setHistoryPaymentHistoryOpenByAppointment] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (typeof isMobile === 'boolean') {
+      setHistoryViewMode(isMobile ? 'history' : 'list');
+    }
+  }, [isMobile]);
 
   // Snapshot states
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
@@ -2513,17 +2632,46 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       getAppointmentTypeName(numericType, (sourceAppointment as any).customType) ||
       String((sourceAppointment as any).type || "");
     const currentPrice = Number((sourceAppointment as any).price ?? selectedService?.price ?? 0);
-    const currentDuration = normalizeBookingDuration((sourceAppointment as any).duration || selectedService?.duration || 30);
+    const initialSections = (() => {
+      const bookingTreatments = getBookingTreatmentsValue(sourceAppointment);
+      if (bookingTreatments.length > 0) {
+        return bookingTreatments.map((bookingTreatment, index) => {
+          const treatmentType = Number.isFinite(Number(bookingTreatment.type)) ? Number(bookingTreatment.type) : selectedId;
+          const matchedTreatment = activeTreatmentOptions.find((option) => option.id === treatmentType) || null;
+          const priceValue = Number.isFinite(Number(bookingTreatment.price))
+            ? Number(bookingTreatment.price)
+            : Number.isFinite(currentPrice)
+              ? currentPrice
+              : matchedTreatment?.price ?? 0;
+          return {
+            selectedTreatmentId: treatmentType,
+            currentTreatmentLabel: index === 0 ? currentTreatmentName : "",
+            customTreatmentName:
+              treatmentType === OTHER_APPOINTMENT_TYPE_INDEX
+                ? String(bookingTreatment.customType || (sourceAppointment as any).customType || currentTreatmentName || "").trim()
+                : "",
+            selectedPrice: String(Math.max(0, Number(priceValue) || 0)),
+          } satisfies SelectTreatmentModalSection;
+        });
+      }
+
+      return [{
+        selectedTreatmentId: selectedId,
+        currentTreatmentLabel: currentTreatmentName,
+        customTreatmentName:
+          selectedId === OTHER_APPOINTMENT_TYPE_INDEX
+            ? String((sourceAppointment as any).customType || currentTreatmentName || "").trim()
+            : "",
+        selectedPrice: String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0),
+      }] satisfies SelectTreatmentModalSection[];
+    })();
 
     setUpdateTreatmentAppointment(sourceAppointment);
-    setSelectedVisitTreatmentId(selectedId);
-    setCustomVisitTreatmentName(
-      selectedId === OTHER_APPOINTMENT_TYPE_INDEX
-        ? String((sourceAppointment as any).customType || currentTreatmentName || "").trim()
-        : ""
-    );
-    setVisitTreatmentPrice(String(Number.isFinite(currentPrice) ? Math.max(0, currentPrice) : 0));
-    setVisitTreatmentDuration(String(currentDuration));
+    setSelectedVisitTreatmentSections(initialSections);
+    const firstSection = initialSections[0];
+    setSelectedVisitTreatmentId(firstSection.selectedTreatmentId ?? null);
+    setCustomVisitTreatmentName(firstSection.customTreatmentName || "");
+    setVisitTreatmentPrice(String(firstSection.selectedPrice ?? ""));
     setVisitTreatmentToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(sourceAppointment)));
     setSimilarVisitTreatmentPrompt(null);
   };
@@ -2532,22 +2680,52 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     if (isUpdatingVisitTreatment && !force) return;
 
     setUpdateTreatmentAppointment(null);
+    setSelectedVisitTreatmentSections(null);
     setSelectedVisitTreatmentId(null);
     setCustomVisitTreatmentName("");
     setVisitTreatmentPrice("");
-    setVisitTreatmentDuration("30");
     setVisitTreatmentToothNumberEntries([""]);
     setSimilarVisitTreatmentPrompt(null);
   };
 
   const handleSaveVisitTreatment = async (skipSimilarityCheck = false) => {
     const appointmentId = String(updateTreatmentAppointment?.id || "");
-    const selectedTreatment = treatmentOptions.find((option) => option.id === selectedVisitTreatmentId);
+    const sections = selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
+      ? selectedVisitTreatmentSections
+      : [{
+          selectedTreatmentId: selectedVisitTreatmentId,
+          customTreatmentName: customVisitTreatmentName,
+          selectedPrice: visitTreatmentPrice,
+        }];
 
     if (!appointmentId) {
       toast.error("Could not find appointment to update");
       return;
     }
+
+    if (sections.length === 0) {
+      toast.error("Please select a treatment");
+      return;
+    }
+
+    const invalidSection = sections.find((section) => {
+      const selectedId = section.selectedTreatmentId;
+      if (selectedId === undefined || selectedId === null) return true;
+      const selectedOption = treatmentOptions.find((option) => option.id === selectedId);
+      if (!selectedOption) return true;
+      if (selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return true;
+      const priceValue = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+      if (!Number.isFinite(priceValue) || priceValue < 0) return true;
+      return false;
+    });
+
+    if (invalidSection) {
+      toast.error("Please complete all treatment sections before saving");
+      return;
+    }
+
+    const firstSection = sections[0];
+    const selectedTreatment = treatmentOptions.find((option) => option.id === firstSection.selectedTreatmentId);
 
     if (!selectedTreatment) {
       toast.error("Please select a treatment");
@@ -2555,7 +2733,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
 
     const isOtherTreatment = selectedTreatment.id === OTHER_APPOINTMENT_TYPE_INDEX;
-    const customType = isOtherTreatment ? customVisitTreatmentName.trim() : "";
+    const customType = isOtherTreatment ? String(firstSection.customTreatmentName || "").trim() : "";
     if (isOtherTreatment && !customType) {
       toast.error("Custom treatment name is required");
       return;
@@ -2569,22 +2747,30 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       }
     }
 
-    const nextPrice = Number(visitTreatmentPrice);
-    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
-      toast.error("Enter a valid treatment price");
-      return;
-    }
-
-    const nextDuration = normalizeBookingDuration(visitTreatmentDuration || selectedTreatment.duration || (updateTreatmentAppointment as any).duration || 30);
+    const nextDuration = normalizeBookingDuration((updateTreatmentAppointment as any).duration || 30);
+    const nextTreatments = sections.map((section) => {
+      const selectedOption = treatmentOptions.find((option) => option.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
+      const isCustomTreatment = selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
+      const priceValue = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+      return {
+        type: selectedOption.id,
+        customType: isCustomTreatment ? String(section.customTreatmentName || "").trim() : undefined,
+        duration: nextDuration,
+        price: Math.max(0, priceValue),
+      };
+    });
+    const firstUpdatedTreatment = nextTreatments[0];
+    const nextPrice = Number(firstUpdatedTreatment.price ?? 0);
     const nextToothNumbers = normalizeBookingToothNumbers(visitTreatmentToothNumberEntries);
 
     setIsUpdatingVisitTreatment(true);
     try {
       const updated = await updateAppointment(appointmentId, {
-        type: selectedTreatment.id,
-        customType: isOtherTreatment ? customType : undefined,
+        type: firstUpdatedTreatment.type,
+        customType: firstUpdatedTreatment.customType,
         duration: nextDuration,
         price: Math.max(0, nextPrice),
+        ...buildBookingTreatmentsPayload(nextTreatments),
         toothNumbers: nextToothNumbers,
       } as Partial<Appointment>);
 
@@ -2593,11 +2779,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           ? ({
             ...apt,
             ...updated,
-            type: updated.type ?? selectedTreatment.id,
-            customType: isOtherTreatment ? customType : updated.customType,
+            type: updated.type ?? firstUpdatedTreatment.type,
+            customType: firstUpdatedTreatment.customType ?? updated.customType,
             duration: updated.duration ?? nextDuration,
             price: updated.price ?? Math.max(0, nextPrice),
             toothNumbers: (updated as any).toothNumbers ?? nextToothNumbers,
+            treatments: (updated as any).treatments ?? nextTreatments,
           } as Appointment)
           : apt;
 
@@ -3148,6 +3335,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setQuestionnaireAnswers(draft.questionnaireAnswers || {});
       setSavedQuestionnaireAnswers(draft.savedQuestionnaireAnswers || {});
       setPatientQuestionnaireData(draft.patientQuestionnaireData || {});
+      setSavedPatientQuestionnaireData(draft.savedPatientQuestionnaireData || draft.patientQuestionnaireData || {});
       setPhysicianInformation(createPhysicianInformationState(draft.physicianInformation || draft.patientQuestionnaireData || {}));
       setSavedPhysicianInformation(createPhysicianInformationState(draft.savedPhysicianInformation || draft.patientQuestionnaireData || {}));
       setQuestionnaireQuestions(draft.questionnaireQuestions || []);
@@ -3712,14 +3900,31 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       ? getHistoryAppointmentType(updateTreatmentAppointment as Appointment)
       : String((updateTreatmentAppointment as any).type || "Appointment")
     : "";
-  const selectedVisitTreatment = activeTreatmentOptions.find((option) => option.id === selectedVisitTreatmentId) || null;
-  const visitTreatmentPriceNumber = Number(visitTreatmentPrice);
+  const isVisitTreatmentSectionValid = (section: SelectTreatmentModalSection) => {
+    const selectedId = section.selectedTreatmentId;
+    if (selectedId === undefined || selectedId === null) return false;
+    const selectedOption = activeTreatmentOptions.find((option) => option.id === selectedId);
+    if (!selectedOption) return false;
+    if (selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return false;
+    const priceValue = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+    if (!Number.isFinite(priceValue) || priceValue < 0) return false;
+    return true;
+  };
+
+  const selectedVisitTreatment = activeTreatmentOptions.find((option) => option.id === (selectedVisitTreatmentSections?.[0]?.selectedTreatmentId ?? selectedVisitTreatmentId)) || null;
+  const visitTreatmentPriceNumber = Number(selectedVisitTreatmentSections?.[0]?.selectedPrice ?? visitTreatmentPrice);
   const canSaveVisitTreatment = Boolean(
-    selectedVisitTreatment &&
-    (!selectedVisitTreatment || selectedVisitTreatment.id !== OTHER_APPOINTMENT_TYPE_INDEX || customVisitTreatmentName.trim()) &&
-    Number.isFinite(visitTreatmentPriceNumber) &&
-    visitTreatmentPriceNumber >= 0 &&
-    Boolean(visitTreatmentDuration)
+    updateTreatmentAppointment &&
+    !isUpdatingVisitTreatment &&
+    !isLoadingTreatmentOptions &&
+    (
+      selectedVisitTreatmentSections
+        ? selectedVisitTreatmentSections.length > 0 && selectedVisitTreatmentSections.every(isVisitTreatmentSectionValid)
+        : selectedVisitTreatment &&
+          (!selectedVisitTreatment || selectedVisitTreatment.id !== OTHER_APPOINTMENT_TYPE_INDEX || customVisitTreatmentName.trim()) &&
+          Number.isFinite(visitTreatmentPriceNumber) &&
+          visitTreatmentPriceNumber >= 0
+    )
   );
   const assignDoctorActionLabel = assignDoctorAppointment && getVisitDoctorName(assignDoctorAppointment)
     ? "Change Doctor"
@@ -4268,95 +4473,432 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsContent>
 
             <TabsContent value="questionnaire" data-tour-id="patient-details-questionnaire-content" className="mx-auto w-full max-w-[1680px] space-y-4">
-              <Card className={cardClass}>
-                <CardHeader className={cardHeaderClass}>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
-                      <ClipboardList className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="text-base font-bold text-slate-900">Questionnaire</CardTitle>
-                      <p className="mt-1 text-sm font-medium text-slate-500">Patient questionnaire responses</p>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-5 sm:p-6">
-                  {isLoadingQuestionnaire ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+              {isLoadingQuestionnaire ? (
+                <Card className={cardClass}>
+                  <CardContent className="p-8 text-center text-sm font-semibold text-slate-500">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-violet-600" />
                       Loading questionnaire...
                     </div>
-                  ) : questionnaireQuestions.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
-                      No questionnaire questions have been saved yet.
+                  </CardContent>
+                </Card>
+              ) : questionnaireQuestions.length === 0 ? (
+                <Card className={cardClass}>
+                  <CardContent className="p-8 text-center text-sm font-semibold text-slate-500">
+                    No questionnaire questions have been saved yet.
+                  </CardContent>
+                </Card>
+              ) : (() => {
+                const generalMedicalQuestions = questionnaireQuestions.filter(q => q.id === PHYSICIAN_INFORMATION_QUESTION_ID || GENERAL_MEDICAL_INFO_IDS.has(q.id));
+                const allergyQuestions = questionnaireQuestions.filter(q => ALLERGY_IDS.has(q.id));
+                const medicalConditionQuestions = questionnaireQuestions.filter(q => MEDICAL_CONDITION_IDS.has(q.id));
+                const otherMedicalQuestions = questionnaireQuestions.filter(q => OTHER_MEDICAL_IDS.has(q.id));
+                const womenOnlyQuestions = questionnaireQuestions.filter(q => WOMEN_ONLY_IDS.has(q.id));
+
+                const baselineAllKnownIds = new Set([
+                  PHYSICIAN_INFORMATION_QUESTION_ID,
+                  ...GENERAL_MEDICAL_INFO_IDS,
+                  ...ALLERGY_IDS,
+                  ...MEDICAL_CONDITION_IDS,
+                  ...OTHER_MEDICAL_IDS,
+                  ...WOMEN_ONLY_IDS
+                ]);
+                const additionalQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id));
+
+                const qPhysician = questionnaireQuestions.find(q => q.id === PHYSICIAN_INFORMATION_QUESTION_ID);
+                const qGoodHealth = questionnaireQuestions.find(q => q.id === "baseline_good_health");
+                const qUnderTreatment = questionnaireQuestions.find(q => q.id === "baseline_under_medical_treatment");
+                const qSeriousIllness = questionnaireQuestions.find(q => q.id === "baseline_serious_illness_or_operation");
+                const qHospitalized = questionnaireQuestions.find(q => q.id === "baseline_hospitalized");
+                const qMedication = questionnaireQuestions.find(q => q.id === "baseline_medication");
+                const qTobacco = questionnaireQuestions.find(q => q.id === "baseline_tobacco");
+                const qDrugs = questionnaireQuestions.find(q => q.id === "baseline_alcohol_or_drugs");
+
+                const qPregnant = questionnaireQuestions.find(q => q.id === "baseline_pregnant");
+                const qNursing = questionnaireQuestions.find(q => q.id === "baseline_nursing");
+                const qBirthControl = questionnaireQuestions.find(q => q.id === "baseline_birth_control");
+
+                const renderRowToggle = (question: QuestionnaireQuestion | undefined, detailKey?: string, detailLabel?: string, detailPlaceholder?: string) => {
+                  if (!question) return null;
+                  const checked = Boolean(questionnaireAnswers[question.id]);
+                  return (
+                    <div key={question.id} className="space-y-2 py-3 border-b border-slate-100 last:border-b-0">
+                      <div className="flex items-start justify-between gap-4">
+                        <span className="text-sm font-semibold text-slate-800 leading-tight">{question.text}</span>
+                        <ToggleGroup
+                          type="single"
+                          value={checked ? "yes" : "no"}
+                          onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                          disabled={isSavingQuestionnaire}
+                          aria-label={`Answer ${question.text}`}
+                          className="h-9 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-1"
+                          variant="outline"
+                          size="sm"
+                        >
+                          <ToggleGroupItem value="yes" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                            Yes
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value="no" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                            No
+                          </ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+
+                      {checked && detailKey && (
+                        <div className="mt-2 pl-4 border-l-2 border-violet-100">
+                          {detailLabel && (
+                            <Label className="text-xs font-bold text-slate-500 mb-1 block">{detailLabel}</Label>
+                          )}
+                          <Input
+                            value={patientQuestionnaireData[detailKey] || ""}
+                            onChange={(e) => updateQuestionnaireDataField(detailKey, e.target.value)}
+                            placeholder={detailPlaceholder || "Specify details..."}
+                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                            disabled={isSavingQuestionnaire}
+                          />
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {questionnaireQuestions.map((question) => {
-                        const checkboxId = `patient-questionnaire-${question.id}`;
-                        const checked = Boolean(questionnaireAnswers[question.id]);
-                        const isPhysicianInformationQuestion = question.id === PHYSICIAN_INFORMATION_QUESTION_ID;
+                  );
+                };
 
-                        if (isPhysicianInformationQuestion) {
-                          return (
-                            <div
-                              key={question.id}
-                              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
-                            >
-                              <label htmlFor={checkboxId} className="flex min-h-8 cursor-pointer items-start gap-3">
-                                <Checkbox
-                                  id={checkboxId}
-                                  checked={checked}
-                                  onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
-                                  disabled={isSavingQuestionnaire}
-                                  className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
-                                />
-                                <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
-                              </label>
+                return (
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 items-start">
+                    {/* Left & Middle Column */}
+                    <div className="space-y-6 lg:col-span-2">
+                      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        {/* 1. GENERAL MEDICAL INFORMATION */}
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              1. General Medical Information
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 space-y-1">
+                            {/* Physician Information Question */}
+                            {qPhysician && (() => {
+                              const checked = Boolean(questionnaireAnswers[qPhysician.id]);
+                              const checkboxId = `patient-questionnaire-${qPhysician.id}`;
+                              return (
+                                <div key={qPhysician.id} className="space-y-2 py-3 border-b border-slate-100">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <span className="text-sm font-semibold text-slate-800 leading-tight">{qPhysician.text}</span>
+                                    <ToggleGroup
+                                      type="single"
+                                      value={checked ? "yes" : "no"}
+                                      onValueChange={(value) => handleQuestionnaireAnswerChange(qPhysician.id, value === "yes")}
+                                      disabled={isSavingQuestionnaire}
+                                      aria-label={`Answer ${qPhysician.text}`}
+                                      className="h-9 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-1"
+                                      variant="outline"
+                                      size="sm"
+                                    >
+                                      <ToggleGroupItem value="yes" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        Yes
+                                      </ToggleGroupItem>
+                                      <ToggleGroupItem value="no" className="px-3 text-[10px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        No
+                                      </ToggleGroupItem>
+                                    </ToggleGroup>
+                                  </div>
 
-                              {checked && (
-                                <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
-                                  {PHYSICIAN_INFORMATION_FIELDS.map((field) => (
-                                    <div key={field.id} className="space-y-1.5">
-                                      <Label htmlFor={`${checkboxId}-${field.id}`} className="text-xs font-semibold text-slate-600">
-                                        {field.label}
-                                      </Label>
-                                      <Input
-                                        id={`${checkboxId}-${field.id}`}
-                                        value={physicianInformation[field.id]}
-                                        onChange={(event) => updatePhysicianInformation(field.id, event.target.value)}
-                                        disabled={isSavingQuestionnaire}
-                                        placeholder={field.placeholder}
-                                        className="h-10 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
-                                      />
+                                  {checked && (
+                                    <div className="mt-3 grid gap-3 pl-4 border-l-2 border-violet-100 pt-1">
+                                      {PHYSICIAN_INFORMATION_FIELDS.map((field) => (
+                                        <div key={field.id} className="space-y-1">
+                                          <Label htmlFor={`${checkboxId}-${field.id}`} className="text-xs font-bold text-slate-500">
+                                            {field.label}
+                                          </Label>
+                                          <Input
+                                            id={`${checkboxId}-${field.id}`}
+                                            value={physicianInformation[field.id]}
+                                            onChange={(event) => updatePhysicianInformation(field.id, event.target.value)}
+                                            disabled={isSavingQuestionnaire}
+                                            placeholder={field.placeholder}
+                                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                                          />
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        }
+                              );
+                            })()}
 
-                        return (
-                          <label
-                            key={question.id}
-                            htmlFor={checkboxId}
-                            className="flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/30"
-                          >
-                            <Checkbox
-                              id={checkboxId}
-                              checked={checked}
-                              onCheckedChange={(value) => handleQuestionnaireAnswerChange(question.id, value === true)}
-                              disabled={isSavingQuestionnaire}
-                              className="mt-0.5 border-violet-200 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
-                            />
-                            <span className="text-sm font-semibold leading-6 text-slate-800">{question.text}</span>
-                          </label>
-                        );
-                      })}
+                            {/* Standard General Medical Questions */}
+                            {renderRowToggle(qGoodHealth)}
+                            {renderRowToggle(qUnderTreatment, "underMedicalTreatmentDetails", "If so, what is the condition being treated?", "Specify condition...")}
+                            {renderRowToggle(qSeriousIllness, "seriousIllnessOrOperationDetails", "If so, what illness or operation?", "Specify illness or operation...")}
+                            {renderRowToggle(qHospitalized, "hospitalizedDetails", "If so, when and why?", "Specify when and why...")}
+                            {renderRowToggle(qMedication, "medicationDetails", "If so, please specify.", "Specify medication details...")}
+                            {renderRowToggle(qTobacco)}
+                            {renderRowToggle(qDrugs)}
+                          </CardContent>
+                        </Card>
+
+                        {/* 2. ALLERGIES */}
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              2. Allergies
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 space-y-4">
+                            <p className="text-xs font-semibold text-slate-500">
+                              Are you allergic to any of the following? Check which apply:
+                            </p>
+                            <div className="grid grid-cols-1 gap-4">
+                              {allergyQuestions.map((question) => {
+                                const checked = Boolean(questionnaireAnswers[question.id]);
+                                const isOthers = question.id === "baseline_allergy_others";
+                                return (
+                                  <div key={question.id} className="flex items-start gap-3">
+                                    <Checkbox
+                                      id={`allergy-${question.id}`}
+                                      checked={checked}
+                                      onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                      disabled={isSavingQuestionnaire}
+                                      className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500 mt-0.5"
+                                    />
+                                    <div className="grid gap-1.5 leading-none w-full">
+                                      <Label
+                                        htmlFor={`allergy-${question.id}`}
+                                        className="text-sm font-semibold text-slate-700 cursor-pointer"
+                                      >
+                                        {isOthers ? "Other (Specify)" : question.text.replace(/Are you allergic to /i, "").replace(/\?/g, "").trim()}
+                                      </Label>
+                                      {isOthers && checked && (
+                                        <div className="mt-2 w-full pl-1">
+                                          <Input
+                                            value={patientQuestionnaireData.allergyOthersDetails || ""}
+                                            onChange={(e) => updateQuestionnaireDataField("allergyOthersDetails", e.target.value)}
+                                            placeholder="Specify other allergies..."
+                                            className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                                            disabled={isSavingQuestionnaire}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* 3. MEDICAL CONDITIONS (HISTORY) */}
+                      <Card className={cardClass}>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                            3. Medical Conditions (History)
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-5 space-y-4">
+                          <p className="text-xs font-semibold text-slate-500">
+                            Do you have or have you had any of the following? Check which apply:
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5">
+                            {medicalConditionQuestions.map((question) => {
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center gap-3">
+                                  <Checkbox
+                                    id={`condition-${question.id}`}
+                                    checked={checked}
+                                    onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                  />
+                                  <Label
+                                    htmlFor={`condition-${question.id}`}
+                                    className="text-sm font-semibold text-slate-700 cursor-pointer leading-tight"
+                                  >
+                                    {question.text.replace(/Have you had /i, "").replace(/\?/g, "").trim()}
+                                  </Label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </CardContent>
+                      </Card>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+
+                    {/* Right Column */}
+                    <div className="space-y-6 lg:col-span-1">
+                      {/* 4. OTHER MEDICAL DETAILS */}
+                      <Card className={cardClass}>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                            4. Other Medical Details
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-5 space-y-5">
+                          {/* Bleeding Time */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Bleeding Time</Label>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="0.1"
+                              value={patientQuestionnaireData.bleedingTime || ""}
+                              onChange={(e) => updateQuestionnaireDataField("bleedingTime", e.target.value)}
+                              placeholder="Enter bleeding time"
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Blood Type */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Blood Type</Label>
+                            <Select
+                              value={patientQuestionnaireData.bloodType || ""}
+                              onValueChange={(value) => updateQuestionnaireDataField("bloodType", value)}
+                              disabled={isSavingQuestionnaire}
+                            >
+                              <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200">
+                                <SelectValue placeholder="Select blood type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {[
+                                  "A+",
+                                  "A-",
+                                  "B+",
+                                  "B-",
+                                  "AB+",
+                                  "AB-",
+                                  "O+",
+                                  "O-",
+                                  "Unknown",
+                                ].map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {type}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Blood Pressure */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Blood Pressure</Label>
+                            <Input
+                              value={patientQuestionnaireData.bloodPressure || ""}
+                              onChange={(e) => updateQuestionnaireDataField("bloodPressure", e.target.value)}
+                              placeholder="Specify blood pressure (e.g. 120/80)"
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Other medical condition textarea */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Have you had any other medical condition?</Label>
+                            <Textarea
+                              value={patientQuestionnaireData.otherConditionsDetails || ""}
+                              onChange={(e) => updateQuestionnaireDataField("otherConditionsDetails", e.target.value)}
+                              placeholder="Enter details of other conditions..."
+                              className="min-h-[100px] rounded-lg border-slate-200 bg-white text-slate-900 shadow-none focus-visible:ring-violet-200 text-sm"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                          {/* Women Only Section */}
+                          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                            <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                              For women only:
+                            </p>
+                            
+                            {[
+                              { question: qPregnant, label: "Are you pregnant?" },
+                              { question: qNursing, label: "Are you nursing?" },
+                              { question: qBirthControl, label: "Are you taking birth control pills?" }
+                            ].map(({ question, label }) => {
+                              if (!question) return null;
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center justify-between gap-4 py-1.5 border-b border-slate-100 last:border-b-0 last:pb-0">
+                                  <span className="text-xs font-semibold text-slate-700 leading-tight">{label}</span>
+                                  <ToggleGroup
+                                    type="single"
+                                    value={checked ? "yes" : "no"}
+                                    onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      Yes
+                                    </ToggleGroupItem>
+                                    <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      No
+                                    </ToggleGroupItem>
+                                  </ToggleGroup>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Bottom extra medical condition input */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Have you had any other medical condition?</Label>
+                            <Input
+                              value={patientQuestionnaireData.otherMedicalCondition || ""}
+                              onChange={(e) => updateQuestionnaireDataField("otherMedicalCondition", e.target.value)}
+                              placeholder="Specify here..."
+                              className="h-9 rounded-lg border-slate-200 bg-white text-sm shadow-none focus-visible:ring-violet-200"
+                              disabled={isSavingQuestionnaire}
+                            />
+                          </div>
+
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Additional questions if they are dynamic */}
+                    {additionalQuestions.length > 0 && (
+                      <div className="col-span-full mt-4">
+                        <Card className={cardClass}>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              Additional Questionnaire Questions
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {additionalQuestions.map((question) => {
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center justify-between gap-4 p-3 rounded-lg border border-slate-100 bg-slate-50/30">
+                                  <span className="text-xs font-semibold text-slate-700">{question.text}</span>
+                                  <ToggleGroup
+                                    type="single"
+                                    value={checked ? "yes" : "no"}
+                                    onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                    disabled={isSavingQuestionnaire}
+                                    className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      Yes
+                                    </ToggleGroupItem>
+                                    <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                      No
+                                    </ToggleGroupItem>
+                                  </ToggleGroup>
+                                </div>
+                              );
+                            })}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </TabsContent>
 
             <TabsContent value="consent" data-tour-id="patient-details-consent-content" className="mx-auto w-full max-w-[1680px] space-y-4">
@@ -4595,20 +5137,32 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <CardHeader className="border-b border-slate-100 px-4 py-5 sm:px-6">
                   <div className="flex flex-col gap-5">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <CardTitle className="text-2xl font-black text-slate-950">Treatment History</CardTitle>
                         <p className="mt-1 text-sm font-medium text-slate-500">All past appointments and treatments</p>
                       </div>
-                      <Button
-                        size="sm"
-                        type="button"
-                        onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
-                        className="h-10 rounded-xl bg-violet-600 px-4 font-bold text-white shadow-md shadow-violet-100 hover:bg-violet-700"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Appointment
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2 justify-end">
+                        <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Treatment history view">
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setHistoryViewMode("history")} className={`h-8 rounded-lg px-3 text-xs font-black ${historyViewMode === "history" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>
+                            <History className="mr-1.5 h-3.5 w-3.5" />
+                            History
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setHistoryViewMode("list")} className={`h-8 rounded-lg px-3 text-xs font-black ${historyViewMode === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>
+                            <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
+                            List
+                          </Button>
+                        </div>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => openCreateModal(undefined, undefined, undefined, patientIdForBooking)}
+                          className="h-10 rounded-xl bg-violet-600 px-4 font-bold text-white shadow-md shadow-violet-100 hover:bg-violet-700"
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          New Appointment
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-3 md:grid-cols-[minmax(220px,1fr)_180px_180px_180px] xl:grid-cols-[minmax(280px,1fr)_190px_190px_190px]">
@@ -4735,8 +5289,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                    historyViewMode === "history" ? (
+                      <div className="space-y-3">
+                        {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                         const appointmentId = String(appointment.id || `apt-${index}`);
                         const appointmentBalance = Number((appointment as any).balance);
                         const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
@@ -4846,7 +5401,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                          </span>
                                        </div>
                                      ) : null}
-
 
                                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
                                       <span className="inline-flex items-center gap-1">
@@ -4995,144 +5549,324 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               </div>
 
                               {visitTransactions.length > 0 ? (
-                                <div className="mt-4 border-t border-slate-100 pt-4">
-                                  <div className="mb-3 flex items-center gap-2">
-                                    <PaymentIcon className="h-4 w-4 text-violet-600" />
-                                    <h4 className="text-sm font-black text-slate-950">Payment History</h4>
-                                  </div>
-                                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                    <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
-                                      <span>Payment Method</span>
-                                      <span>Amount</span>
-                                      <span>Date</span>
-                                      <span>Reference No.</span>
-                                      <span className="text-right">Actions</span>
-                                    </div>
-                                    <div className="divide-y divide-slate-100">
-                                      {visitTransactions.map((txn) => {
-                                        const transactionKey = getPaymentTransactionKey(txn);
-                                        const paymentDisplay = getTransactionPaymentDisplay(txn);
-                                        const methodLabel = normalizeBookingPaymentMethod(txn.method);
-                                        const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
-                                        const referenceNo = String(txn.transactionId || txn.id || "N/A");
-                                        const editablePaymentId = getEditablePaymentId(txn);
-                                        const restorablePaymentId = getRestorablePaymentId(txn);
-                                        const isCashPayment = methodLabel.toLowerCase() === "cash";
-                                        const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
-                                        const isCancelledPayment =
-                                          appointmentStatus === "cancelled" ||
-                                          isAppointmentCancelledStatusTransaction(txn);
-                                        const isInactivePayment = isDeletedPayment || isCancelledPayment;
-
-                                        return (
-                                          <div
-                                            key={transactionKey}
-                                            className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
-                                              }`}
-                                          >
-                                            <div className="flex min-w-0 items-center gap-3">
-                                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isCashPayment ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-700"}`}>
-                                                {getPaymentMethodIcon(methodLabel)}
-                                              </div>
-                                              <div className="min-w-0">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                  <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
-                                                  <span className="font-semibold text-slate-400">-</span>
-                                                  <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
-                                                    <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
-                                                  </span>
-                                                  {paymentDisplay.label ? (
-                                                    <PaymentTransactionStatusBadge
-                                                      display={paymentDisplay}
-                                                      className="rounded-full px-2.5 py-0.5 text-xs"
-                                                      showIcon={false}
-                                                    />
-                                                  ) : null}
-                                                </div>
-                                                {txn.notes ? (
-                                                  <p className="mt-1 line-clamp-2 text-xs font-medium text-slate-500">{txn.notes}</p>
-                                                ) : null}
-                                              </div>
-                                            </div>
-
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
-                                              <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
-                                                <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
-                                              </span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
-                                              <span className="font-bold text-slate-700">{txnDate}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-3 md:block">
-                                              <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span>
-                                              <span className="font-mono text-xs font-bold text-slate-600">Ref: {referenceNo}</span>
-                                            </div>
-                                            <div className="flex items-center justify-end gap-2">
-                                              <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="icon"
-                                                className="h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
-                                                onClick={() => handleOpenTransactionSnapshot(txn)}
-                                                title="View payment snapshot"
-                                              >
-                                                <Eye className="h-4 w-4" />
-                                                <span className="sr-only">View payment snapshot</span>
-                                              </Button>
-                                              {!isDeletedPayment ? (
-                                                <>
-                                                  <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
-                                                    onClick={() => handleEditPaymentTransaction(txn)}
-                                                    title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
-                                                  >
-                                                    <Edit className="h-4 w-4" />
-                                                    <span className="sr-only">Edit payment</span>
-                                                  </Button>
-                                                  <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className={`h-9 w-9 rounded-xl border-red-100 text-red-600 hover:bg-red-50 ${editablePaymentId ? "" : "opacity-60"}`}
-                                                    onClick={() => requestDeletePaymentTransaction(txn)}
-                                                    title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
-                                                  >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    <span className="sr-only">Delete payment</span>
-                                                  </Button>
-                                                </>
-                                              ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
-                                                <Button
-                                                  type="button"
-                                                  variant="outline"
-                                                  size="sm"
-                                                  className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-50"
-                                                  onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
-                                                  title="Restore payment"
-                                                >
-                                                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                                                  Restore
-                                                </Button>
-                                              ) : null}
-                                            </div>
+                                (() => {
+                                  const isPaymentHistoryOpen = historyPaymentHistoryOpenByAppointment[appointmentId] ?? false;
+                                  return (
+                                    <div className="mt-4 border-t border-slate-100 pt-4">
+                                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <PaymentIcon className="h-4 w-4 text-violet-600" />
+                                          <h4 className="text-sm font-black text-slate-950">Payment History</h4>
+                                        </div>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 rounded-xl border-slate-200 text-xs font-black text-slate-700 hover:bg-slate-50"
+                                          onClick={() => setHistoryPaymentHistoryOpenByAppointment((prev) => ({
+                                            ...prev,
+                                            [appointmentId]: !isPaymentHistoryOpen,
+                                          }))}
+                                        >
+                                          {isPaymentHistoryOpen ? "Hide payments" : `Show payments (${visitTransactions.length})`}
+                                        </Button>
+                                      </div>
+                                      {isPaymentHistoryOpen ? (
+                                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                          <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 md:grid">
+                                            <span>Payment Method</span>
+                                            <span>Amount</span>
+                                            <span>Date</span>
+                                            <span>Reference No.</span>
+                                            <span className="text-right">Actions</span>
                                           </div>
-                                        );
-                                      })}
+                                          <div className="divide-y divide-slate-100">
+                                            {visitTransactions.map((txn) => {
+                                              const transactionKey = getPaymentTransactionKey(txn);
+                                              const paymentDisplay = getTransactionPaymentDisplay(txn);
+                                              const methodLabel = normalizeBookingPaymentMethod(txn.method);
+                                              const txnDate = formatPatientLogDate((txn as any).paymentDate || txn.date);
+                                              const referenceNo = String(txn.transactionId || txn.id || "N/A");
+                                              const editablePaymentId = getEditablePaymentId(txn);
+                                              const restorablePaymentId = getRestorablePaymentId(txn);
+                                              const isCashPayment = methodLabel.toLowerCase() === "cash";
+                                              const isDeletedPayment = isSoftDeletedPaymentTransaction(txn);
+                                              const isCancelledPayment =
+                                                appointmentStatus === "cancelled" ||
+                                                isAppointmentCancelledStatusTransaction(txn);
+                                              const isInactivePayment = isDeletedPayment || isCancelledPayment;
+
+                                              return (
+                                                <div
+                                                  key={transactionKey}
+                                                  className={`grid gap-3 px-4 py-4 text-sm md:grid-cols-[minmax(0,1.3fr)_minmax(110px,0.5fr)_minmax(150px,0.7fr)_minmax(150px,0.8fr)_124px] md:items-center ${isInactivePayment ? deletedPaymentRowClass : paymentDisplay.isLog ? "bg-slate-50/70" : "bg-white"
+                                                    }`}
+                                                >
+                                                  <div className="flex min-w-0 items-center gap-3">
+                                                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isCashPayment ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-700"}`}>
+                                                      {getPaymentMethodIcon(methodLabel)}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        <span className={`truncate font-black ${isInactivePayment ? "text-gray-700" : "text-slate-900"}`}>{methodLabel}</span>
+                                                        <span className="font-semibold text-slate-400">-</span>
+                                                        <span className={`font-bold ${isInactivePayment ? "text-gray-600" : "text-slate-700"}`}>
+                                                          <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                                        </span>
+                                                        {paymentDisplay.label ? (
+                                                          <PaymentTransactionStatusBadge
+                                                            display={paymentDisplay}
+                                                            className="rounded-full px-2.5 py-0.5 text-xs"
+                                                            showIcon={false}
+                                                          />
+                                                        ) : null}
+                                                      </div>
+                                                      {txn.notes ? (
+                                                        <p className="mt-1 line-clamp-2 text-xs font-medium text-slate-500">{txn.notes}</p>
+                                                      ) : null}
+                                                    </div>
+                                                  </div>
+
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Amount</span>
+                                                    <span className={`font-black ${isInactivePayment ? "text-gray-600" : "text-emerald-600"}`}>
+                                                      <CurrencyText value={formatPatientHistoryCurrency(txn.amount)} />
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Date</span>
+                                                    <span className="font-bold text-slate-700">{txnDate}</span>
+                                                  </div>
+                                                  <div className="flex items-center justify-between gap-3 md:block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 md:hidden">Reference</span>
+                                                    <span className="font-mono text-xs font-bold text-slate-600">Ref: {referenceNo}</span>
+                                                  </div>
+                                                  <div className="flex items-center justify-end gap-2">
+                                                    <Button
+                                                      type="button"
+                                                      variant="outline"
+                                                      size="icon"
+                                                      className="h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50"
+                                                      onClick={() => handleOpenTransactionSnapshot(txn)}
+                                                      title="View payment snapshot"
+                                                    >
+                                                      <Eye className="h-4 w-4" />
+                                                      <span className="sr-only">View payment snapshot</span>
+                                                    </Button>
+                                                    {!isDeletedPayment ? (
+                                                      <>
+                                                        <Button
+                                                          type="button"
+                                                          variant="outline"
+                                                          size="icon"
+                                                          className={`h-9 w-9 rounded-xl border-violet-100 text-violet-700 hover:bg-violet-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                          onClick={() => handleEditPaymentTransaction(txn)}
+                                                          title={editablePaymentId ? "Edit payment" : getPaymentEditUnavailableMessage(txn)}
+                                                        >
+                                                          <Edit className="h-4 w-4" />
+                                                          <span className="sr-only">Edit payment</span>
+                                                        </Button>
+                                                        <Button
+                                                          type="button"
+                                                          variant="outline"
+                                                          size="icon"
+                                                          className={`h-9 w-9 rounded-xl border-red-100 text-red-600 hover:bg-red-50 ${editablePaymentId ? "" : "opacity-60"}`}
+                                                          onClick={() => requestDeletePaymentTransaction(txn)}
+                                                          title={editablePaymentId ? "Delete payment" : getPaymentEditUnavailableMessage(txn)}
+                                                        >
+                                                          <Trash2 className="h-4 w-4" />
+                                                          <span className="sr-only">Delete payment</span>
+                                                        </Button>
+                                                      </>
+                                                    ) : isActualDeletedPaymentTransaction(txn) && restorablePaymentId ? (
+                                                      <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-50"
+                                                        onClick={() => handleRestorePayment(restorablePaymentId, txn.appointmentId || getTransactionAppointmentId(txn))}
+                                                        title="Restore payment"
+                                                      >
+                                                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                                        Restore
+                                                      </Button>
+                                                    ) : null}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      ) : null}
                                     </div>
-                                  </div>
-                                </div>
+                                  );
+                                })()
                               ) : null}
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                  )}
+                  ) : historyViewMode === "list" ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date &amp; Time</TableHead>
+                            <TableHead>Tooth No.</TableHead>
+                            <TableHead>Service</TableHead>
+                            <TableHead>Doctor</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Total</TableHead>
+                            <TableHead>Paid</TableHead>
+                            <TableHead>Balance</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                            const appointmentId = String(appointment.id || `apt-${index}`);
+                            const appointmentTime = formatPatientHistoryTime(appointment.date, (appointment as any).time);
+                            const doctorName = getVisitDoctorName(appointment);
+                            const isDeletedAppointment = isSoftDeletedAppointment(appointment);
+                            const appointmentStatus = normalizeAppointmentStatus(String(appointment.status || ""));
+                            const bookingTreatments = getBookingTreatmentsValue(appointment);
+                            const treatmentNames = bookingTreatments.length > 0
+                              ? bookingTreatments.map(t => getAppointmentTypeName(t.type, t.customType) || String(t.type || 'Treatment')).join(", ")
+                              : String(appointment.type || "Appointment");
+                            const appointmentBalance = Number((appointment as any).balance);
+                            const computedOutstandingBalance = Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
+                            const storedDisplayedBalance = Number.isFinite(appointmentBalance)
+                              ? appointmentBalance
+                              : computedOutstandingBalance;
+                            const originalDisplayedBalance = isDeletedAppointment
+                              ? Math.max(storedDisplayedBalance, computedOutstandingBalance)
+                              : storedDisplayedBalance;
+                            const displayedBalance = isDeletedAppointment ? 0 : originalDisplayedBalance;
+                            const toothNumbers = getBookingToothNumbersValue(appointment);
+                            const patientDisplayName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Patient";
+                            const originalAppointment = patientAppointments.find((x: Appointment) => String(x.id) === appointmentId);
+                            const editableAppointment = originalAppointment || appointment;
+                            const canRestoreAppointment = isDeletedAppointment && effectiveRole === "admin";
+                            const isDoctorUnassigned = !doctorName;
+
+                            return (
+                              <TableRow key={appointmentId} className={isDeletedAppointment ? deletedPaymentRowClass : undefined}>
+                                <TableCell className="whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && openRescheduleModal(editableAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`Edit schedule for ${treatmentNames}: ${formatPatientLogDate(appointment.date)} at ${appointmentTime}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <Calendar className="h-4 w-4 shrink-0 text-violet-600" />
+                                    <span className="min-w-0">
+                                      <span className="block font-semibold text-slate-900">{formatPatientLogDate(appointment.date)}</span>
+                                      <span className="block text-xs font-medium text-slate-500">{appointmentTime}</span>
+                                    </span>
+                                  </button>
+                                </TableCell>
+                                <TableCell>{toothNumbers || "—"}</TableCell>
+                                <TableCell className="max-w-xs whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && openUpdateTreatmentModal(editableAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`Edit treatment for ${treatmentNames}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <ClipboardList className="h-4 w-4 shrink-0 text-violet-600" />
+                                    <span className="truncate font-medium text-slate-900">{treatmentNames}</span>
+                                  </button>
+                                </TableCell>
+                                <TableCell className="max-w-[10rem] whitespace-normal">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isDeletedAppointment && setAssignDoctorAppointment(editableAppointment as HistoryAppointment)}
+                                    disabled={isDeletedAppointment}
+                                    aria-label={`${doctorName ? "Change" : "Assign"} doctor for ${treatmentNames}`}
+                                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
+                                    <span className="truncate font-medium text-slate-900">{doctorName || "Unassigned"}</span>
+                                  </button>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <AppointmentStatusSelect
+                                      value={isDeletedAppointment ? "deleted" : String(appointment.status || "")}
+                                      statuses={APPOINTMENT_STATUSES}
+                                      includeDeleted={effectiveRole === "admin"}
+                                      onChange={(nextStatus) => handleVisitStatusChange(appointment, nextStatus)}
+                                      badgeClassName="font-medium"
+                                    />
+                                    <span className="text-slate-400">/</span>
+                                    {getPaymentStatusBadge(String(appointment.paymentStatus || "unpaid"))}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-medium">{formatPatientHistoryCurrency(appointment.price)}</TableCell>
+                                <TableCell className="font-medium text-emerald-700">{formatPatientHistoryCurrency(appointment.totalPaid)}</TableCell>
+                                <TableCell className={`font-medium ${displayedBalance > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                                  {formatPatientHistoryCurrency(displayedBalance)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex flex-wrap justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleOpenSnapshot(appointment)}
+                                    >
+                                      View
+                                    </Button>
+                                    {!isDeletedAppointment && displayedBalance > 0 ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (patient.id) {
+                                            openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId);
+                                          }
+                                        }}
+                                      >
+                                        Pay
+                                      </Button>
+                                    ) : null}
+                                    <AppointmentActionsMenu
+                                      actions={createVisitHistoryActions(
+                                        {
+                                          onViewDetails: () => handleOpenSnapshot(appointment),
+                                          onViewHistory: () => handleOpenBookingHistory(appointment),
+                                          onRecordPayment: !isDeletedAppointment && displayedBalance > 0 && patient.id ? () => openPaymentModal(String(patient.id), patientDisplayName, mockAppointmentHistoryLocal, appointmentId) : undefined,
+                                          onRestoreAppointment: canRestoreAppointment ? () => handleRestoreVisitAppointment(appointment) : undefined,
+                                          onReschedule: originalAppointment && !isDeletedAppointment ? () => openRescheduleModal(originalAppointment) : undefined,
+                                          onUpdateTreatment: originalAppointment && !isDeletedAppointment ? () => openUpdateTreatmentModal(originalAppointment) : undefined,
+                                          onAssignDoctor: originalAppointment && !isDeletedAppointment ? () => setAssignDoctorAppointment(originalAppointment as unknown as HistoryAppointment) : undefined,
+                                        },
+                                        {
+                                          canRestoreAppointment,
+                                          canReschedule: Boolean(originalAppointment && !isDeletedAppointment),
+                                          canUpdateTreatment: Boolean(originalAppointment && !isDeletedAppointment),
+                                          canAssignDoctor: Boolean(originalAppointment && !isDeletedAppointment),
+                                          isDoctorUnassigned,
+                                        }
+                                      )}
+                                      triggerVariant="outline"
+                                      triggerSize="icon"
+                                      triggerIcon={<MoreVertical className="h-4 w-4" />}
+                                      ariaLabel="Visit actions"
+                                    />
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null)}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -5609,26 +6343,58 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           currentTreatmentLabel={updateTreatmentCurrentLabel}
           customTreatmentName={customVisitTreatmentName}
           selectedPrice={visitTreatmentPrice}
-          selectedDuration={visitTreatmentDuration}
           toothNumberEntries={visitTreatmentToothNumberEntries}
-          onCustomTreatmentNameChange={setCustomVisitTreatmentName}
-          onSelectedPriceChange={setVisitTreatmentPrice}
-          onSelectedDurationChange={setVisitTreatmentDuration}
+          treatmentSections={selectedVisitTreatmentSections ?? undefined}
+          onCustomTreatmentNameChange={(nextValue, sectionIndex) => {
+            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
+              ? selectedVisitTreatmentSections
+              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
+            ).map((section, index) => index === (sectionIndex ?? 0) ? { ...section, customTreatmentName: nextValue } : section);
+            setSelectedVisitTreatmentSections(nextSections);
+            const firstSection = nextSections[0];
+            setCustomVisitTreatmentName(firstSection.customTreatmentName || "");
+          }}
+          onSelectedPriceChange={(nextValue, sectionIndex) => {
+            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
+              ? selectedVisitTreatmentSections
+              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
+            ).map((section, index) => index === (sectionIndex ?? 0) ? { ...section, selectedPrice: nextValue } : section);
+            setSelectedVisitTreatmentSections(nextSections);
+            const firstSection = nextSections[0];
+            setVisitTreatmentPrice(String(firstSection.selectedPrice ?? ""));
+          }}
           onToothNumberEntriesChange={setVisitTreatmentToothNumberEntries}
-          onTreatmentSelect={(treatment) => {
-            setSelectedVisitTreatmentId(treatment.id);
-            setVisitTreatmentPrice(String(Math.max(0, Number(treatment.price || 0))));
-            setVisitTreatmentDuration(String(normalizeBookingDuration(treatment.duration || 30)));
+          onTreatmentSectionsChange={setSelectedVisitTreatmentSections}
+          onTreatmentSelect={(treatment, sectionIndex) => {
+            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
+              ? selectedVisitTreatmentSections
+              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
+            ).map((section, index) => index === (sectionIndex ?? 0)
+              ? {
+                  ...section,
+                  selectedTreatmentId: treatment.id,
+                  selectedPrice: String(Math.max(0, Number(treatment.price || section.selectedPrice || 0))),
+                  customTreatmentName: treatment.id === OTHER_APPOINTMENT_TYPE_INDEX
+                    ? String(section.customTreatmentName || updateTreatmentCurrentLabel || "").trim()
+                    : "",
+                }
+              : section);
+            setSelectedVisitTreatmentSections(nextSections);
+            const firstSection = nextSections[0];
+            setSelectedVisitTreatmentId(firstSection.selectedTreatmentId ?? null);
+            setVisitTreatmentPrice(String(firstSection.selectedPrice ?? ""));
             if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
               setCustomVisitTreatmentName("");
             } else if (!customVisitTreatmentName.trim()) {
               setCustomVisitTreatmentName(updateTreatmentCurrentLabel);
             }
           }}
+          allowAddTreatment={true}
+          allowRemoveTreatment={true}
           onSave={handleSaveVisitTreatment}
           onCancel={() => closeUpdateTreatmentModal()}
           isSaving={isUpdatingVisitTreatment}
-          canSave={canSaveVisitTreatment && !isLoadingTreatmentOptions}
+          canSave={canSaveVisitTreatment}
         />
         <AlertDialog
           open={Boolean(similarVisitTreatmentPrompt)}

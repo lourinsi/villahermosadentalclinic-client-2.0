@@ -1,7 +1,8 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { ClipboardList, Clock, Loader2, Plus, Tag, X } from "lucide-react";
+import { ClipboardList, Loader2, Plus, Tag, X } from "lucide-react";
+import { getBookingTreatmentsCatalogPrice } from "./sharedBookingLogic";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
-import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 
 type TreatmentOption = {
   id: number;
@@ -23,7 +23,6 @@ type TreatmentOption = {
   value?: string;
   icon?: string;
   price?: number;
-  duration?: number;
 };
 
 export type SelectTreatmentModalSection = {
@@ -31,7 +30,6 @@ export type SelectTreatmentModalSection = {
   currentTreatmentLabel?: string;
   customTreatmentName?: string;
   selectedPrice?: string | number;
-  selectedDuration?: string | number;
 };
 
 type SelectTreatmentModalProps = {
@@ -45,12 +43,10 @@ type SelectTreatmentModalProps = {
   currentTreatmentLabel?: string;
   customTreatmentName?: string;
   selectedPrice?: string | number;
-  selectedDuration?: string | number;
   toothNumberEntries?: string[];
   treatmentSections?: SelectTreatmentModalSection[];
   onCustomTreatmentNameChange?: (value: string, sectionIndex?: number) => void;
   onSelectedPriceChange?: (value: string, sectionIndex?: number) => void;
-  onSelectedDurationChange?: (value: string, sectionIndex?: number) => void;
   onToothNumberEntriesChange?: (entries: string[], sectionIndex?: number) => void;
   onTreatmentSelect?: (treatment: TreatmentOption, sectionIndex?: number) => void;
   onTreatmentSectionsChange?: (sections: SelectTreatmentModalSection[]) => void;
@@ -89,12 +85,10 @@ export function SelectTreatmentModal({
   currentTreatmentLabel,
   customTreatmentName = "",
   selectedPrice,
-  selectedDuration: selectedDurationInput,
   toothNumberEntries,
   treatmentSections,
   onCustomTreatmentNameChange,
   onSelectedPriceChange,
-  onSelectedDurationChange,
   onToothNumberEntriesChange,
   onTreatmentSelect,
   onTreatmentSectionsChange,
@@ -116,7 +110,6 @@ export function SelectTreatmentModal({
             currentTreatmentLabel,
             customTreatmentName,
             selectedPrice,
-            selectedDuration: selectedDurationInput,
           },
         ];
   const isMultiSectionMode = Array.isArray(treatmentSections);
@@ -131,7 +124,6 @@ export function SelectTreatmentModal({
       const firstSection = nextSections[0];
       onCustomTreatmentNameChange?.(firstSection.customTreatmentName || "");
       onSelectedPriceChange?.(String(firstSection.selectedPrice ?? ""));
-      onSelectedDurationChange?.(String(firstSection.selectedDuration ?? "30"));
       onToothNumberEntriesChange?.(toothNumberEntries || [""]);
       if (firstSection.selectedTreatmentId !== undefined && firstSection.selectedTreatmentId !== null) {
         const treatment = treatments.find((option) => option.id === firstSection.selectedTreatmentId);
@@ -157,14 +149,12 @@ export function SelectTreatmentModal({
 
   const handleSectionTreatmentSelect = (sectionIndex: number, treatment: TreatmentOption) => {
     const defaultPrice = treatment.price ?? 0;
-    const defaultDuration = treatment.duration ?? 30;
     const nextSections = sections.map((section, index) =>
       index === sectionIndex
         ? {
             ...section,
             selectedTreatmentId: treatment.id,
             selectedPrice: String(Math.max(0, Number(section.selectedPrice ?? defaultPrice) || defaultPrice)),
-            selectedDuration: String(normalizeBookingDuration(section.selectedDuration ?? defaultDuration)),
             customTreatmentName:
               treatment.id === OTHER_APPOINTMENT_TYPE_INDEX
                 ? String(section.customTreatmentName || "").trim() || section.currentTreatmentLabel || ""
@@ -184,10 +174,6 @@ export function SelectTreatmentModal({
     updateSectionValue(sectionIndex, { selectedPrice: value });
   };
 
-  const handleSectionSelectedDurationChange = (sectionIndex: number, value: string) => {
-    updateSectionValue(sectionIndex, { selectedDuration: value });
-  };
-
   const handleAddTreatment = () => {
     if (!allowAddTreatment) return;
     updateSections([
@@ -197,7 +183,6 @@ export function SelectTreatmentModal({
         currentTreatmentLabel: "",
         customTreatmentName: "",
         selectedPrice: "0",
-        selectedDuration: "30",
       },
     ]);
   };
@@ -213,7 +198,6 @@ export function SelectTreatmentModal({
     if (treatment.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return false;
     const priceValue = section.selectedPrice === undefined || section.selectedPrice === null ? (treatment.price ?? 0) : Number(section.selectedPrice);
     if (!Number.isFinite(priceValue) || priceValue < 0) return false;
-    if (!String(section.selectedDuration ?? "").trim()) return false;
     return true;
   };
 
@@ -235,11 +219,6 @@ export function SelectTreatmentModal({
       ? String(getSectionTreatment(section)?.price ?? 0)
       : String(section.selectedPrice);
 
-  const getSectionDuration = (section: SelectTreatmentModalSection) =>
-    normalizeBookingDuration(
-      section.selectedDuration ?? getSectionTreatment(section)?.duration ?? 30
-    );
-
   const isSectionCustomTreatment = (section: SelectTreatmentModalSection) =>
     getSectionTreatment(section)?.id === OTHER_APPOINTMENT_TYPE_INDEX;
 
@@ -247,7 +226,6 @@ export function SelectTreatmentModal({
   const selectedTreatment = getSectionTreatment(activeSection);
   const selectedPriceValue = getSectionPriceValue(activeSection);
   const selectedPriceNumber = Number(selectedPriceValue) || 0;
-  const selectedDuration = getSectionDuration(activeSection);
   const treatmentLabels = sections.map((section) => {
     const sectionTreatment = getSectionTreatment(section);
     const isCustom = sectionTreatment?.id === OTHER_APPOINTMENT_TYPE_INDEX;
@@ -264,7 +242,6 @@ export function SelectTreatmentModal({
   const isCustomTreatment = isSectionCustomTreatment(activeSection);
   const canEditToothNumbers = Boolean(onToothNumberEntriesChange || onTreatmentSectionsChange);
   const showToothNumberField = canEditToothNumbers;
-  const canEditDuration = Boolean(onSelectedDurationChange);
 
   const updateToothNumberEntries = (nextEntries: string[]) => {
     const normalizedEntries = nextEntries.length > 0 ? nextEntries : [""];
@@ -328,7 +305,6 @@ export function SelectTreatmentModal({
           {sections.map((section, sectionIndex) => {
             const sectionTreatment = getSectionTreatment(section);
             const sectionPriceValue = getSectionPriceValue(section);
-            const sectionDuration = getSectionDuration(section);
             const sectionIsCustomTreatment = isSectionCustomTreatment(section);
 
             return (
@@ -376,10 +352,6 @@ export function SelectTreatmentModal({
                               <p className="truncate text-base font-black text-slate-950">{sectionTreatment.label}</p>
                               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-slate-500">
                                 <span className="inline-flex items-center gap-1">
-                                  <Clock className="h-3.5 w-3.5 text-blue-500" />
-                                  {sectionDuration} mins
-                                </span>
-                                <span className="inline-flex items-center gap-1">
                                   <Tag className="h-3.5 w-3.5 text-emerald-500" />
                                   {formatTreatmentCurrency(sectionTreatment.price)}
                                 </span>
@@ -392,7 +364,6 @@ export function SelectTreatmentModal({
                       </SelectTrigger>
                       <SelectContent className="max-h-[18rem] rounded-2xl border-blue-100 bg-white p-2 shadow-xl">
                         {treatments.map((treatment) => {
-                          const duration = Number(treatment.duration || 0) || 30;
                           const isOther = treatment.id === OTHER_APPOINTMENT_TYPE_INDEX;
                           const isSelectedByOtherSection = sections.some(
                             (section, currentIndex) =>
@@ -420,7 +391,7 @@ export function SelectTreatmentModal({
                                 <span className="min-w-0">
                                   <span className="block truncate text-sm font-black">{treatment.label}</span>
                                   <span className="block truncate text-xs font-semibold text-slate-500">
-                                    {isOther ? "Custom treatment" : `${duration} mins - ${formatTreatmentCurrency(treatment.price)}`}
+                                    {isOther ? "Custom treatment" : formatTreatmentCurrency(treatment.price)}
                                   </span>
                                 </span>
                               </div>
@@ -450,7 +421,14 @@ export function SelectTreatmentModal({
               </div>
             );
           })}
-
+          {allowAddTreatment ? (
+            <div className="rounded-xl border border-dashed border-blue-100 bg-white p-4 text-center shadow-sm">
+              <Button type="button" variant="outline" className="rounded-xl" onClick={handleAddTreatment} disabled={isSaving}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add treatment
+              </Button>
+            </div>
+          ) : null}
           {showToothNumberField ? (
             <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">
               <div className="flex items-center justify-between gap-4">
@@ -461,6 +439,7 @@ export function SelectTreatmentModal({
                   #
                 </div>
               </div>
+              
               <div className="mt-3 flex flex-wrap items-center gap-2.5">
                 {resolvedToothNumberEntries.map((toothNumber, index) => (
                   <div key={index} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2.5 shadow-sm">
@@ -502,14 +481,7 @@ export function SelectTreatmentModal({
             </div>
           ) : null}
 
-          {allowAddTreatment ? (
-            <div className="rounded-xl border border-dashed border-blue-100 bg-white p-4 text-center shadow-sm">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={handleAddTreatment} disabled={isSaving}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add treatment
-              </Button>
-            </div>
-          ) : null}
+
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
             <div className="border-b border-slate-100 p-4 sm:p-5 lg:border-b-0 lg:border-r">
@@ -541,7 +513,7 @@ export function SelectTreatmentModal({
                 <Label htmlFor="visit-treatment-price" className="text-xs font-black uppercase tracking-widest text-slate-500">
                   Manual Price
                 </Label>
-                <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
+                  <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
                   <span className="shrink-0 text-xl font-black text-blue-600">{"\u20b1"}</span>
                   <Input
                     id="visit-treatment-price"
@@ -550,8 +522,15 @@ export function SelectTreatmentModal({
                     step={1}
                     inputMode="decimal"
                     value={selectedPriceValue}
-                    onChange={(event) => onSelectedPriceChange?.(event.target.value)}
-                    disabled={!onSelectedPriceChange || isSaving}
+                    onChange={(event) => {
+                      // In multi-section mode, update the first/active section; otherwise call single handler
+                      if (isMultiSectionMode) {
+                        handleSectionSelectedPriceChange(0, event.target.value);
+                      } else {
+                        onSelectedPriceChange?.(event.target.value);
+                      }
+                    }}
+                    disabled={!(onSelectedPriceChange || onTreatmentSectionsChange) || isSaving}
                     className="h-12 border-0 bg-transparent text-right text-3xl font-black text-blue-600 shadow-none focus-visible:ring-0"
                   />
                 </div>
@@ -560,36 +539,17 @@ export function SelectTreatmentModal({
 
             <div className="grid content-start gap-3 bg-slate-50/70 p-4 sm:grid-cols-2 sm:p-5">
               <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Duration</p>
-                <div className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
-                  <Clock className="h-4 w-4 shrink-0 text-blue-600" />
-                  {canEditDuration ? (
-                    <Select
-                      value={String(selectedDuration)}
-                      onValueChange={(value) => onSelectedDurationChange?.(String(normalizeBookingDuration(value)))}
-                      disabled={isSaving}
-                    >
-                      <SelectTrigger className="h-auto min-h-0 border-0 bg-transparent px-0 py-0 text-left text-lg font-black text-slate-950 shadow-none focus:ring-0 focus:ring-offset-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {ALLOWED_BOOKING_DURATIONS.map((duration) => (
-                          <SelectItem key={duration} value={String(duration)}>
-                            {duration} mins
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span>{selectedDuration} mins</span>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Catalog Price</p>
                 <p className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
                   <Tag className="h-4 w-4 text-emerald-600" />
-                  {formatTreatmentCurrency(selectedTreatment?.price)}
+                  {formatTreatmentCurrency(
+                    getBookingTreatmentsCatalogPrice(
+                      sections.map((sec) => ({
+                        price: sec.selectedPrice === undefined || sec.selectedPrice === null ? getSectionTreatment(sec)?.price : Number(sec.selectedPrice),
+                        label: getSectionTreatment(sec)?.label,
+                      }))
+                    )
+                  )}
                 </p>
               </div>
               <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 sm:col-span-2">

@@ -24,7 +24,6 @@ import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTyp
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
   ALLOWED_BOOKING_DURATIONS,
-  DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
   findNextAvailableRepeatSlot,
@@ -330,14 +329,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     });
     return prices;
   }, [serviceOptions]);
-  const serviceDurationByName = useMemo(() => {
-    const durations: Record<string, number> = { ...appointmentTypeDurations };
-    serviceOptions.forEach((service) => {
-      durations[service.label] = Number(service.duration) || 30;
-    });
-    return durations;
-  }, [serviceOptions]);
-
   // If a default patient id is provided (e.g., from PatientsView schedule button), preselect it
   useEffect(() => {
     if (appointmentToEdit) return;
@@ -1003,17 +994,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   const patientConflictSet = useMemo(() => computePatientConflicts(), [computePatientConflicts]);
 
-  // Update duration when appointment type changes - always reset to default when type changes
-  useEffect(() => {
-    if (!appointmentType) {
-      setDuration("");
-      return;
-    }
-    // Always set default duration when appointment type changes
-    const defaultDur = normalizeBookingDuration(serviceDurationByName[appointmentType]);
-    setDuration(String(defaultDur));
-  }, [appointmentType, serviceDurationByName]);
-
   useEffect(() => {
     setSelectedDate(getBookingDefaultDate(defaultDate));
   }, [defaultDate]);
@@ -1097,7 +1077,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       selectedPatient,
       defaultPatientId,
       patientId,
-      appointmentTypeDurations: serviceDurationByName,
+      appointmentTypeDurations: {},
+      selectedDuration: duration,
     });
 
     if (autoPreselect.type === "skip") return;
@@ -1128,7 +1109,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setSelectedTime(nextSlot.time);
       console.log('[BookingModal] Auto-preselected slot:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode, serviceDurationByName]);
+  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode, duration]);
 
   const runAutoPreselectRef = useRef(runAutoPreselect);
 
