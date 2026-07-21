@@ -13,7 +13,7 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { buildModalMemoryKey, readModalMemory, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
-import { Banknote, Calendar as CalendarIcon, Check, CheckCircle, ClipboardList, CreditCard, Edit, Loader2, X } from "lucide-react";
+import { Banknote, Calendar as CalendarIcon, Check, CheckCircle, CreditCard, Edit, History, Loader2, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
@@ -79,6 +79,7 @@ type BookingPaymentPageProps = {
   transactionIdField?: ReactNode;
   notesField?: ReactNode;
   loadingMessage?: ReactNode;
+  paymentHistory?: ReactNode;
   showHeaderCard?: boolean;
 };
 
@@ -93,6 +94,50 @@ export const getAppointmentPaid = (appointment?: Partial<Appointment> | null) =>
   Math.max(0, toPaymentNumber(appointment?.totalPaid));
 export const getAdjustedAppointmentPrice = (appointment: Partial<Appointment>, adjustedTotalDue: number) =>
   Math.max(0, adjustedTotalDue + toPaymentNumber(appointment.discount));
+
+type AppointmentPaymentHistoryEntry = {
+  id: string;
+  amount: number;
+  date: string;
+  method: string;
+  reference: string;
+  notes: string;
+};
+
+const getPaymentHistoryDate = (payment: any) =>
+  payment?.paymentDate ||
+  payment?.date ||
+  payment?.paymentDetails?.paymentDate ||
+  payment?.paymentDetails?.date ||
+  payment?.transaction?.paymentDate ||
+  payment?.transaction?.date ||
+  payment?.createdAt ||
+  "";
+
+const getPaymentHistoryMethod = (payment: any) =>
+  payment?.paymentMethod || payment?.method || payment?.paymentDetails?.method || payment?.transaction?.method || "";
+
+const getPaymentHistorySortTime = (date: string) => {
+  const value = /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T00:00:00` : date;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const normalizeAppointmentPaymentHistory = (payments: any[]): AppointmentPaymentHistoryEntry[] =>
+  payments
+    .map((payment, index) => {
+      const date = String(getPaymentHistoryDate(payment) || "").trim();
+      return {
+        id: String(payment?.paymentId || payment?.paymentRecordId || payment?.id || payment?.transactionId || `payment-${index}`),
+        amount: toPaymentNumber(payment?.amount ?? payment?.paymentAmount),
+        date,
+        method: String(getPaymentHistoryMethod(payment) || "").trim(),
+        reference: String(payment?.transactionId || payment?.referenceId || payment?.reference || "").trim(),
+        notes: String(payment?.notes || payment?.paymentDetails?.notes || "").trim(),
+      };
+    })
+    .filter((payment) => payment.amount > 0)
+    .sort((first, second) => getPaymentHistorySortTime(second.date) - getPaymentHistorySortTime(first.date));
 
 export function BookingPaymentPage({
   title = "Payment & Status",
@@ -121,6 +166,7 @@ export function BookingPaymentPage({
   transactionIdField,
   notesField,
   loadingMessage,
+  paymentHistory,
   showHeaderCard = true,
 }: BookingPaymentPageProps) {
   const internalPaymentDateInputRef = useRef<HTMLInputElement | null>(null);
@@ -173,57 +219,7 @@ export function BookingPaymentPage({
 
   return (
     <div data-tour-id="booking-payment-step" className="mx-auto max-w-5xl space-y-4 py-1 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:space-y-5 sm:py-2">
-      {showHeaderCard ? (
-        <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.25rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100 sm:h-16 sm:w-16">
-            <CreditCard className="h-7 w-7" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">{title}</h3>
-            <p className="mt-1 text-base font-medium leading-snug text-slate-500">{description}</p>
-          </div>
-        </div>
-      ) : null}
-
-      {loadingMessage}
-      {appointmentSelector}
-      {paymentIdSelector}
-      {appointmentIdField}
-
-      <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
-        <h4 className="mb-4 text-xl font-black text-gray-900 sm:text-lg">Bill Summary</h4>
-        <div className="divide-y divide-gray-100">
-          <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
-                <ClipboardList className="h-6 w-6" />
-              </span>
-              <p className="text-base font-bold text-slate-500">Total Billed</p>
-            </div>
-            <p className="text-xl font-black tracking-tight text-gray-900"><CurrencyText value={formatCurrency(totalBilled)} /></p>
-          </div>
-          <div className="flex items-center justify-between gap-4 py-3">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                <CreditCard className="h-6 w-6" />
-              </span>
-              <p className="text-base font-bold text-slate-500">Total Paid</p>
-            </div>
-            <p className="text-xl font-black tracking-tight text-gray-900"><CurrencyText value={formatCurrency(totalPaid)} /></p>
-          </div>
-          <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                <Banknote className="h-6 w-6" />
-              </span>
-              <p className="text-base font-bold text-slate-500">Current Balance Due</p>
-            </div>
-            <p className="text-2xl font-black tracking-tight text-emerald-600"><CurrencyText value={formatCurrency(currentBalanceDue)} /></p>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
+            <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
         <div className="space-y-6">
           <div>
             <h4 className="text-xl font-black text-gray-900 sm:text-2xl">Payment Details</h4>
@@ -350,6 +346,44 @@ export function BookingPaymentPage({
           </div>
         )}
       </div>
+      {showHeaderCard ? (
+        <div className="flex items-center gap-4 px-1 sm:gap-6 sm:rounded-[1.25rem] sm:border sm:border-gray-100 sm:bg-white sm:p-6 sm:shadow-sm">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.25rem] bg-emerald-600 text-white shadow-xl shadow-emerald-100 sm:h-16 sm:w-16">
+            <CreditCard className="h-7 w-7" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">{title}</h3>
+            <p className="mt-1 text-base font-medium leading-snug text-slate-500">{description}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {loadingMessage}
+      {appointmentSelector}
+      {paymentIdSelector}
+      {appointmentIdField}
+
+      <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
+        <h4 className="text-xl font-black tracking-tight text-gray-900">Bill Summary</h4>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <dt className="text-xs font-black uppercase tracking-wide text-slate-500">Total Billed</dt>
+            <dd className="mt-2 text-xl font-black tracking-tight text-slate-950"><CurrencyText value={formatCurrency(totalBilled)} /></dd>
+          </div>
+          <div className="rounded-2xl bg-emerald-50 p-4">
+            <dt className="text-xs font-black uppercase tracking-wide text-emerald-700">Total Paid</dt>
+            <dd className="mt-2 text-xl font-black tracking-tight text-emerald-600"><CurrencyText value={formatCurrency(totalPaid)} /></dd>
+          </div>
+          <div className="rounded-2xl bg-blue-50 p-4">
+            <dt className="text-xs font-black uppercase tracking-wide text-blue-700">Balance Due</dt>
+            <dd className="mt-2 text-xl font-black tracking-tight text-blue-700"><CurrencyText value={formatCurrency(currentBalanceDue)} /></dd>
+          </div>
+        </dl>
+      </div>
+
+      {paymentHistory}
+
+
     </div>
   );
 }
@@ -376,6 +410,11 @@ export function PaymentModal() {
   const [transactionId, setTransactionId] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [paymentHistory, setPaymentHistory] = useState<AppointmentPaymentHistoryEntry[]>([]);
+  const [isLoadingPaymentHistory, setIsLoadingPaymentHistory] = useState(false);
+  const [paymentHistoryError, setPaymentHistoryError] = useState("");
+  const [showAllPaymentHistory, setShowAllPaymentHistory] = useState(false);
+  const [paymentHistoryRefreshKey, setPaymentHistoryRefreshKey] = useState(0);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
   const [isOverpaymentDialogOpen, setIsOverpaymentDialogOpen] = useState(false);
   const [overpaymentAdjustedPrice, setOverpaymentAdjustedPrice] = useState("");
@@ -491,6 +530,73 @@ export function PaymentModal() {
     };
     fetchPaymentMethods();
   }, [isPaymentModalOpen, paymentData, paymentId]);
+
+  const activeAppointmentId = String(selectedAppointment || appointmentId || "").trim();
+
+  useEffect(() => {
+    if (!isPaymentModalOpen || !activeAppointmentId) {
+      setPaymentHistory([]);
+      setPaymentHistoryError("");
+      setIsLoadingPaymentHistory(false);
+      setShowAllPaymentHistory(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let isCurrentRequest = true;
+
+    const loadPaymentHistory = async () => {
+      setIsLoadingPaymentHistory(true);
+      setPaymentHistoryError("");
+      setShowAllPaymentHistory(false);
+
+      try {
+        const response = await fetch(apiUrl(`/api/payments/appointment/${encodeURIComponent(activeAppointmentId)}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+
+        if (!response.ok || !result?.success || !Array.isArray(result.data)) {
+          throw new Error(result?.message || "Unable to load payment history");
+        }
+
+        if (isCurrentRequest) {
+          setPaymentHistory(normalizeAppointmentPaymentHistory(result.data));
+        }
+      } catch (error: any) {
+        if (error?.name !== "AbortError" && isCurrentRequest) {
+          console.warn("[PaymentModal] Failed to load payment history:", error);
+          setPaymentHistory([]);
+          setPaymentHistoryError(error?.message || "Unable to load payment history");
+        }
+      } finally {
+        if (isCurrentRequest) setIsLoadingPaymentHistory(false);
+      }
+    };
+
+    void loadPaymentHistory();
+
+    return () => {
+      isCurrentRequest = false;
+      controller.abort();
+    };
+  }, [activeAppointmentId, isPaymentModalOpen, paymentHistoryRefreshKey]);
+
+  useEffect(() => {
+    if (!isPaymentModalOpen || !activeAppointmentId || typeof window === "undefined") return;
+
+    const handlePaymentsUpdated = (event: Event) => {
+      const updatedAppointmentId = String((event as CustomEvent<{ appointmentId?: string }>)?.detail?.appointmentId || "").trim();
+      if (!updatedAppointmentId || updatedAppointmentId === activeAppointmentId) {
+        setPaymentHistoryRefreshKey((current) => current + 1);
+      }
+    };
+
+    window.addEventListener("payments:updated", handlePaymentsUpdated as EventListener);
+    return () => window.removeEventListener("payments:updated", handlePaymentsUpdated as EventListener);
+  }, [activeAppointmentId, isPaymentModalOpen]);
 
   const selectedApt = appointments.find((a) => a.id === selectedAppointment) || (appointmentId ? appointments.find((a) => a.id === appointmentId) : undefined);
   const selectedAptTotalDue = getAppointmentTotalDue(selectedApt);
@@ -612,6 +718,75 @@ export function PaymentModal() {
     await performRecordPayment();
   };
 
+  const visiblePaymentHistory = showAllPaymentHistory ? paymentHistory : paymentHistory.slice(0, 2);
+  const paymentHistoryContent = activeAppointmentId ? (
+    <section className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-6" aria-labelledby="payment-history-heading">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700">
+            <History className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h4 id="payment-history-heading" className="text-lg font-black tracking-tight text-slate-950">Payment History</h4>
+            <p className="mt-0.5 text-sm font-medium text-slate-500">Previous payments recorded for this appointment.</p>
+          </div>
+        </div>
+        {!isLoadingPaymentHistory && paymentHistory.length > 0 ? (
+          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
+            {paymentHistory.length} {paymentHistory.length === 1 ? "payment" : "payments"}
+          </span>
+        ) : null}
+      </div>
+
+      {isLoadingPaymentHistory ? (
+        <div className="mt-4 flex min-h-20 items-center justify-center gap-2 rounded-2xl bg-slate-50 px-4 text-sm font-bold text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+          Loading payment history
+        </div>
+      ) : paymentHistoryError ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-amber-800">{paymentHistoryError}</p>
+          <Button type="button" variant="ghost" onClick={() => setPaymentHistoryRefreshKey((current) => current + 1)} className="h-8 shrink-0 rounded-lg px-2 text-xs font-black text-amber-800 hover:bg-amber-100">
+            Try again
+          </Button>
+        </div>
+      ) : paymentHistory.length === 0 ? (
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-500">
+          No payments have been recorded for this appointment yet.
+        </div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {visiblePaymentHistory.map((payment) => {
+            const detailLines = [
+              payment.reference ? `Reference: ${payment.reference}` : "",
+              payment.notes,
+            ].filter(Boolean);
+
+            return (
+              <article key={payment.id} className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="flex min-w-0 items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-emerald-700"><CurrencyText value={formatCurrency(payment.amount)} /></p>
+                    <p className="mt-0.5 text-xs font-bold text-slate-500">{formatPaymentMethod(payment.method, "Payment method not recorded")} · {formatWordyDate(payment.date, { fallback: "Date not recorded" })}</p>
+                  </div>
+                  <span className="shrink-0 text-xs font-black uppercase tracking-wide text-slate-400">Paid</span>
+                </div>
+                {detailLines.length > 0 ? (
+                  <p className="mt-2 break-words border-t border-slate-200 pt-2 text-xs font-medium leading-5 text-slate-600">{detailLines.join(" · ")}</p>
+                ) : null}
+              </article>
+            );
+          })}
+          {paymentHistory.length > 2 ? (
+            <Button type="button" variant="ghost" onClick={() => setShowAllPaymentHistory((current) => !current)} className="h-8 rounded-lg px-1 text-sm font-black text-blue-700 hover:bg-transparent hover:text-blue-800">
+              {showAllPaymentHistory ? "Show less" : `See all payments (${paymentHistory.length})`}
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </section>
+  ) : null;
+
   return (
     <>
     <Dialog open={isPaymentModalOpen} onOpenChange={closePaymentModal}>
@@ -646,8 +821,8 @@ export function PaymentModal() {
             title="Record Payment"
             description={patientName ? `For ${patientName}` : "Apply a payment to an appointment."}
             selectedTreatmentName={selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : "Selected appointment"}
-            totalBilled={selectedApt?.price || 0}
-            totalPaid={selectedApt?.totalPaid || 0}
+            totalBilled={selectedAptTotalDue}
+            totalPaid={selectedAptPaid}
             currentBalanceDue={outstandingBalance}
             amount={amount}
             onAmountChange={setAmount}
@@ -689,6 +864,7 @@ export function PaymentModal() {
                 <Textarea placeholder="Additional payment details..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="rounded-xl border-slate-200 bg-white font-medium shadow-sm" />
               </div>
             )}
+            paymentHistory={paymentHistoryContent}
             showHeaderCard={false}
           />
           <div className="hidden">

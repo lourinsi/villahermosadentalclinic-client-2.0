@@ -597,6 +597,37 @@ export function EditPaymentModal() {
           </div>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 custom-scrollbar sm:px-6">
+          {isReceptionistView ? (
+            <div className="mb-5 rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
+                    <CreditCard className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-widest text-blue-700">Editing this payment</p>
+                    <h3 className="mt-1 text-xl font-black leading-tight text-slate-950">{paymentSummaryTitle}</h3>
+                    <p className="mt-1 text-sm font-semibold leading-snug text-slate-500">
+                      {patientSummaryName ? `For ${patientSummaryName}` : `For ${selectedTreatmentName}`}
+                      {patientSummaryName && selectedTreatmentName ? ` - ${selectedTreatmentName}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-2 rounded-2xl bg-blue-50/80 p-3 text-xs font-bold text-blue-800 sm:min-w-[15rem]">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-blue-600">Payment date</span>
+                    <span className="text-right text-blue-950">{paymentSummaryDate}</span>
+                  </div>
+                  {appointmentDateSummary ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-blue-600">Appointment</span>
+                      <span className="text-right text-blue-950">{appointmentDateSummary}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <BookingPaymentPage
             title={editPaymentTitle}
             description={editPaymentDescription}
@@ -618,37 +649,6 @@ export function EditPaymentModal() {
                 Loading payment record...
               </div>
             ) : null}
-            appointmentSelector={isReceptionistView ? (
-              <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
-                      <CreditCard className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-black uppercase tracking-widest text-blue-700">Editing this payment</p>
-                      <h3 className="mt-1 text-xl font-black leading-tight text-slate-950">{paymentSummaryTitle}</h3>
-                      <p className="mt-1 text-sm font-semibold leading-snug text-slate-500">
-                        {patientSummaryName ? `For ${patientSummaryName}` : `For ${selectedTreatmentName}`}
-                        {patientSummaryName && selectedTreatmentName ? ` - ${selectedTreatmentName}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid gap-2 rounded-2xl bg-blue-50/80 p-3 text-xs font-bold text-blue-800 sm:min-w-[15rem]">
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-blue-600">Payment date</span>
-                      <span className="text-right text-blue-950">{paymentSummaryDate}</span>
-                    </div>
-                    {appointmentDateSummary ? (
-                      <div className="flex items-center justify-between gap-4">
-                        <span className="text-blue-600">Appointment</span>
-                        <span className="text-right text-blue-950">{appointmentDateSummary}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ) : undefined}
             paymentIdSelector={!isReceptionistView ? (
               <div className="rounded-[1.25rem] border border-gray-100 bg-white p-4 shadow-sm">
                 <Label className="text-xs font-black uppercase tracking-widest text-slate-500">Payment ID</Label>
