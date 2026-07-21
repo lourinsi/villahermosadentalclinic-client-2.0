@@ -289,19 +289,41 @@ export function SelectTreatmentModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-4xl">
-        <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
-          <DialogHeader className="pr-8">
-            <DialogTitle className="text-xl font-black text-slate-950">{title}</DialogTitle>
-            {description ? (
-              <DialogDescription className="font-semibold text-slate-500">
-                {description}
-              </DialogDescription>
-            ) : null}
-          </DialogHeader>
-        </div>
+      <DialogContent
+        showCloseButton={false}
+        className="w-[calc(100vw-1.25rem)] sm:w-full sm:max-w-4xl overflow-hidden rounded-[2rem] border border-gray-100 bg-white p-0 shadow-2xl"
+      >
+        {/* Universal icon header */}
+        <DialogHeader className="border-b border-gray-100 px-5 pb-5 pt-5 text-left sm:px-7 sm:pt-7">
+          <div className="flex items-center gap-5">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+              <ClipboardList className="h-7 w-7" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="truncate text-2xl font-black tracking-tight text-gray-900">
+                {title}
+              </DialogTitle>
+              {description ? (
+                <DialogDescription className="mt-1 text-sm font-bold text-gray-400">
+                  {description}
+                </DialogDescription>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onCancel ? onCancel() : onOpenChange?.(false)}
+              disabled={isSaving}
+              className="h-10 w-10 shrink-0 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              aria-label="Close treatment modal"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+        </DialogHeader>
 
-        <div data-tour-id="booking-treatment-step" className="max-h-[72dvh] space-y-4 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
+        <div data-tour-id="booking-treatment-step" className="max-h-[72dvh] space-y-4 overflow-y-auto bg-gray-50/70 px-5 py-6 custom-scrollbar sm:px-7">
           {sections.map((section, sectionIndex) => {
             const sectionTreatment = getSectionTreatment(section);
             const sectionPriceValue = getSectionPriceValue(section);
@@ -560,13 +582,19 @@ export function SelectTreatmentModal({
           </div>
         </div>
 
-        <DialogFooter className="border-t border-slate-100 px-5 py-4 sm:px-6">
-          <Button type="button" variant="outline" className="rounded-xl" onClick={onCancel} disabled={isSaving}>
+        <DialogFooter className="gap-3 border-t border-gray-100 bg-gray-50/70 px-5 py-4 sm:px-7">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={isSaving}
+            className="h-12 flex-1 rounded-2xl border-gray-200 bg-white text-sm font-black text-gray-700 hover:bg-gray-50"
+          >
             Cancel
           </Button>
           <Button
             type="button"
-            className="rounded-xl bg-blue-600 hover:bg-blue-700"
+            className="h-12 flex-1 rounded-2xl bg-blue-600 text-sm font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
             onClick={() => void onSave?.()}
             disabled={!resolvedCanSave}
             title={submitButtonTitle}

@@ -174,7 +174,7 @@ export function SelectPatientModal({
     <Dialog open={open} onOpenChange={(nextOpen) => !isSaving && onOpenChange(nextOpen)}>
       <DialogContent
         showCloseButton={false}
-        className="w-[calc(100vw-1.25rem)] max-w-[560px] overflow-hidden rounded-[2rem] border border-gray-100 bg-white p-0 shadow-2xl"
+        className="w-[calc(100vw-1.25rem)] sm:w-full sm:max-w-[560px] overflow-hidden rounded-[2rem] border border-gray-100 bg-white p-0 shadow-2xl"
       >
         <DialogHeader className="border-b border-gray-100 px-5 pb-5 pt-5 text-left sm:px-7 sm:pt-7">
           <div className="flex items-center gap-5">

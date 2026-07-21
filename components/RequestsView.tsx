@@ -37,7 +37,11 @@ import {
   CalendarCheck2,
   CalendarX2,
   Mail,
-  Phone
+  Phone,
+  Stethoscope,
+  Check,
+  Loader2,
+  X,
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -90,10 +94,17 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
 import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
-import { SelectTreatmentModal } from "./SelectTreatmentModal";
+import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
+import {
+  getBookingToothNumberEntries,
+  getBookingToothNumbersValue,
+  buildBookingTreatmentsPayload,
+  normalizeBookingDuration,
+  normalizeBookingToothNumbers,
+} from "./sharedBookingLogic";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -364,6 +375,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [selectedTreatmentId, setSelectedTreatmentId] = useState<number | null>(null);
   const [customTreatmentName, setCustomTreatmentName] = useState("");
   const [treatmentPrice, setTreatmentPrice] = useState("");
+  const [treatmentSections, setTreatmentSections] = useState<SelectTreatmentModalSection[] | null>(null);
+  const [treatmentToothNumberEntries, setTreatmentToothNumberEntries] = useState<string[]>([""]);
+  const [isSavingTreatmentChange, setIsSavingTreatmentChange] = useState(false);
   const [doctorCellAppointment, setDoctorCellAppointment] = useState<Appointment | null>(null);
 
   const getInitials = (name: string) => {
@@ -799,10 +813,34 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const openTreatmentCell = (appointment: Appointment) => {
     if (isSoftDeletedAppointment(appointment)) return;
     const type = Number(appointment.type);
+    const resolvedType = Number.isInteger(type) ? type : OTHER_APPOINTMENT_TYPE_INDEX;
+    const resolvedCustomType = String(appointment.customType || "");
+    const resolvedPrice = String(Number(appointment.price || 0));
+    const toothEntries = getBookingToothNumberEntries(getBookingToothNumbersValue(appointment as any));
+
+    // Build sections from existing treatments payload if available
+    const rawTreatments = (appointment as any).treatments;
+    const hasTreatmentSections = Array.isArray(rawTreatments) && rawTreatments.length > 0;
+    const nextSections: SelectTreatmentModalSection[] = hasTreatmentSections
+      ? rawTreatments.map((t: any, index: number) => ({
+          selectedTreatmentId: Number.isInteger(Number(t.type)) ? Number(t.type) : OTHER_APPOINTMENT_TYPE_INDEX,
+          currentTreatmentLabel: index === 0 ? getAppointmentTypeName(appointment.type, appointment.customType) : String(t.customType || getAppointmentTypeName(t.type, t.customType) || ""),
+          customTreatmentName: String(t.customType || ""),
+          selectedPrice: String(Number(t.price ?? appointment.price ?? 0)),
+        }))
+      : [{
+          selectedTreatmentId: resolvedType,
+          currentTreatmentLabel: getAppointmentTypeName(appointment.type, appointment.customType),
+          customTreatmentName: resolvedCustomType,
+          selectedPrice: resolvedPrice,
+        }];
+
     setTreatmentCellAppointment(appointment);
-    setSelectedTreatmentId(Number.isInteger(type) ? type : OTHER_APPOINTMENT_TYPE_INDEX);
-    setCustomTreatmentName(String(appointment.customType || ""));
-    setTreatmentPrice(String(Number(appointment.price || 0)));
+    setSelectedTreatmentId(nextSections[0].selectedTreatmentId ?? null);
+    setCustomTreatmentName(nextSections[0].customTreatmentName || "");
+    setTreatmentPrice(String(nextSections[0].selectedPrice ?? resolvedPrice));
+    setTreatmentSections(nextSections);
+    setTreatmentToothNumberEntries(toothEntries || [""]);
   };
 
   const editableCellClass = "-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70 focus-visible:border-violet-300 focus-visible:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60";
@@ -2397,38 +2435,151 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       /> : null}
       <SelectTreatmentModal
         open={Boolean(treatmentCellAppointment)}
-        onOpenChange={(open) => !open && setTreatmentCellAppointment(null)}
-        title="Update Treatment"
-        treatments={treatmentOptions.filter((option) => option.isActive !== false)}
-        selectedTreatmentId={selectedTreatmentId}
-        currentTreatmentLabel={treatmentCellAppointment ? getAppointmentTypeName(treatmentCellAppointment.type, treatmentCellAppointment.customType) : ""}
-        customTreatmentName={customTreatmentName}
-        selectedPrice={treatmentPrice}
-        onCustomTreatmentNameChange={setCustomTreatmentName}
-        onSelectedPriceChange={setTreatmentPrice}
-        onTreatmentSelect={(treatment) => { setSelectedTreatmentId(treatment.id); setTreatmentPrice(String(treatment.price || 0)); }}
-        onSave={async () => {
-          if (!treatmentCellAppointment || selectedTreatmentId === null) return;
-          const isOther = selectedTreatmentId === OTHER_APPOINTMENT_TYPE_INDEX;
-          if (isOther && !customTreatmentName.trim()) { toast.error("Enter a treatment name"); return; }
-          await saveCellAppointment(treatmentCellAppointment, { type: selectedTreatmentId, customType: isOther ? customTreatmentName.trim() : "", price: Number(treatmentPrice) || 0 } as Partial<Appointment>, "Treatment updated");
-          setTreatmentCellAppointment(null);
+        onOpenChange={(open) => {
+          if (!open) {
+            setTreatmentCellAppointment(null);
+            setTreatmentSections(null);
+            setTreatmentToothNumberEntries([""]);
+          }
         }}
-        onCancel={() => setTreatmentCellAppointment(null)}
-        canSave={selectedTreatmentId !== null}
+        title="Update Treatment"
+        description={treatmentCellAppointment ? getAppointmentTypeName(treatmentCellAppointment.type, treatmentCellAppointment.customType) + " for " + getCurrentPatientName(treatmentCellAppointment) : ""}
+        treatments={treatmentOptions.filter((option) => option.isActive !== false)}
+        treatmentSections={treatmentSections ?? undefined}
+        onTreatmentSectionsChange={setTreatmentSections}
+        toothNumberEntries={treatmentToothNumberEntries}
+        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
+        allowAddTreatment={true}
+        allowRemoveTreatment={true}
+        onSave={async () => {
+          if (!treatmentCellAppointment) return;
+          const activeTreatmentOptions = treatmentOptions.filter((o) => o.isActive !== false);
+          const sections = treatmentSections && treatmentSections.length > 0
+            ? treatmentSections
+            : [{ selectedTreatmentId, customTreatmentName, selectedPrice: treatmentPrice }];
+
+          const invalidSection = sections.find((section) => {
+            const selectedId = section.selectedTreatmentId;
+            if (selectedId === undefined || selectedId === null) return true;
+            const option = activeTreatmentOptions.find((t) => t.id === selectedId);
+            if (!option) return true;
+            if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return true;
+            return false;
+          });
+          if (invalidSection) { toast.error("Please complete all treatment sections before saving"); return; }
+
+          const appointmentDuration = normalizeBookingDuration((treatmentCellAppointment as any).duration || 30);
+          const updatedTreatments = sections.map((section) => {
+            const option = activeTreatmentOptions.find((o) => o.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
+            const isCustom = option.id === OTHER_APPOINTMENT_TYPE_INDEX;
+            return {
+              type: option.id,
+              customType: isCustom ? String(section.customTreatmentName || "").trim() : undefined,
+              duration: appointmentDuration,
+              price: Math.max(0, Number(section.selectedPrice ?? option.price ?? 0)),
+            };
+          });
+          const firstTreatment = updatedTreatments[0];
+          const appointmentToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
+          const payload: Partial<Appointment> = {
+            type: firstTreatment.type,
+            customType: firstTreatment.customType,
+            duration: appointmentDuration,
+            price: firstTreatment.price,
+            ...buildBookingTreatmentsPayload(updatedTreatments),
+            toothNumbers: appointmentToothNumbers,
+          };
+
+          setIsSavingTreatmentChange(true);
+          try {
+            await saveCellAppointment(treatmentCellAppointment, payload, "Treatment updated");
+            setTreatmentCellAppointment(null);
+            setTreatmentSections(null);
+            setTreatmentToothNumberEntries([""]);
+          } finally {
+            setIsSavingTreatmentChange(false);
+          }
+        }}
+        onCancel={() => { setTreatmentCellAppointment(null); setTreatmentSections(null); setTreatmentToothNumberEntries([""]); }}
+        isSaving={isSavingTreatmentChange}
+        canSave={Boolean(treatmentSections ? treatmentSections.length > 0 : selectedTreatmentId !== null)}
+        saveLabel="Save Treatment"
       />
       <Dialog open={Boolean(doctorCellAppointment)} onOpenChange={(open) => !open && setDoctorCellAppointment(null)}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>Assign Doctor</DialogTitle><DialogDescription>Select the dentist for this appointment.</DialogDescription></DialogHeader>
-          <SelectDoctorModal className="max-h-[55vh] overflow-y-auto" onDoctorAdded={() => void reloadDoctors()}>
-            {isLoadingDoctors ? <p className="py-8 text-center text-sm text-slate-500">Loading doctors…</p> : (
-              <div className="space-y-2">{doctors.map((doctor) => <button key={doctor.id} type="button" className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left hover:border-violet-200 hover:bg-violet-50" onClick={async () => {
-                if (!doctorCellAppointment) return;
-                await saveCellAppointment(doctorCellAppointment, { doctor: doctor.name, doctorId: doctor.id, doctorName: doctor.name } as Partial<Appointment>, "Doctor updated");
-                setDoctorCellAppointment(null);
-              }}><span className="font-semibold text-slate-900">{doctor.name}</span><span className="text-xs text-slate-500">{doctor.specialization || "Dentist"}</span></button>)}</div>
-            )}
-          </SelectDoctorModal>
+        <DialogContent
+          showCloseButton={false}
+          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
+        >
+          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                  <Stethoscope className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
+                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
+                    {doctorCellAppointment ? `Select the dentist for this appointment.` : ""}
+                  </DialogDescription>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setDoctorCellAppointment(null)}
+                className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100"
+                aria-label="Close assign doctor"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
+            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
+              {isLoadingDoctors ? (
+                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+                  Loading doctors
+                </div>
+              ) : doctors.length === 0 ? (
+                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-black text-slate-900">No doctors available</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this appointment.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {doctors.map((doctor: any) => (
+                    <button
+                      key={doctor.id || doctor.name}
+                      type="button"
+                      onClick={async () => {
+                        if (!doctorCellAppointment) return;
+                        await saveCellAppointment(doctorCellAppointment, { doctor: doctor.name, doctorId: doctor.id, doctorName: doctor.name } as Partial<Appointment>, "Doctor updated");
+                        setDoctorCellAppointment(null);
+                      }}
+                      className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+                    >
+                      <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
+                        <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
+                          {getInitials(doctor.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-black leading-tight text-slate-950">{doctor.name}</p>
+                        <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
+                      </div>
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                        <Check className="h-4 w-4" />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SelectDoctorModal>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
