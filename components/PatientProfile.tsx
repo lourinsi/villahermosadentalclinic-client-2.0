@@ -5424,7 +5424,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 <div className="grid gap-2 border-slate-200 text-sm sm:grid-cols-3 xl:grid-cols-1 xl:border-l xl:pl-5">
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="font-medium text-slate-500">Total</span>
-                                    <span className="font-black text-slate-900"><CurrencyText value={formatPatientHistoryCurrency(appointment.price)} /></span>
+                                    <div className="flex items-center gap-1.5">
+                                      {Number(appointment.discount) > 0 && (
+                                        <span className="text-xs text-slate-400 line-through decoration-rose-400 font-normal">
+                                          <CurrencyText value={formatPatientHistoryCurrency(appointment.price)} />
+                                        </span>
+                                      )}
+                                      <span className="font-black text-slate-900">
+                                        <CurrencyText value={formatPatientHistoryCurrency(Math.max(0, Number(appointment.price || 0) - Number(appointment.discount || 0)))} />
+                                      </span>
+                                    </div>
                                   </div>
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="font-medium text-slate-500">Paid</span>
@@ -5805,7 +5814,20 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     {getPaymentStatusBadge(String(appointment.paymentStatus || "unpaid"))}
                                   </div>
                                 </TableCell>
-                                <TableCell className="font-medium">{formatPatientHistoryCurrency(appointment.price)}</TableCell>
+                                <TableCell className="font-medium">
+                                  {Number(appointment.discount) > 0 ? (
+                                    <div className="flex flex-col leading-tight">
+                                      <span className="text-xs text-slate-400 line-through decoration-rose-400 font-normal">
+                                        {formatPatientHistoryCurrency(appointment.price)}
+                                      </span>
+                                      <span className="font-semibold text-slate-900">
+                                        {formatPatientHistoryCurrency(Math.max(0, Number(appointment.price || 0) - Number(appointment.discount || 0)))}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    formatPatientHistoryCurrency(appointment.price)
+                                  )}
+                                </TableCell>
                                 <TableCell className="font-medium text-emerald-700">{formatPatientHistoryCurrency(appointment.totalPaid)}</TableCell>
                                 <TableCell className={`font-medium ${displayedBalance > 0 ? "text-amber-600" : "text-emerald-600"}`}>
                                   {formatPatientHistoryCurrency(displayedBalance)}

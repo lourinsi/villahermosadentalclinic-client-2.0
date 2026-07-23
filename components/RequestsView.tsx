@@ -1482,7 +1482,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             title="Click to set new price total"
                           >
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total</p>
-                            <p className="mt-1 text-sm font-bold text-gray-900">{formatPaymentCurrency(request.price || 0)}</p>
+                            {Number(request.discount) > 0 && (
+                              <span className="block text-[10px] font-normal text-gray-400 line-through decoration-rose-400">
+                                {formatPaymentCurrency(request.price || 0)}
+                              </span>
+                            )}
+                            <p className="mt-0.5 text-sm font-bold text-gray-900">
+                              {formatPaymentCurrency(Math.max(0, Number(request.price || 0) - Number(request.discount || 0)))}
+                            </p>
                           </div>
                           <div
                             className="px-2 cursor-pointer hover:bg-emerald-50/60 rounded-lg transition-colors group/cell"
@@ -1691,8 +1698,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             onClick={() => setSetPriceAppointment(request)}
                             title="Click to set new price total"
                           >
-                            <div className="flex items-center gap-1">
-                              <span>{formatPaymentCurrency(request.price || 0)}</span>
+                            <div className="flex flex-col justify-center leading-tight">
+                              {Number(request.discount) > 0 && (
+                                <span className="text-[11px] font-normal text-gray-400 line-through decoration-rose-400">
+                                  {formatPaymentCurrency(request.price || 0)}
+                                </span>
+                              )}
+                              <span className="font-semibold text-gray-900">
+                                {formatPaymentCurrency(Math.max(0, Number(request.price || 0) - Number(request.discount || 0)))}
+                              </span>
                             </div>
                           </TableCell>
                           <TableCell
@@ -2070,7 +2084,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             title="Click to set new price total"
                           >
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total</p>
-                            <p className="mt-1 text-sm font-bold text-gray-900">{formatPaymentCurrency(item.price || 0)}</p>
+                            {Number(item.discount) > 0 && (
+                              <span className="block text-[10px] font-normal text-gray-400 line-through decoration-rose-400">
+                                {formatPaymentCurrency(item.price || 0)}
+                              </span>
+                            )}
+                            <p className="mt-0.5 text-sm font-bold text-gray-900">
+                              {formatPaymentCurrency(Math.max(0, Number(item.price || 0) - Number(item.discount || 0)))}
+                            </p>
                           </div>
                           <div
                             className="px-2 cursor-pointer hover:bg-emerald-50/60 rounded-lg transition-colors group/cell"
@@ -2269,8 +2290,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             onClick={() => setSetPriceAppointment(item)}
                             title="Click to set new price total"
                           >
-                            <div className="flex items-center gap-1">
-                              <span>{formatPaymentCurrency(item.price || 0)}</span>
+                            <div className="flex flex-col justify-center leading-tight">
+                              {Number(item.discount) > 0 && (
+                                <span className="text-[11px] font-normal text-gray-400 line-through decoration-rose-400">
+                                  {formatPaymentCurrency(item.price || 0)}
+                                </span>
+                              )}
+                              <span className="font-semibold text-gray-900">
+                                {formatPaymentCurrency(Math.max(0, Number(item.price || 0) - Number(item.discount || 0)))}
+                              </span>
                             </div>
                           </TableCell>
                           <TableCell
