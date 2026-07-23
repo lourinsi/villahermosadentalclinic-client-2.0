@@ -152,16 +152,17 @@ export function SelectScheduleModal({
   const resolvedDuration = isDraftMode ? localDraft.selectedDuration : selectedDuration;
   const resolvedStatus = isDraftMode ? localDraft.status : status;
   const hasDate = hasUsableDate(resolvedDate);
-  const hasTime = Boolean(String(resolvedTime || "").trim());
+  const rawTimeStr = String(resolvedTime || "").trim();
+  const hasTime = Boolean(rawTimeStr && rawTimeStr !== "undefined" && rawTimeStr !== "null");
   const selectedDateLabel = hasDate
     ? formatWordyDate(resolvedDate as Date | string, { fallback: "Select date" })
     : "Select date";
-  const selectedTimeLabel = hasTime ? formatTimeTo12h(String(resolvedTime)) : "Select time";
+  const selectedTimeLabel = hasTime ? formatTimeTo12h(rawTimeStr) : "Select time";
   const durationValue = resolvedDuration ? String(resolvedDuration) : "";
   const durationOptions = [30, 60, 90, 120];
   const endTimeLabel = formatEndTime(resolvedTime, durationValue);
   const timeRangeLabel = hasTime && endTimeLabel
-    ? `${formatTimeTo12h(String(selectedTime))} – ${endTimeLabel}`
+    ? `${formatTimeTo12h(rawTimeStr)} – ${endTimeLabel}`
     : "Choose a time and duration";
   const showDurationInput = isDraftMode || typeof onDurationChange === "function" || selectedDuration != null;
   const showStatusSelect = Array.isArray(statusOptions) && statusOptions.length > 0 && (isDraftMode || typeof onStatusChange === "function");

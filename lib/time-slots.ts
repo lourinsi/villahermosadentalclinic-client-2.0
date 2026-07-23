@@ -5,8 +5,14 @@ export const TIME_SLOTS = [
 ];
 
 export function formatTimeTo12h(time24: string): string {
-  if (!time24) return "";
-  const [hours, minutes] = time24.split(":").map(Number);
+  if (!time24 || typeof time24 !== "string") return "";
+  const trimmed = time24.trim();
+  if (/am|pm/i.test(trimmed)) return trimmed;
+  const parts = trimmed.split(":");
+  if (parts.length < 2) return trimmed;
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return trimmed;
   const period = hours >= 12 ? "PM" : "AM";
   const hours12 = hours % 12 || 12;
   return `${hours12}:${minutes.toString().padStart(2, "0")} ${period}`;
