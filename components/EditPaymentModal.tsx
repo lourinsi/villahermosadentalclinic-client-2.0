@@ -31,7 +31,7 @@ import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { cn, formatWordyDate } from "@/lib/utils";
-import { normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
+import { getBookingTreatmentDisplay, normalizeBookingPaymentMethod, NO_PAYMENT_METHOD_LABEL } from "./sharedBookingLogic";
 import {
   BookingPaymentPage,
   getAdjustedAppointmentPrice,
@@ -421,9 +421,13 @@ export function EditPaymentModal() {
   const currentBalanceDue = Math.max(0, totalBilled - totalPaid);
   const postEditPaymentTargetAmount = Math.max(0, totalBilled - Math.max(0, totalPaid - currentPaymentAmount));
   const projectedRemainingBalance = Math.max(0, totalBilled - Math.max(0, totalPaid - currentPaymentAmount + (parseFloat(amount) || 0)));
-  const selectedTreatmentName = selectedAppointmentRecord
-    ? getAppointmentTypeName(selectedAppointmentRecord.type, selectedAppointmentRecord.customType)
-    : effectivePaymentData?.appointmentSnapshot?.customType || effectivePaymentData?.appointmentSnapshot?.type || "Selected appointment";
+  const treatmentAppointment = selectedAppointmentRecord || effectivePaymentData?.appointmentSnapshot;
+  const selectedTreatmentName = treatmentAppointment
+    ? (() => {
+        const { labels, toothDetail } = getBookingTreatmentDisplay(treatmentAppointment, getAppointmentTypeName);
+        return `${labels.join(" • ")}${toothDetail ? ` (${toothDetail})` : ""}`;
+      })()
+    : "Selected appointment";
   const appointmentSnapshot = effectivePaymentData?.appointmentSnapshot || {};
   const paymentAmountForSummary = toPaymentNumber(
     effectivePaymentData?.amount ??

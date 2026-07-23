@@ -18,6 +18,7 @@ import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
+import { getBookingTreatmentDisplay } from "./sharedBookingLogic";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
 import { CurrencyText } from "./CurrencyAmount";
@@ -820,7 +821,10 @@ export function PaymentModal() {
           <BookingPaymentPage
             title="Record Payment"
             description={patientName ? `For ${patientName}` : "Apply a payment to an appointment."}
-            selectedTreatmentName={selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : "Selected appointment"}
+            selectedTreatmentName={selectedApt ? (() => {
+              const { labels, toothDetail } = getBookingTreatmentDisplay(selectedApt, getAppointmentTypeName);
+              return `${labels.join(" • ")}${toothDetail ? ` (${toothDetail})` : ""}`;
+            })() : "Selected appointment"}
             totalBilled={selectedAptTotalDue}
             totalPaid={selectedAptPaid}
             currentBalanceDue={outstandingBalance}
@@ -874,7 +878,12 @@ export function PaymentModal() {
               <div className="grid grid-cols-2 gap-3 max-[380px]:grid-cols-1">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
-                  <div className="text-sm font-semibold text-gray-900">{getAppointmentTypeName(selectedApt.type, selectedApt.customType)}</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {getBookingTreatmentDisplay(selectedApt, getAppointmentTypeName).labels.join(" • ")}
+                    {getBookingTreatmentDisplay(selectedApt, getAppointmentTypeName).toothDetail ? (
+                      <span className="mt-1 block text-xs font-medium text-slate-500">{getBookingTreatmentDisplay(selectedApt, getAppointmentTypeName).toothDetail}</span>
+                    ) : null}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>

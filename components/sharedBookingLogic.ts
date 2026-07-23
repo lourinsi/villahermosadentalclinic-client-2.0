@@ -1336,6 +1336,45 @@ export function getBookingTreatmentsValue(appointment?: any): BookingTreatment[]
   return [];
 }
 
+/**
+ * Presentation-safe treatment details for bookings that may use either the
+ * current `treatments` array or a legacy primary type/customType shape.
+ * Tooth numbers belong to the booking (not an individual treatment), so they
+ * are intentionally returned as one separate detail line.
+ */
+export function getBookingTreatmentDisplay(
+  appointment: any,
+  resolveTreatmentName: (type: number, customType?: string) => string
+) {
+  const treatments = getBookingTreatmentsValue(appointment);
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+  const legacySource = sources.find((source) => source && typeof source === "object") || {};
+  const resolveLabel = (type: number, customType?: string) => {
+    const resolved = resolveTreatmentName(type, customType);
+    return customType && /^(?:unknown|other)$/i.test(String(resolved).trim())
+      ? customType
+      : resolved || customType || String(type);
+  };
+  const labels = (treatments.length > 0
+    ? treatments.map((treatment) => resolveLabel(treatment.type, treatment.customType))
+    : [resolveLabel(Number(legacySource.type), legacySource.customType)]
+  )
+    .map((label) => String(label || "").trim())
+    .filter(Boolean);
+  const toothNumbers = getBookingToothNumbersValue(appointment);
+
+  return {
+    labels: labels.length > 0 ? labels : ["Selected treatment"],
+    toothDetail: toothNumbers ? `Tooth # ${toothNumbers}` : "",
+  };
+}
+
 export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toothNumbers?: unknown) {
   return {
     treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),

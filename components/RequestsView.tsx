@@ -101,6 +101,8 @@ import { TimePickerModal } from "./TimePickerModal";
 import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
+  getBookingTreatmentsValue,
+  getBookingTreatmentDisplay,
   buildBookingTreatmentsPayload,
   normalizeBookingDuration,
   normalizeBookingToothNumbers,
@@ -112,6 +114,24 @@ interface RequestsViewProps {
 
 const REQUESTS_PER_PAGE = 10;
 const HISTORY_PER_PAGE = 10;
+
+const getTreatmentDisplay = (appointment: any) =>
+  getBookingTreatmentDisplay(appointment, getAppointmentTypeName);
+
+const TreatmentCellContent = ({ appointment, compact = false }: { appointment: any; compact?: boolean }) => {
+  const { labels, toothDetail } = getTreatmentDisplay(appointment);
+
+  return (
+    <div className="min-w-0 space-y-0.5 text-left">
+      {labels.map((label, index) => (
+        <span key={`${label}-${index}`} className={index === 0 ? "block font-semibold leading-snug text-gray-900" : "block text-xs font-medium leading-snug text-slate-600"}>
+          {label}
+        </span>
+      ))}
+      {toothDetail ? <span className={compact ? "block text-xs font-medium leading-snug text-violet-600" : "block text-xs font-medium leading-snug text-slate-500"}>{toothDetail}</span> : null}
+    </div>
+  );
+};
 
 const resolveImageSource = (source?: string) => {
   if (!source) return undefined;
@@ -439,8 +459,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           bVal = getCurrentPatientName(b).toLowerCase();
           break;
         case "service":
-          aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
-          bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
+          aVal = getTreatmentDisplay(a).labels.join(" ").toLowerCase();
+          bVal = getTreatmentDisplay(b).labels.join(" ").toLowerCase();
           break;
         case "doctor":
           aVal = a.doctor.toLowerCase();
@@ -528,7 +548,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         if (
           search &&
           !getCurrentPatientName(appointment).toLowerCase().includes(search.toLowerCase()) &&
-          !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
+          !getTreatmentDisplay(appointment).labels.join(" ").toLowerCase().includes(search.toLowerCase()) &&
+          !getTreatmentDisplay(appointment).toothDetail.toLowerCase().includes(search.toLowerCase())
         ) {
           return false;
         }
@@ -663,7 +684,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         if (
           search &&
           !getCurrentPatientName(appointment).toLowerCase().includes(search.toLowerCase()) &&
-          !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
+          !getTreatmentDisplay(appointment).labels.join(" ").toLowerCase().includes(search.toLowerCase()) &&
+          !getTreatmentDisplay(appointment).toothDetail.toLowerCase().includes(search.toLowerCase())
         ) {
           return false;
         }
@@ -819,8 +841,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     const toothEntries = getBookingToothNumberEntries(getBookingToothNumbersValue(appointment as any));
 
     // Build sections from existing treatments payload if available
-    const rawTreatments = (appointment as any).treatments;
-    const hasTreatmentSections = Array.isArray(rawTreatments) && rawTreatments.length > 0;
+    const rawTreatments = getBookingTreatmentsValue(appointment as any);
+    const hasTreatmentSections = rawTreatments.length > 0;
     const nextSections: SelectTreatmentModalSection[] = hasTreatmentSections
       ? rawTreatments.map((t: any, index: number) => ({
           selectedTreatmentId: Number.isInteger(Number(t.type)) ? Number(t.type) : OTHER_APPOINTMENT_TYPE_INDEX,
@@ -1336,7 +1358,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 ) : (
                   sortedRequests.map((request) => {
                     const patientName = getCurrentPatientName(request);
-                    const serviceName = getAppointmentTypeName(request.type, request.customType);
                     return (
                       <div key={request.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
                         <div className="flex items-start gap-3">
@@ -1411,7 +1432,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <ClipboardList className="h-5 w-5" />
                             </div>
                             <div className="min-w-0">
-                              <p className="truncate font-black text-gray-900">{serviceName}</p>
+                              <TreatmentCellContent appointment={request} compact />
                               <p className="mt-1 truncate text-sm font-medium text-gray-500">
                                 <span className="mr-1 text-violet-600">-</span>
                                 {request.doctor || "Unassigned"}
@@ -1594,7 +1615,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     ) : (
                       sortedRequests.map((request) => {
                         const patientName = getCurrentPatientName(request);
-                        const serviceName = getAppointmentTypeName(request.type, request.customType);
                         return (
                         <TableRow key={request.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
                           <TableCell className="whitespace-normal">
@@ -1620,7 +1640,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
-                              <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
+                              <TreatmentCellContent appointment={request} />
                             </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
@@ -1948,7 +1968,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 ) : (
                   sortedHistory.map((item) => {
                     const patientName = getCurrentPatientName(item);
-                    const serviceName = getAppointmentTypeName(item.type, item.customType);
                     return (
                       <div key={item.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
                         <div className="flex items-start gap-3">
@@ -2009,7 +2028,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <ClipboardList className="h-5 w-5" />
                             </div>
                             <div className="min-w-0">
-                              <p className="truncate font-black text-gray-900">{serviceName}</p>
+                              <TreatmentCellContent appointment={item} compact />
                               <p className="mt-1 truncate text-sm font-medium text-gray-500">{item.doctor || "Unassigned"}</p>
                             </div>
                           </div>
@@ -2179,7 +2198,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     ) : (
                       sortedHistory.map((item) => {
                         const patientName = getCurrentPatientName(item);
-                        const serviceName = getAppointmentTypeName(item.type, item.customType);
                         return (
                         <TableRow key={item.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
                           <TableCell className="whitespace-normal">
@@ -2205,7 +2223,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
-                              <span className="font-semibold leading-snug text-gray-900">{serviceName}</span>
+                              <TreatmentCellContent appointment={item} />
                             </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
