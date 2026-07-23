@@ -9,6 +9,7 @@ import {
   AlertCircle,
   Calendar as CalendarIcon,
   CheckCircle2,
+  ChevronRight,
   CircleDot,
   ClipboardList,
   Clock,
@@ -19,8 +20,9 @@ import {
 } from "lucide-react";
 import { CompactNotesField } from "./CompactNotesField";
 import { DatePickerModal } from "./DatePickerModal";
-import { formatBookingPaymentDateLabel, getBookingDoctorValue, parseLocalDateOnly } from "./sharedBookingLogic";
+import { formatBookingPaymentDateLabel, getBookingDoctorValue, normalizeBookingToothNumbers, parseLocalDateOnly } from "./sharedBookingLogic";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
+import { ToothNumbersEditor } from "./ToothNumbersEditor";
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
 const REPEAT_OPTIONS = [
@@ -126,6 +128,15 @@ interface ConfirmAppointmentModalProps {
   onRepeatOptionChange: (option: string) => void;
   onCustomRepeatDateChange: (date: string) => void;
 
+  // Editable callbacks (optional – cells become interactive when provided)
+  onPatientClick?: () => void;
+  onDoctorClick?: () => void;
+  onServiceClick?: () => void;
+  onScheduleClick?: () => void;
+  onToothNumbersChange?: (value: string) => void;
+  onDurationChange?: (duration: string) => void;
+  onTreatmentNotesChange?: (treatmentNotes: string) => void;
+
   // Utilities
   getPersonInitials: (name?: string) => string;
   getDoctorInitials: (name: string) => string;
@@ -176,6 +187,13 @@ export function ConfirmAppointmentModal({
   previouslyPaidAmount,
   paymentAmountNow,
   paymentDate,
+  onPatientClick,
+  onDoctorClick,
+  onServiceClick,
+  onScheduleClick,
+  onToothNumbersChange,
+  onDurationChange,
+  onTreatmentNotesChange,
   getPersonInitials,
   getDoctorInitials,
   getBookingStatusLabel,
@@ -195,10 +213,17 @@ export function ConfirmAppointmentModal({
   const [repeatOption, setRepeatOption] = useState<string>(repeatOptionProp);
   const [customRepeatDate, setCustomRepeatDate] = useState<string>(customRepeatDateProp);
   const [customRepeatDatePickerOpen, setCustomRepeatDatePickerOpen] = useState(false);
+  const [isToothEditorOpen, setIsToothEditorOpen] = useState(false);
+  const [localToothNumbers, setLocalToothNumbers] = useState(String(toothNumbers || ""));
 
   useEffect(() => {
     setRepeatOption(repeatOptionProp);
   }, [repeatOptionProp]);
+
+  useEffect(() => {
+    setLocalToothNumbers(String(toothNumbers || ""));
+    setIsToothEditorOpen(false);
+  }, [toothNumbers, open]);
 
   useEffect(() => {
     setCustomRepeatDate(customRepeatDateProp);
@@ -290,67 +315,159 @@ export function ConfirmAppointmentModal({
           <div className="space-y-6 bg-white px-5 pb-7 sm:px-9">
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
               <div className="grid sm:grid-cols-2">
-                <DetailCell
-                  label="Patient"
-                  className="border-b border-slate-200 sm:border-r"
-                  icon={
-                    <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
-                      {patientAvatar && <AvatarImage src={patientAvatar} alt={patientName} className="object-cover" />}
-                      <AvatarFallback className="bg-blue-600 text-base font-black text-white">
-                        {getPersonInitials(patientName)}
-                      </AvatarFallback>
-                    </Avatar>
-                  }
+                {/* Patient cell */}
+                <div
+                  className="min-w-0 border-b border-slate-200 sm:border-r group cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={onPatientClick}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onPatientClick?.(); }}
+                  aria-label={`Change patient: ${patientName}`}
                 >
-                  <span className="block truncate">{patientName}</span>
-                </DetailCell>
+                  <DetailCell
+                    label="Patient"
+                    className=""
+                    icon={
+                      <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
+                        {patientAvatar && <AvatarImage src={patientAvatar} alt={patientName} className="object-cover" />}
+                        <AvatarFallback className="bg-blue-600 text-base font-black text-white">
+                          {getPersonInitials(patientName)}
+                        </AvatarFallback>
+                      </Avatar>
+                    }
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2 pr-2">
+                      <span className="block truncate">{patientName}</span>
+                      <Pencil className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:scale-110" />
+                    </div>
+                  </DetailCell>
+                </div>
 
-                <DetailCell
-                  label="Doctor"
-                  className="border-b border-slate-200"
-                  icon={
-                    <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
-                      {doctorAvatar && <AvatarImage src={doctorAvatar} alt={doctorName} className="object-cover" />}
-                      <AvatarFallback className="bg-emerald-500 text-base font-black text-white">
-                        {getDoctorInitials(doctorName)}
-                      </AvatarFallback>
-                    </Avatar>
-                  }
+                {/* Doctor cell */}
+                <div
+                  className="min-w-0 border-b border-slate-200 group cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={onDoctorClick}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onDoctorClick?.(); }}
+                  aria-label={`Change doctor: ${doctorName}`}
                 >
-                  <span className="block truncate">{doctorName}</span>
-                </DetailCell>
+                  <DetailCell
+                    label="Doctor"
+                    className=""
+                    icon={
+                      <Avatar className="h-14 w-14 shrink-0 border-4 border-white shadow-lg">
+                        {doctorAvatar && <AvatarImage src={doctorAvatar} alt={doctorName} className="object-cover" />}
+                        <AvatarFallback className="bg-emerald-500 text-base font-black text-white">
+                          {getDoctorInitials(doctorName)}
+                        </AvatarFallback>
+                      </Avatar>
+                    }
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2 pr-2">
+                      <span className="block truncate">{doctorName}</span>
+                      <Pencil className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:scale-110" />
+                    </div>
+                  </DetailCell>
+                </div>
 
-                <DetailCell
-                  label="Service"
-                  className="border-b border-slate-200 sm:border-r"
-                  icon={
-                    <DetailIcon>
-                      <CircleDot className="h-7 w-7" />
-                    </DetailIcon>
-                  }
+                {/* Service cell */}
+                <div
+                  className="min-w-0 border-b border-slate-200 sm:border-r group cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={onServiceClick}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onServiceClick?.(); }}
+                  aria-label={`Change service: ${treatmentName}`}
                 >
-                  <span className="block truncate">{treatmentName}</span>
-                </DetailCell>
+                  <DetailCell
+                    label="Service"
+                    className=""
+                    icon={
+                      <DetailIcon>
+                        <CircleDot className="h-7 w-7" />
+                      </DetailIcon>
+                    }
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2 pr-2">
+                      <span className="block truncate">{treatmentName}</span>
+                      <Pencil className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:scale-110" />
+                    </div>
+                  </DetailCell>
+                </div>
 
-                <DetailCell label="Tooth No./s" className="border-b border-slate-200">
-                  <span className={toothNumbersText ? "block truncate" : "block truncate text-slate-400"}>
-                    {toothNumbersText || "No tooth numbers added."}
-                  </span>
-                </DetailCell>
-
-                <DetailCell
-                  label="Schedule"
-                  className="border-b border-slate-200 sm:border-r"
-                  icon={
-                    <DetailIcon>
-                      <CalendarIcon className="h-7 w-7" />
-                    </DetailIcon>
-                  }
+                {/* Tooth No./s cell - always clickable to toggle inline editor */}
+                <div
+                  className="min-w-0 border-b border-slate-200 cursor-pointer hover:bg-blue-50/50 transition-colors group"
+                  onClick={!isToothEditorOpen ? () => { setLocalToothNumbers(String(toothNumbers || "")); setIsToothEditorOpen(true); } : undefined}
+                  role={!isToothEditorOpen ? "button" : undefined}
+                  tabIndex={!isToothEditorOpen ? 0 : undefined}
+                  onKeyDown={!isToothEditorOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { setLocalToothNumbers(String(toothNumbers || "")); setIsToothEditorOpen(true); } } : undefined}
+                  aria-label="Click to edit tooth numbers"
                 >
-                  <span className="block truncate">
-                    {formatWordyDate(selectedDate)} at {selectedTime ? formatTimeTo12h(selectedTime) : "-"}
-                  </span>
-                </DetailCell>
+                  <div className="min-w-0 p-5 sm:p-6">
+                    <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Tooth No./s</p>
+                    {isToothEditorOpen ? (
+                      <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+                        <ToothNumbersEditor
+                          value={localToothNumbers}
+                          onChange={(val) => {
+                            setLocalToothNumbers(val);
+                          }}
+                          size="sm"
+                          autoFocusFirst
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToothNumbersChange?.(localToothNumbers);
+                            setIsToothEditorOpen(false);
+                          }}
+                          className="mt-1 text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline block"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex min-w-0 items-center justify-between gap-2 pr-2">
+                        <div className="min-w-0 text-[19px] font-black leading-tight tracking-tight text-slate-950">
+                          <span className={localToothNumbers ? "block truncate" : "block truncate text-slate-400"}>
+                            {localToothNumbers || "Click to add tooth numbers"}
+                          </span>
+                        </div>
+                        <Pencil className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:scale-110" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Schedule cell */}
+                <div
+                  className="min-w-0 border-b border-slate-200 sm:border-r group cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={onScheduleClick}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onScheduleClick?.(); }}
+                  aria-label="Change schedule"
+                >
+                  <DetailCell
+                    label="Schedule"
+                    className=""
+                    icon={
+                      <DetailIcon>
+                        <CalendarIcon className="h-7 w-7" />
+                      </DetailIcon>
+                    }
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2 pr-2">
+                      <span className="block truncate">
+                        {formatWordyDate(selectedDate)} at {selectedTime ? formatTimeTo12h(selectedTime) : "-"}
+                      </span>
+                      <Pencil className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:scale-110" />
+                    </div>
+                  </DetailCell>
+                </div>
 
                 <DetailCell
                   label="Duration"
@@ -361,8 +478,23 @@ export function ConfirmAppointmentModal({
                     </DetailIcon>
                   }
                 >
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    <span className="truncate">{duration} mins</span>
+                  <div className="flex items-center gap-2">
+                    {onDurationChange ? (
+                      <Select value={String(duration)} onValueChange={onDurationChange}>
+                        <SelectTrigger className="h-10 min-w-[130px] rounded-full border border-slate-200 bg-white px-4 text-sm font-bold text-slate-900 shadow-sm focus:ring-0 focus:ring-offset-0">
+                          <SelectValue placeholder={`${duration} mins`} />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl border-none shadow-2xl">
+                          {["30", "60", "90", "120"].map((mins) => (
+                            <SelectItem key={mins} value={mins} className="mx-2 my-1 rounded-xl font-bold">
+                              {mins} mins
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="truncate text-sm font-bold text-slate-900">{duration} mins</span>
+                    )}
                     {durationConflict && (
                       <span
                         title={bookingConflictWarnings.find((warning) => warning.type === "duration")?.message || durationConflict}
@@ -371,7 +503,7 @@ export function ConfirmAppointmentModal({
                         <AlertCircle className="h-4 w-4" />
                       </span>
                     )}
-                  </span>
+                  </div>
                 </DetailCell>
 
                 <DetailCell
@@ -426,9 +558,9 @@ export function ConfirmAppointmentModal({
                           <SelectItem value={REPEAT_NONE_OPTION} className="mx-2 my-1 rounded-xl">
                             Do not repeat
                           </SelectItem>
-                          {REPEAT_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value} className="mx-2 my-1 rounded-xl">
-                              {option.label}
+                          {REPEAT_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value} className="mx-2 my-1 rounded-xl">
+                              {opt.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -464,12 +596,16 @@ export function ConfirmAppointmentModal({
                   <DetailIcon>
                     <ClipboardList className="h-7 w-7" />
                   </DetailIcon>
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-2 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Treatment Notes</p>
-                    <p className={`line-clamp-3 text-lg font-semibold leading-snug ${treatmentNotesText ? "text-slate-700" : "text-slate-500"}`}>
-                      {treatmentNotesText || "No treatment notes added."}
-                    </p>
-                  </div>
+                  <CompactNotesField
+                    id="confirm-summary-treatment-notes"
+                    label="Treatment Notes"
+                    placeholder="No treatment notes added. Click to add..."
+                    value={treatmentNotes}
+                    onChange={(val) => onTreatmentNotesChange?.(val)}
+                    disabled={isPatientReadonly && isCancelled}
+                    className="min-w-0 flex-1 space-y-0 [&_button]:h-auto [&_button]:border-transparent [&_button]:pb-0 [&_button]:text-lg"
+                    labelClassName="mb-2 block text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80"
+                  />
                 </div>
 
                 <div className="flex min-w-0 gap-4 p-5 sm:col-span-2 sm:p-6">

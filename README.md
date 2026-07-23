@@ -16,6 +16,7 @@ The frontend is the staff-facing web application and public informational site f
 - [Package scripts](#package-scripts)
 - [Build and deployment](#build-and-deployment)
 - [Loading, errors, and backend readiness](#loading-errors-and-backend-readiness)
+- [Universal select modals UI](#universal-select-modals-ui)
 - [Coding and UI conventions](#coding-and-ui-conventions)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
@@ -243,6 +244,46 @@ The application distinguishes availability from authentication as follows:
 - Unexpected authentication `5xx` responses show a temporary unavailable state instead of logging the user out.
 
 Feature pages also contain local spinners, empty states, dialogs, and Sonner notifications. Avoid exposing raw fetch errors, status codes, stack traces, or tokens to users.
+
+## Universal select modals UI
+
+The application uses a set of **universal select modals** that are shared across all views that deal with appointments, requests, and patient records. Any code that needs to let a user pick a patient, doctor, service/treatment, or schedule must open the matching modal from this set rather than building its own bespoke picker.
+
+### Modal components
+
+| Component | File | Purpose |
+| --- | --- | --- |
+| `SelectPatientModal` | `components/SelectPatientModal.tsx` | Searchable patient picker with name, contact, and DOB display |
+| `SelectTreatmentModal` | `components/SelectTreatmentModal.tsx` | Service/treatment picker with catalog price display and tooth-number input |
+| `SelectScheduleModal` | `components/SelectScheduleModal.tsx` | Date, time, and duration picker built on `DatePickerModal` and `TimePickerModal` |
+| `SelectDoctorModal` | `components/SelectDoctorModal.tsx` | Searchable doctor picker with avatar and specialization display |
+| `ToothNumbersEditor` | `components/ToothNumbersEditor.tsx` | Inline box-array editor for adding, editing, and removing tooth numbers |
+
+### Where the modals appear
+
+The universal pickers are used consistently in every view that reads or writes appointment data:
+
+- **`RequestsView.tsx`** — appointment request rows open the universal pickers for patient, doctor, service, and schedule; tooth numbers are edited inline with `ToothNumbersEditor`.
+- **`PatientProfile.tsx`** — the appointment history table opens the same universal pickers; tooth numbers are edited inline.
+- **`AppointmentHistoryView.tsx`** — uses the same pattern as `RequestsView`.
+- **`ConfirmAppointmentModal.tsx`** — every detail cell (Patient, Doctor, Service, Schedule, Tooth No./s) is clickable and opens the corresponding universal modal. The pencil icon in each row communicates editability.
+- **`ImprovedBookingModal.tsx`** and **`BookingModal.tsx`** — the confirmation step delegates all field editing to the same universal modals via `onPatientClick`, `onDoctorClick`, `onServiceClick`, `onScheduleClick`, and `onToothNumbersChange` callbacks.
+
+### ToothNumbersEditor behaviour
+
+`ToothNumbersEditor` renders an array of numbered boxes for each saved tooth number plus one empty input box for new entries. The component:
+
+- Accepts and emits an array of number strings.
+- Strips non-numeric and non-integer input automatically.
+- Commits changes to the backend only when the user clicks **Done**, not on every keystroke or box addition.
+- Stops click-event propagation on its internal buttons so it can be embedded inside clickable table rows without triggering row-level navigation or modal opens.
+
+### Rules for new features
+
+- **Do not create bespoke patient, doctor, service, or schedule pickers.** Reuse the four universal modals above.
+- **Do not create a separate tooth-number UI.** Embed `ToothNumbersEditor` where inline editing is required, or open `SelectTreatmentModal` (which already contains tooth-number input) when the service selection flow is appropriate.
+- **Defer backend saves for tooth numbers.** Collect edits in local state and call the API only on an explicit user confirmation action (Done button or form submit).
+- **Keep click handlers and open-state variables co-located** with the component that renders the trigger row or cell; do not lift them higher than necessary.
 
 ## Coding and UI conventions
 

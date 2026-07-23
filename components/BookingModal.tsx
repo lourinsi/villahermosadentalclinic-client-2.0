@@ -17,7 +17,8 @@ import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersis
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, X, ShieldCheck, RotateCcw } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, ShieldCheck, RotateCcw } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -76,6 +77,10 @@ import useSharedBookingLogic, {
 import BookingAppointmentHistory from "./BookingAppointmentHistory";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import OverpaymentConfirmDialog from "./OverpaymentConfirmDialog";
+import { SelectDoctorModal } from "./SelectDoctorModal";
+import { SelectPatientModal } from "./SelectPatientModal";
+import { SelectScheduleModal } from "./SelectScheduleModal";
+import { SelectTreatmentModal } from "./SelectTreatmentModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { ConfirmAppointmentModal } from "./ConfirmAppointmentModal";
@@ -591,6 +596,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     existingStatus: appointmentToEdit?.paymentStatus,
     statusOptions: paymentStatuses,
   });
+  const [isSubSelectPatientOpen, setIsSubSelectPatientOpen] = useState(false);
+  const [isSubSelectDoctorOpen, setIsSubSelectDoctorOpen] = useState(false);
+  const [isSubSelectTreatmentOpen, setIsSubSelectTreatmentOpen] = useState(false);
+  const [isSubSelectScheduleOpen, setIsSubSelectScheduleOpen] = useState(false);
+
   const getPaymentStatusOption = (statusValue: string) =>
     paymentStatusOptions.find((status) => status.value === statusValue);
 
@@ -3492,6 +3502,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onRepeatOptionChange={setRepeatOption}
         onCustomRepeatDateChange={setCustomRepeatDate}
         patientId={selectedPatient}
+        onPatientClick={() => setIsSubSelectPatientOpen(true)}
+        onDoctorClick={() => setIsSubSelectDoctorOpen(true)}
+        onServiceClick={() => setIsSubSelectTreatmentOpen(true)}
+        onScheduleClick={() => setIsSubSelectScheduleOpen(true)}
+        onToothNumbersChange={(newVal) => setToothNumberEntries(getBookingToothNumberEntries(newVal))}
+        onDurationChange={(dur) => setDuration(dur)}
+        onTreatmentNotesChange={(notes) => setTreatmentNotes(notes)}
 
         getPersonInitials={(name?: string) => {
           const initials = String(name || "")
@@ -3520,6 +3537,78 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
         userRole={effectiveRole}
+      />
+
+      {/* Submodal 1: Select Patient */}
+      <SelectPatientModal
+        open={isSubSelectPatientOpen}
+        onOpenChange={setIsSubSelectPatientOpen}
+        selectedPatientId={selectedPatient}
+        selectedPatientName={patients.find((p) => p.id === selectedPatient)?.name}
+        canCreatePatients={!isPatientReadonly}
+        onConfirm={(patient) => {
+          setSelectedPatient(patient.id);
+          setIsSubSelectPatientOpen(false);
+        }}
+      />
+
+      {/* Submodal 2: Select Doctor */}
+      <SelectDoctorModal
+        open={isSubSelectDoctorOpen}
+        onOpenChange={setIsSubSelectDoctorOpen}
+        title="Assign Doctor"
+        description="Select the dentist for this appointment."
+        doctors={(doctors || []) as any[]}
+        selectedValue={selectedDoctor}
+        showAddDoctorButton={false}
+        onSelect={(doc) => {
+          const val = (doc as any).value || doc.name;
+          setSelectedDoctor(val);
+          setIsSubSelectDoctorOpen(false);
+        }}
+      />
+
+      {/* Submodal 3: Select Service/Treatment */}
+      <SelectTreatmentModal
+        open={isSubSelectTreatmentOpen}
+        onOpenChange={setIsSubSelectTreatmentOpen}
+        treatments={(serviceOptions || []).map((opt: any, idx: number) => ({
+          id: idx + 1,
+          label: opt.name || opt.label || String(opt),
+          value: opt.name || opt.value || String(opt),
+          price: opt.price || APPOINTMENT_PRICES[opt.name || opt.label] || 0,
+        }))}
+        selectedTreatmentId={
+          (serviceOptions || []).findIndex((t: any) => (t.name || t.label || t) === appointmentType) + 1 || 1
+        }
+        currentTreatmentLabel={appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType}
+        customTreatmentName={customAppointmentTypeName}
+        selectedPrice={customPrice}
+        onTreatmentSelect={(treatment: any) => {
+          setAppointmentType(treatment.label);
+          if (treatment.price) setCustomPrice(String(treatment.price));
+          setIsSubSelectTreatmentOpen(false);
+        }}
+        onSave={() => setIsSubSelectTreatmentOpen(false)}
+        onCancel={() => setIsSubSelectTreatmentOpen(false)}
+      />
+
+      {/* Submodal 4: Select Schedule */}
+      <SelectScheduleModal
+        open={isSubSelectScheduleOpen}
+        onOpenChange={setIsSubSelectScheduleOpen}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        selectedDuration={duration}
+        onDurationChange={(dur) => setDuration(dur)}
+        onDateClick={() => {
+          setIsDatePickerOpen(true);
+        }}
+        onTimeClick={() => {
+          setIsTimePickerOpen(true);
+        }}
+        onSave={() => setIsSubSelectScheduleOpen(false)}
+        onCancel={() => setIsSubSelectScheduleOpen(false)}
       />
 
       <OverpaymentConfirmDialog

@@ -100,6 +100,7 @@ import { SelectDoctorModal } from "./SelectDoctorModal";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { SetAppointmentPriceModal } from "./SetAppointmentPriceModal";
+import { ToothNumbersEditor } from "./ToothNumbersEditor";
 import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
@@ -403,6 +404,27 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [isSavingTreatmentChange, setIsSavingTreatmentChange] = useState(false);
   const [doctorCellAppointment, setDoctorCellAppointment] = useState<Appointment | null>(null);
   const [setPriceAppointment, setSetPriceAppointment] = useState<Appointment | null>(null);
+  const [editingToothNumberAptId, setEditingToothNumberAptId] = useState<string | null>(null);
+  const [editingToothNumberValue, setEditingToothNumberValue] = useState<string>("");
+
+  const handleSaveToothNumbers = async (appointment: Appointment, newToothNumbers: string) => {
+    const appointmentId = String(appointment.id || "");
+    if (!appointmentId) return;
+    try {
+      const patch = {
+        toothNumbers: newToothNumbers,
+        toothNumber: newToothNumbers,
+      };
+      const updated = await updateAppointment(appointmentId, patch);
+      setRequests((prev) => prev.map((r) => String(r.id) === appointmentId ? { ...r, ...updated, ...patch } : r));
+      setHistory((prev) => prev.map((h) => String(h.id) === appointmentId ? { ...h, ...updated, ...patch } : h));
+      refreshAppointments();
+      toast.success("Tooth numbers updated");
+    } catch (err) {
+      console.error("Failed to update tooth numbers:", err);
+      toast.error("Failed to update tooth numbers");
+    }
+  };
 
   const getInitials = (name: string) => {
     if (!name) return "P";
@@ -1574,47 +1596,52 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 <Table className="min-w-[1180px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
-                      <TableHead className="w-[13%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
+                      <TableHead className="w-[12%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Date &amp; Time {getSortIcon("date", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[16%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
+                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Treatment {getSortIcon("service", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
+                      <TableHead className="w-[11%] font-bold text-gray-900">
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Tooth No.
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[11%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Doctor {getSortIcon("doctor", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("status")}>
+                      <TableHead className="w-[9%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Status {getSortIcon("status", true)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Total</TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Paid</TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Balance</TableHead>
-                      <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Total</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Paid</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Balance</TableHead>
+                      <TableHead className="w-[9%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isRequestsLoading ? (
                       <TableRow>
-                        <TableCell colSpan={pendingRequestColumnCount} className="h-32 text-center text-gray-500 font-medium">
+                        <TableCell colSpan={10} className="h-32 text-center text-gray-500 font-medium">
                           Loading requests...
                         </TableCell>
                       </TableRow>
                     ) : sortedRequests.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={pendingRequestColumnCount} className="h-64 text-center">
+                        <TableCell colSpan={10} className="h-64 text-center">
                           <div className="flex flex-col items-center justify-center py-12">
                             <div className="p-4 bg-gray-50 rounded-full mb-4">
                               <ClipboardList className="h-10 w-10 text-gray-300" />
@@ -1630,7 +1657,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         return (
                         <TableRow key={request.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
                           <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openScheduleCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit schedule for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => openScheduleCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit schedule for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
                               <div className="min-w-0">
                                 <span className="font-bold text-gray-900">{formatWordyDate(request.date, { fallback: request.date || 'N/A' })}</span>
@@ -1639,7 +1666,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </button>
                           </TableCell>
                           <TableCell className="py-5 pr-3 whitespace-normal">
-                            <button type="button" onClick={() => setPatientCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change patient for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => setPatientCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change patient for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
@@ -1648,12 +1675,54 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openTreatmentCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit treatment for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => openTreatmentCell(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Edit treatment for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
                               <TreatmentCellContent appointment={request} />
                             </button>
+                          </TableCell>
+                          <TableCell className="max-w-[160px] whitespace-normal">
+                            {editingToothNumberAptId === String(request.id) && !isSoftDeletedAppointment(request) ? (
+                              <div className="space-y-2 p-1.5 bg-violet-50/80 rounded-lg border border-violet-200" onClick={(e) => e.stopPropagation()}>
+                                <ToothNumbersEditor
+                                  value={editingToothNumberValue}
+                                  onChange={(val) => {
+                                    setEditingToothNumberValue(val);
+                                  }}
+                                  size="sm"
+                                  autoFocusFirst
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSaveToothNumbers(request, editingToothNumberValue);
+                                    setEditingToothNumberAptId(null);
+                                  }}
+                                  className="text-xs font-bold text-violet-700 hover:underline block"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isSoftDeletedAppointment(request)) {
+                                    setEditingToothNumberAptId(String(request.id));
+                                    setEditingToothNumberValue(getBookingToothNumbersValue(request) || "");
+                                  }
+                                }}
+                                disabled={isSoftDeletedAppointment(request)}
+                                aria-label={`Edit tooth numbers for ${patientName}`}
+                                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70"
+                              >
+                                <span className="truncate font-semibold text-gray-900">
+                                  {getBookingToothNumbersValue(request) || "—"}
+                                </span>
+                              </button>
+                            )}
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <button type="button" onClick={() => !isSoftDeletedAppointment(request) && setDoctorCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change doctor for ${patientName}`} className={editableCellClass}>
@@ -2166,47 +2235,52 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 <Table className="min-w-[1180px] table-fixed">
                   <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
-                      <TableHead className="w-[13%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
+                      <TableHead className="w-[12%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Date &amp; Time {getSortIcon("date", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[16%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
+                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Patient {getSortIcon("patient", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
+                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Treatment {getSortIcon("service", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[12%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
+                      <TableHead className="w-[11%] font-bold text-gray-900">
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Tooth No.
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[11%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Doctor {getSortIcon("doctor", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[10%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
+                      <TableHead className="w-[9%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Status {getSortIcon("status", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Total</TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Paid</TableHead>
-                      <TableHead className="w-[8%] font-bold text-gray-900">Balance</TableHead>
-                      <TableHead className="w-[11%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Total</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Paid</TableHead>
+                      <TableHead className="w-[7%] font-bold text-gray-900">Balance</TableHead>
+                      <TableHead className="w-[9%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isHistoryLoading ? (
                       <TableRow>
-                        <TableCell colSpan={historyColumnCount} className="h-32 text-center text-gray-500 font-medium">
+                        <TableCell colSpan={10} className="h-32 text-center text-gray-500 font-medium">
                           Loading history...
                         </TableCell>
                       </TableRow>
                     ) : sortedHistory.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={historyColumnCount} className="h-64 text-center">
+                        <TableCell colSpan={10} className="h-64 text-center">
                           <div className="flex flex-col items-center justify-center py-12">
                             <div className="p-4 bg-gray-50 rounded-full mb-4">
                               <History className="h-10 w-10 text-gray-300" />
@@ -2222,7 +2296,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         return (
                         <TableRow key={item.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
                           <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openScheduleCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit schedule for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => openScheduleCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit schedule for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
                               <div className="min-w-0">
                                 <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
@@ -2231,7 +2305,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </button>
                           </TableCell>
                           <TableCell className="py-5 pr-3 whitespace-normal">
-                            <button type="button" onClick={() => setPatientCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change patient for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => setPatientCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change patient for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
@@ -2240,12 +2314,54 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </button>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openTreatmentCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit treatment for ${patientName}`} className={editableCellClass}>
+                            <button type="button" onClick={() => openTreatmentCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit treatment for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                                 <ClipboardList className="h-5 w-5" />
                               </div>
                               <TreatmentCellContent appointment={item} />
                             </button>
+                          </TableCell>
+                          <TableCell className="max-w-[160px] whitespace-normal">
+                            {editingToothNumberAptId === String(item.id) && !isSoftDeletedAppointment(item) ? (
+                              <div className="space-y-2 p-1.5 bg-violet-50/80 rounded-lg border border-violet-200" onClick={(e) => e.stopPropagation()}>
+                                <ToothNumbersEditor
+                                  value={editingToothNumberValue}
+                                  onChange={(val) => {
+                                    setEditingToothNumberValue(val);
+                                  }}
+                                  size="sm"
+                                  autoFocusFirst
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSaveToothNumbers(item, editingToothNumberValue);
+                                    setEditingToothNumberAptId(null);
+                                  }}
+                                  className="text-xs font-bold text-violet-700 hover:underline block"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isSoftDeletedAppointment(item)) {
+                                    setEditingToothNumberAptId(String(item.id));
+                                    setEditingToothNumberValue(getBookingToothNumbersValue(item) || "");
+                                  }
+                                }}
+                                disabled={isSoftDeletedAppointment(item)}
+                                aria-label={`Edit tooth numbers for ${patientName}`}
+                                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70"
+                              >
+                                <span className="truncate font-semibold text-gray-900">
+                                  {getBookingToothNumbersValue(item) || "—"}
+                                </span>
+                              </button>
+                            )}
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <button type="button" onClick={() => !isSoftDeletedAppointment(item) && setDoctorCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change doctor for ${patientName}`} className={editableCellClass}>
@@ -2588,83 +2704,22 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         canSave={Boolean(treatmentSections ? treatmentSections.length > 0 : selectedTreatmentId !== null)}
         saveLabel="Save Treatment"
       />
-      <Dialog open={Boolean(doctorCellAppointment)} onOpenChange={(open) => !open && setDoctorCellAppointment(null)}>
-        <DialogContent
-          showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
-        >
-          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                  <Stethoscope className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 text-left">
-                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
-                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
-                    {doctorCellAppointment ? `Select the dentist for this appointment.` : ""}
-                  </DialogDescription>
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setDoctorCellAppointment(null)}
-                className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100"
-                aria-label="Close assign doctor"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
-            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
-              {isLoadingDoctors ? (
-                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
-                  Loading doctors
-                </div>
-              ) : doctors.length === 0 ? (
-                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
-                  <p className="text-sm font-black text-slate-900">No doctors available</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this appointment.</p>
-                </div>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {doctors.map((doctor: any) => (
-                    <button
-                      key={doctor.id || doctor.name}
-                      type="button"
-                      onClick={async () => {
-                        if (!doctorCellAppointment) return;
-                        await saveCellAppointment(doctorCellAppointment, { doctor: doctor.name, doctorId: doctor.id, doctorName: doctor.name } as Partial<Appointment>, "Doctor updated");
-                        setDoctorCellAppointment(null);
-                      }}
-                      className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
-                    >
-                      <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
-                        <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
-                          {getInitials(doctor.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-black leading-tight text-slate-950">{doctor.name}</p>
-                        <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
-                      </div>
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
-                        <Check className="h-4 w-4" />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </SelectDoctorModal>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SelectDoctorModal
+        open={Boolean(doctorCellAppointment)}
+        onOpenChange={(open) => !open && setDoctorCellAppointment(null)}
+        doctors={doctors}
+        isLoading={isLoadingDoctors}
+        onDoctorAdded={() => void reloadDoctors()}
+        onSelect={async (doctor) => {
+          if (!doctorCellAppointment) return;
+          await saveCellAppointment(
+            doctorCellAppointment,
+            { doctor: doctor.name, doctorId: doctor.id, doctorName: doctor.name } as Partial<Appointment>,
+            "Doctor updated"
+          );
+          setDoctorCellAppointment(null);
+        }}
+      />
     </div>
   );
 }

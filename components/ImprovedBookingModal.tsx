@@ -549,6 +549,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
+  const [isSubSelectPatientOpen, setIsSubSelectPatientOpen] = useState(false);
+  const [isSubSelectDoctorOpen, setIsSubSelectDoctorOpen] = useState(false);
+  const [isSubSelectTreatmentOpen, setIsSubSelectTreatmentOpen] = useState(false);
+  const [isSubSelectScheduleOpen, setIsSubSelectScheduleOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
   const [snapshotIsHistorical, setSnapshotIsHistorical] = useState(false);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
@@ -4433,6 +4437,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onRepeatOptionChange={setRepeatOption}
         onCustomRepeatDateChange={setCustomRepeatDate}
         patientId={selectedPatient}
+        onPatientClick={() => setIsSubSelectPatientOpen(true)}
+        onDoctorClick={() => setIsSubSelectDoctorOpen(true)}
+        onServiceClick={() => setIsSubSelectTreatmentOpen(true)}
+        onScheduleClick={() => setIsSubSelectScheduleOpen(true)}
+        onToothNumbersChange={(newVal) => setToothNumberEntries(getBookingToothNumberEntries(newVal))}
+        onDurationChange={(dur) => setDuration(dur)}
+        onTreatmentNotesChange={(notes) => setTreatmentNotes(notes)}
         
         getPersonInitials={getPersonInitials}
         getDoctorInitials={getDoctorInitials}
@@ -4445,6 +4456,79 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
         userRole={effectiveRole}
+      />
+
+      {/* Submodal 1: Select Patient */}
+      <SelectPatientModal
+        open={isSubSelectPatientOpen}
+        onOpenChange={setIsSubSelectPatientOpen}
+        selectedPatientId={selectedPatient}
+        selectedPatientName={summaryPatientName}
+        canCreatePatients={!isPatientReadonly}
+        onConfirm={(patient) => {
+          setSelectedPatient(patient.id);
+          setIsSubSelectPatientOpen(false);
+        }}
+      />
+
+      {/* Submodal 2: Select Doctor */}
+      <SelectDoctorModal
+        open={isSubSelectDoctorOpen}
+        onOpenChange={setIsSubSelectDoctorOpen}
+        title="Assign Doctor"
+        description="Select the dentist for this appointment."
+        doctors={(doctors || []) as any[]}
+        selectedValue={selectedDoctor}
+        showAddDoctorButton
+        onDoctorAdded={() => void reloadDoctors()}
+        onSelect={(doc) => {
+          const val = (doc as any).value || doc.name;
+          setSelectedDoctor(val);
+          setIsSubSelectDoctorOpen(false);
+        }}
+      />
+
+      {/* Submodal 3: Select Service/Treatment */}
+      <SelectTreatmentModal
+        open={isSubSelectTreatmentOpen}
+        onOpenChange={setIsSubSelectTreatmentOpen}
+        treatments={bookingTreatmentOptions.map((opt, idx) => ({
+          id: idx + 1,
+          label: opt.name,
+          value: opt.name,
+          price: servicePriceByName[opt.name] || 0,
+        }))}
+        selectedTreatmentId={
+          bookingTreatmentOptions.findIndex((t) => t.name === appointmentType) + 1 || 1
+        }
+        currentTreatmentLabel={appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType}
+        customTreatmentName={customAppointmentTypeName}
+        selectedPrice={customPrice}
+        onTreatmentSelect={(treatment) => {
+          setAppointmentType(treatment.label);
+          if (treatment.price) setCustomPrice(String(treatment.price));
+          setIsSubSelectTreatmentOpen(false);
+        }}
+        onSave={() => setIsSubSelectTreatmentOpen(false)}
+        onCancel={() => setIsSubSelectTreatmentOpen(false)}
+      />
+
+      {/* Submodal 4: Select Schedule */}
+      <SelectScheduleModal
+        open={isSubSelectScheduleOpen}
+        onOpenChange={setIsSubSelectScheduleOpen}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        selectedDuration={duration}
+        onDurationChange={(dur) => setDuration(dur)}
+        onDateClick={() => {
+          setIsDatePickerOpen(true);
+        }}
+        onTimeClick={() => {
+          setIsTimePickerOpen(true);
+        }}
+        onSave={() => setIsSubSelectScheduleOpen(false)}
+        onCancel={() => setIsSubSelectScheduleOpen(false)}
       />
 
       <OverpaymentConfirmDialog
