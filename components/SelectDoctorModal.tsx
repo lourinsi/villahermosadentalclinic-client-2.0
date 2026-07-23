@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import AddStaffModal from "./AddStaffModal";
 import { dentalStaffRoleOptions, type StaffRecordForModal } from "./sharedAddStaffLogic";
+import type { DoctorSelectionDraft } from "./universalSelectModalDrafts";
 
 const addDoctorInitialStaff: StaffRecordForModal = {
   role: "dentist",
@@ -67,6 +68,9 @@ type SelectDoctorModalProps = {
   isLoading?: boolean;
   isSaving?: boolean;
   selectedValue?: string;
+  /** Preferred scalable API: one selected-doctor draft emitted after selection. */
+  draft?: DoctorSelectionDraft<DoctorSelectItem>;
+  onSaveDraft?: (draft: DoctorSelectionDraft<DoctorSelectItem>) => void | Promise<void>;
   showAddDoctorButton?: boolean;
   addDoctorDisabled?: boolean;
   onDoctorAdded?: (staff?: unknown) => void | Promise<void>;
@@ -91,6 +95,8 @@ export function SelectDoctorModal({
   isLoading = false,
   isSaving = false,
   selectedValue,
+  draft,
+  onSaveDraft,
   showAddDoctorButton = true,
   addDoctorDisabled = false,
   onDoctorAdded,
@@ -99,6 +105,16 @@ export function SelectDoctorModal({
   const [isAddDoctorOpen, setIsAddDoctorOpen] = useState(false);
   const isDialogMode = typeof open === "boolean" && typeof onOpenChange === "function";
   const addDoctorIsDisabled = isSaving || addDoctorDisabled;
+  const resolvedSelectedValue = draft?.doctor ? (draft.doctor.value || draft.doctor.name) : selectedValue;
+
+  const handleSelect = async (doctor: DoctorSelectItem) => {
+    if (onSaveDraft) {
+      await onSaveDraft({ doctor });
+      onOpenChange?.(false);
+      return;
+    }
+    await onSelect?.(doctor);
+  };
 
   const handleDoctorAdded = (staff?: unknown) => {
     void onDoctorAdded?.(staff);
@@ -211,14 +227,14 @@ export function SelectDoctorModal({
                     const key = String(doctor.id ?? doctor.name);
                     const label = doctor.label || doctor.name;
                     const value = doctor.value || doctor.name;
-                    const isSelected = selectedValue !== undefined && selectedValue === value;
+                    const isSelected = resolvedSelectedValue !== undefined && resolvedSelectedValue === value;
                     const avatarSrc = doctor.avatar || resolveImageSource(doctor.profilePicture || doctor.profilePictureUrl);
 
                     return (
                       <button
                         key={key}
                         type="button"
-                        onClick={() => void onSelect?.(doctor)}
+                        onClick={() => void handleSelect(doctor)}
                         disabled={isSaving}
                         className={`group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-70 ${
                           isSelected

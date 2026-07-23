@@ -3509,7 +3509,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onToothNumbersChange={(newVal) => setToothNumberEntries(getBookingToothNumberEntries(newVal))}
         onDurationChange={(dur) => setDuration(dur)}
         onTreatmentNotesChange={(notes) => setTreatmentNotes(notes)}
-
         getPersonInitials={(name?: string) => {
           const initials = String(name || "")
             .split(/\s+/)
@@ -3578,18 +3577,85 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           value: opt.name || opt.value || String(opt),
           price: opt.price || APPOINTMENT_PRICES[opt.name || opt.label] || 0,
         }))}
-        selectedTreatmentId={
-          (serviceOptions || []).findIndex((t: any) => (t.name || t.label || t) === appointmentType) + 1 || 1
-        }
-        currentTreatmentLabel={appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType}
-        customTreatmentName={customAppointmentTypeName}
-        selectedPrice={customPrice}
-        onTreatmentSelect={(treatment: any) => {
-          setAppointmentType(treatment.label);
-          if (treatment.price) setCustomPrice(String(treatment.price));
+        draft={{
+          sections: [
+            {
+              selectedTreatmentId:
+                (serviceOptions || []).findIndex(
+                  (t: any) => (t.name || t.label || t) === appointmentType
+                ) + 1 || null,
+              currentTreatmentLabel: appointmentType,
+              customTreatmentName: customAppointmentTypeName,
+              selectedPrice: customPrice,
+            },
+            ...additionalTreatmentSections.map((section) => ({
+              selectedTreatmentId:
+                (serviceOptions || []).findIndex(
+                  (t: any) => (t.name || t.label || t) === section.appointmentType
+                ) + 1 || null,
+              currentTreatmentLabel: section.appointmentType || "",
+              customTreatmentName: section.customAppointmentTypeName || "",
+              selectedPrice: String(
+                (serviceOptions || []).find(
+                  (t: any) => (t.name || t.label || t) === section.appointmentType
+                )?.price || APPOINTMENT_PRICES[section.appointmentType || ""] || 0
+              ),
+            })),
+          ],
+          toothNumberEntries,
+          manualPrice: customPrice,
+          discount,
+          treatmentNotes,
+        }}
+        onSaveDraft={(draft) => {
+          const treatmentList = (serviceOptions || []).map((opt: any, idx: number) => ({
+            id: idx + 1,
+            label: opt.name || opt.label || String(opt),
+            value: opt.name || opt.value || String(opt),
+            price: opt.price || APPOINTMENT_PRICES[opt.name || opt.label] || 0,
+          }));
+          const sections = draft.sections;
+          const [primarySection, ...additionalSections] = sections;
+          if (!primarySection) {
+            setAppointmentType("");
+            setCustomAppointmentTypeName("");
+            setAdditionalTreatmentSections([]);
+          } else {
+            const primaryTreatment = treatmentList.find(
+              (t: any) => t.id === primarySection.selectedTreatmentId
+            );
+
+            if (primaryTreatment) {
+              setAppointmentType(primaryTreatment.label);
+              setCustomAppointmentTypeName(
+                primaryTreatment.label === "Other" ? primarySection.customTreatmentName || "" : ""
+              );
+            }
+
+            setAdditionalTreatmentSections(
+              additionalSections.flatMap((section) => {
+                const treatment = treatmentList.find(
+                  (t: any) => t.id === section.selectedTreatmentId
+                );
+                if (!treatment) return [];
+                return [{
+                  appointmentType: treatment.label,
+                  customAppointmentTypeName:
+                    treatment.label === "Other" ? section.customTreatmentName || "" : "",
+                  treatmentNotes: "",
+                  toothNumberEntries: [""],
+                }];
+              })
+            );
+          }
+          setCustomPrice(draft.manualPrice);
+          setDiscount(draft.discount);
+          setTreatmentNotes(draft.treatmentNotes);
+          setToothNumberEntries(draft.toothNumberEntries);
           setIsSubSelectTreatmentOpen(false);
         }}
-        onSave={() => setIsSubSelectTreatmentOpen(false)}
+        allowAddTreatment
+        allowRemoveTreatment
         onCancel={() => setIsSubSelectTreatmentOpen(false)}
       />
 

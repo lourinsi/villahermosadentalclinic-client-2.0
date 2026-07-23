@@ -49,7 +49,10 @@ import {
   normalizeBookingHistoryStatus,
   parseLocalDateOnly,
   findNextAvailableRepeatSlot,
+  appointmentToTreatmentDraft,
+  treatmentDraftToPayload,
 } from "./sharedBookingLogic";
+import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
@@ -2709,6 +2712,57 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
   };
 
+  const handleSaveTreatmentDraft = async (draft: TreatmentSelectionDraft) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const appointmentDuration = normalizeBookingDuration(displayedSnapshot?.duration || 30);
+    const payload = treatmentDraftToPayload(draft, activeTreatmentOptions, appointmentDuration);
+    const firstUpdatedTreatment = (payload.treatments as any[])?.[0] || {
+      type: payload.type,
+      customType: payload.customType,
+      duration: appointmentDuration,
+      price: payload.price,
+    };
+
+    setIsSavingTreatmentChange(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), payload as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        type: updated?.type ?? firstUpdatedTreatment.type,
+        customType: firstUpdatedTreatment.customType ?? updated?.customType,
+        duration: updated?.duration ?? appointmentDuration,
+        price: updated?.price ?? firstUpdatedTreatment.price,
+        discount: updated?.discount ?? payload.discount,
+        treatmentNotes: updated?.treatmentNotes ?? payload.treatmentNotes,
+        toothNumbers: updated?.toothNumbers ?? payload.toothNumbers ?? current.toothNumbers,
+        treatments: updated?.treatments ?? current.treatments ?? payload.treatments,
+      }));
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Treatment updated");
+      closeChangeTreatmentModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update treatment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update treatment");
+    } finally {
+      setIsSavingTreatmentChange(false);
+    }
+  };
+
   const goToPatient = () => {
     if (!canGoToPatient) {
       toast.error("No patient profile available");
@@ -4010,16 +4064,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         title="Change Treatment"
         description={patientName ? `${typeName} for ${patientName}` : typeName}
         treatments={activeTreatmentOptions}
-        treatmentSections={selectedTreatmentSections ?? undefined}
-        onTreatmentSectionsChange={setSelectedTreatmentSections}
-        toothNumberEntries={treatmentToothNumberEntries}
-        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
+        draft={appointmentToTreatmentDraft(displayedSnapshot, activeTreatmentOptions)}
+        onSaveDraft={handleSaveTreatmentDraft}
         allowAddTreatment={true}
         allowRemoveTreatment={true}
-        onSave={handleSaveTreatmentChange}
         onCancel={() => closeChangeTreatmentModal()}
         isSaving={isSavingTreatmentChange}
-        canSave={canSaveTreatmentChange}
         saveLabel="Save Treatment"
       />
 

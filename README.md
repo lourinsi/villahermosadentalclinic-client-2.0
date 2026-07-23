@@ -269,6 +269,17 @@ The universal pickers are used consistently in every view that reads or writes a
 - **`ConfirmAppointmentModal.tsx`** — every detail cell (Patient, Doctor, Service, Schedule, Tooth No./s) is clickable and opens the corresponding universal modal. The pencil icon in each row communicates editability.
 - **`ImprovedBookingModal.tsx`** and **`BookingModal.tsx`** — the confirmation step delegates all field editing to the same universal modals via `onPatientClick`, `onDoctorClick`, `onServiceClick`, `onScheduleClick`, and `onToothNumbersChange` callbacks.
 
+### Selector draft contracts
+
+Universal selectors support a preferred **draft-in / draft-out** contract. New code should pass one complete draft object and receive one completed draft on Save instead of passing a prop and callback for every field. The contracts live in `components/universalSelectModalDrafts.ts`:
+
+- `TreatmentSelectionDraft`
+- `PatientSelectionDraft`
+- `DoctorSelectionDraft`
+- `ScheduleSelectionDraft`
+
+For example, use `draft` with `onSaveDraft` on `SelectTreatmentModal`. The modal owns temporary UI state—including future fields such as notes or discounts—and the caller converts the saved draft to its page or API payload at one boundary. Legacy field-level props remain supported for existing views, but new work must prefer the draft contract.
+
 ### ToothNumbersEditor behaviour
 
 `ToothNumbersEditor` renders an array of numbered boxes for each saved tooth number plus one empty input box for new entries. The component:

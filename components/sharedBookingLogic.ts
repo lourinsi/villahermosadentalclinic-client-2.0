@@ -15,6 +15,8 @@ import {
   getDefaultPaymentStatusColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
+import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import type { TreatmentSelectionDraft, TreatmentSelectionSection } from "./universalSelectModalDrafts";
 
 export {
   CART_APPOINTMENT_STATUS,
@@ -1385,6 +1387,104 @@ export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toot
 export function buildBookingTreatmentsPayload(treatments?: unknown) {
   const normalized = normalizeBookingTreatments(treatments);
   return normalized.length > 0 ? { treatments: normalized } : {};
+}
+
+export type TreatmentOptionLike = {
+  id: number;
+  label?: string;
+  value?: string;
+  price?: number;
+};
+
+export function appointmentToTreatmentDraft(
+  appointment: any,
+  treatmentOptions: TreatmentOptionLike[] = []
+): TreatmentSelectionDraft {
+  const toothNumberEntries = getBookingToothNumberEntries(getBookingToothNumbersValue(appointment));
+  const treatmentNotes = getBookingTreatmentNotesValue(appointment) || "";
+  const discount = String(Math.max(0, Number(appointment?.discount) || 0));
+  const rawTreatments = getBookingTreatmentsValue(appointment);
+
+  const sections: TreatmentSelectionSection[] = rawTreatments.length > 0
+    ? rawTreatments.map((t: any) => {
+        const typeNum = Number(t.type);
+        const sectionId = Number.isInteger(typeNum) ? typeNum : OTHER_APPOINTMENT_TYPE_INDEX;
+        const matched = treatmentOptions.find((opt) => opt.id === sectionId);
+        const customName = sectionId === OTHER_APPOINTMENT_TYPE_INDEX
+          ? String(t.customType || appointment?.customType || "").trim()
+          : "";
+        const priceVal = String(Number(t.price ?? matched?.price ?? appointment?.price ?? 0));
+        return {
+          selectedTreatmentId: sectionId,
+          currentTreatmentLabel: matched?.label || matched?.value || "",
+          customTreatmentName: customName,
+          selectedPrice: priceVal,
+        };
+      })
+    : (() => {
+        const typeNum = Number(appointment?.type);
+        const sectionId = Number.isInteger(typeNum) ? typeNum : OTHER_APPOINTMENT_TYPE_INDEX;
+        const matched = treatmentOptions.find((opt) => opt.id === sectionId);
+        const customName = sectionId === OTHER_APPOINTMENT_TYPE_INDEX
+          ? String(appointment?.customType || "").trim()
+          : "";
+        const priceVal = String(Number(appointment?.price ?? matched?.price ?? 0));
+        return [{
+          selectedTreatmentId: sectionId,
+          currentTreatmentLabel: matched?.label || matched?.value || "",
+          customTreatmentName: customName,
+          selectedPrice: priceVal,
+        }];
+      })();
+
+  const manualPrice = sections[0]?.selectedPrice !== undefined ? String(sections[0].selectedPrice) : String(appointment?.price ?? 0);
+
+  return {
+    sections,
+    toothNumberEntries,
+    manualPrice,
+    discount,
+    treatmentNotes,
+  };
+}
+
+export function treatmentDraftToPayload(
+  draft: TreatmentSelectionDraft,
+  treatmentOptions: TreatmentOptionLike[] = [],
+  duration: number = 30
+) {
+  const sections = draft.sections && draft.sections.length > 0 ? draft.sections : [];
+  const updatedTreatments = sections.map((section) => {
+    const selectedOption = treatmentOptions.find((opt) => opt.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
+    const isCustom = selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
+    const priceVal = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+    return {
+      type: selectedOption.id,
+      customType: isCustom ? String(section.customTreatmentName || "").trim() || undefined : undefined,
+      duration: duration,
+      price: Math.max(0, priceVal),
+    };
+  });
+
+  const firstTreatment = updatedTreatments[0] || {
+    type: OTHER_APPOINTMENT_TYPE_INDEX,
+    customType: undefined,
+    duration,
+    price: Math.max(0, Number(draft.manualPrice) || 0),
+  };
+
+  const toothNumbers = normalizeBookingToothNumbers(draft.toothNumberEntries);
+
+  return {
+    type: firstTreatment.type,
+    customType: firstTreatment.customType,
+    duration,
+    price: firstTreatment.price,
+    discount: Math.max(0, Number(draft.discount) || 0),
+    treatmentNotes: draft.treatmentNotes,
+    ...buildBookingTreatmentsPayload(updatedTreatments),
+    toothNumbers,
+  };
 }
 
 // Compute catalog price for booking treatments. If a priceMap is provided (e.g., from service catalog or APPOINTMENT_PRICES),

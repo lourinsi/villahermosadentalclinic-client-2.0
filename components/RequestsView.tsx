@@ -109,7 +109,10 @@ import {
   buildBookingTreatmentsPayload,
   normalizeBookingDuration,
   normalizeBookingToothNumbers,
+  appointmentToTreatmentDraft,
+  treatmentDraftToPayload,
 } from "./sharedBookingLogic";
+import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -2635,73 +2638,30 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       <SelectTreatmentModal
         open={Boolean(treatmentCellAppointment)}
         onOpenChange={(open) => {
-          if (!open) {
-            setTreatmentCellAppointment(null);
-            setTreatmentSections(null);
-            setTreatmentToothNumberEntries([""]);
-          }
+          if (!open) setTreatmentCellAppointment(null);
         }}
         title="Update Treatment"
         description={treatmentCellAppointment ? getAppointmentTypeName(treatmentCellAppointment.type, treatmentCellAppointment.customType) + " for " + getCurrentPatientName(treatmentCellAppointment) : ""}
         treatments={treatmentOptions.filter((option) => option.isActive !== false)}
-        treatmentSections={treatmentSections ?? undefined}
-        onTreatmentSectionsChange={setTreatmentSections}
-        toothNumberEntries={treatmentToothNumberEntries}
-        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
-        allowAddTreatment={true}
-        allowRemoveTreatment={true}
-        onSave={async () => {
+        draft={treatmentCellAppointment ? appointmentToTreatmentDraft(treatmentCellAppointment, treatmentOptions.filter((option) => option.isActive !== false)) : undefined}
+        onSaveDraft={async (draft) => {
           if (!treatmentCellAppointment) return;
           const activeTreatmentOptions = treatmentOptions.filter((o) => o.isActive !== false);
-          const sections = treatmentSections && treatmentSections.length > 0
-            ? treatmentSections
-            : [{ selectedTreatmentId, customTreatmentName, selectedPrice: treatmentPrice }];
-
-          const invalidSection = sections.find((section) => {
-            const selectedId = section.selectedTreatmentId;
-            if (selectedId === undefined || selectedId === null) return true;
-            const option = activeTreatmentOptions.find((t) => t.id === selectedId);
-            if (!option) return true;
-            if (option.id === OTHER_APPOINTMENT_TYPE_INDEX && !String(section.customTreatmentName || "").trim()) return true;
-            return false;
-          });
-          if (invalidSection) { toast.error("Please complete all treatment sections before saving"); return; }
-
-          const appointmentDuration = normalizeBookingDuration((treatmentCellAppointment as any).duration || 30);
-          const updatedTreatments = sections.map((section) => {
-            const option = activeTreatmentOptions.find((o) => o.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
-            const isCustom = option.id === OTHER_APPOINTMENT_TYPE_INDEX;
-            return {
-              type: option.id,
-              customType: isCustom ? String(section.customTreatmentName || "").trim() : undefined,
-              duration: appointmentDuration,
-              price: Math.max(0, Number(section.selectedPrice ?? option.price ?? 0)),
-            };
-          });
-          const firstTreatment = updatedTreatments[0];
-          const appointmentToothNumbers = normalizeBookingToothNumbers(treatmentToothNumberEntries);
-          const payload: Partial<Appointment> = {
-            type: firstTreatment.type,
-            customType: firstTreatment.customType,
-            duration: appointmentDuration,
-            price: firstTreatment.price,
-            ...buildBookingTreatmentsPayload(updatedTreatments),
-            toothNumbers: appointmentToothNumbers,
-          };
+          const duration = normalizeBookingDuration((treatmentCellAppointment as any).duration || 30);
+          const payload = treatmentDraftToPayload(draft, activeTreatmentOptions, duration);
 
           setIsSavingTreatmentChange(true);
           try {
-            await saveCellAppointment(treatmentCellAppointment, payload, "Treatment updated");
+            await saveCellAppointment(treatmentCellAppointment, payload as Partial<Appointment>, "Treatment updated");
             setTreatmentCellAppointment(null);
-            setTreatmentSections(null);
-            setTreatmentToothNumberEntries([""]);
           } finally {
             setIsSavingTreatmentChange(false);
           }
         }}
-        onCancel={() => { setTreatmentCellAppointment(null); setTreatmentSections(null); setTreatmentToothNumberEntries([""]); }}
+        allowAddTreatment={true}
+        allowRemoveTreatment={true}
+        onCancel={() => setTreatmentCellAppointment(null)}
         isSaving={isSavingTreatmentChange}
-        canSave={Boolean(treatmentSections ? treatmentSections.length > 0 : selectedTreatmentId !== null)}
         saveLabel="Save Treatment"
       />
       <SelectDoctorModal

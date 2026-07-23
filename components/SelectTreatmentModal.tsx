@@ -1,8 +1,7 @@
 "use client";
 
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ClipboardList, Loader2, Plus, Tag, X } from "lucide-react";
-import { getBookingTreatmentsCatalogPrice } from "./sharedBookingLogic";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +14,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import type { TreatmentSelectionDraft, TreatmentSelectionSection } from "./universalSelectModalDrafts";
 
 type TreatmentOption = {
   id: number;
@@ -25,12 +26,7 @@ type TreatmentOption = {
   price?: number;
 };
 
-export type SelectTreatmentModalSection = {
-  selectedTreatmentId?: number | null;
-  currentTreatmentLabel?: string;
-  customTreatmentName?: string;
-  selectedPrice?: string | number;
-};
+export type SelectTreatmentModalSection = TreatmentSelectionSection;
 
 type SelectTreatmentModalProps = {
   children?: ReactNode;
@@ -43,10 +39,17 @@ type SelectTreatmentModalProps = {
   currentTreatmentLabel?: string;
   customTreatmentName?: string;
   selectedPrice?: string | number;
+  discount?: string | number;
+  treatmentNotes?: string;
   toothNumberEntries?: string[];
   treatmentSections?: SelectTreatmentModalSection[];
+  /** Preferred scalable API: one complete treatment draft, emitted once on Save. */
+  draft?: TreatmentSelectionDraft;
+  onSaveDraft?: (draft: TreatmentSelectionDraft) => void | Promise<void>;
   onCustomTreatmentNameChange?: (value: string, sectionIndex?: number) => void;
   onSelectedPriceChange?: (value: string, sectionIndex?: number) => void;
+  onDiscountChange?: (value: string) => void;
+  onTreatmentNotesChange?: (value: string) => void;
   onToothNumberEntriesChange?: (entries: string[], sectionIndex?: number) => void;
   onTreatmentSelect?: (treatment: TreatmentOption, sectionIndex?: number) => void;
   onTreatmentSectionsChange?: (sections: SelectTreatmentModalSection[]) => void;
@@ -85,10 +88,16 @@ export function SelectTreatmentModal({
   currentTreatmentLabel,
   customTreatmentName = "",
   selectedPrice,
+  discount = "0",
+  treatmentNotes = "",
   toothNumberEntries,
   treatmentSections,
+  draft,
+  onSaveDraft,
   onCustomTreatmentNameChange,
   onSelectedPriceChange,
+  onDiscountChange,
+  onTreatmentNotesChange,
   onToothNumberEntriesChange,
   onTreatmentSelect,
   onTreatmentSectionsChange,
@@ -101,7 +110,32 @@ export function SelectTreatmentModal({
   canSave = true,
   saveLabel = "Save Treatment",
 }: SelectTreatmentModalProps) {
-  const sections: SelectTreatmentModalSection[] =
+  const isDraftMode = Boolean(draft && onSaveDraft);
+  const [localDraft, setLocalDraft] = useState<TreatmentSelectionDraft>(() => draft || {
+    sections: [],
+    toothNumberEntries: [""],
+    manualPrice: String(selectedPrice ?? "0"),
+    discount: String(discount ?? "0"),
+    treatmentNotes: treatmentNotes || "",
+  });
+
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const justOpened = Boolean(open) && !wasOpenRef.current;
+    wasOpenRef.current = Boolean(open);
+    if (!justOpened || !draft) return;
+    setLocalDraft({
+      sections: draft.sections || [],
+      toothNumberEntries: draft.toothNumberEntries?.length ? draft.toothNumberEntries : [""],
+      manualPrice: String(draft.manualPrice ?? "0"),
+      discount: String(draft.discount ?? "0"),
+      treatmentNotes: draft.treatmentNotes || "",
+    });
+  }, [open, draft]);
+
+  const sections: SelectTreatmentModalSection[] = isDraftMode
+    ? localDraft.sections
+    :
     Array.isArray(treatmentSections) && treatmentSections.length > 0
       ? treatmentSections
       : [
@@ -115,6 +149,10 @@ export function SelectTreatmentModal({
   const isMultiSectionMode = Array.isArray(treatmentSections);
 
   const updateSections = (nextSections: SelectTreatmentModalSection[]) => {
+    if (isDraftMode) {
+      setLocalDraft((current) => ({ ...current, sections: nextSections }));
+      return;
+    }
     if (onTreatmentSectionsChange) {
       onTreatmentSectionsChange(nextSections);
       return;
@@ -133,7 +171,6 @@ export function SelectTreatmentModal({
   };
 
   const getSectionLabel = (section: SelectTreatmentModalSection, index: number) => {
-    if (section.currentTreatmentLabel && index === 0) return section.currentTreatmentLabel;
     return `Treatment ${index + 1}`;
   };
 
@@ -171,7 +208,18 @@ export function SelectTreatmentModal({
   };
 
   const handleSectionSelectedPriceChange = (sectionIndex: number, value: string) => {
+    if (isDraftMode) {
+      setLocalDraft((current) => ({
+        ...current,
+        manualPrice: value,
+        sections: current.sections.map((section, index) =>
+          index === sectionIndex ? { ...section, selectedPrice: value } : section
+        ),
+      }));
+      return;
+    }
     updateSectionValue(sectionIndex, { selectedPrice: value });
+    onSelectedPriceChange?.(value, sectionIndex);
   };
 
   const handleAddTreatment = () => {
@@ -201,7 +249,9 @@ export function SelectTreatmentModal({
     return true;
   };
 
-  const allSectionsValid = sections.every(isSectionValid);
+  const allAssignedSectionsValid = sections
+    .filter((section) => section.selectedTreatmentId !== null && section.selectedTreatmentId !== undefined)
+    .every(isSectionValid);
 
   if (open === undefined) {
     return (
@@ -222,10 +272,9 @@ export function SelectTreatmentModal({
   const isSectionCustomTreatment = (section: SelectTreatmentModalSection) =>
     getSectionTreatment(section)?.id === OTHER_APPOINTMENT_TYPE_INDEX;
 
-  const activeSection = sections[0];
+  const activeSection = sections[0] || { selectedPrice: isDraftMode ? localDraft.manualPrice : selectedPrice };
   const selectedTreatment = getSectionTreatment(activeSection);
-  const selectedPriceValue = getSectionPriceValue(activeSection);
-  const selectedPriceNumber = Number(selectedPriceValue) || 0;
+  const selectedPriceValue = isDraftMode ? localDraft.manualPrice : getSectionPriceValue(activeSection);
   const treatmentLabels = sections.map((section) => {
     const sectionTreatment = getSectionTreatment(section);
     const isCustom = sectionTreatment?.id === OTHER_APPOINTMENT_TYPE_INDEX;
@@ -234,17 +283,24 @@ export function SelectTreatmentModal({
     }
     return sectionTreatment?.label || "No treatment selected";
   });
-  const resolvedToothNumberEntries =
+  const resolvedToothNumberEntries = isDraftMode
+    ? (localDraft.toothNumberEntries.length > 0 ? localDraft.toothNumberEntries : [""])
+    :
     toothNumberEntries && toothNumberEntries.length > 0
       ? toothNumberEntries
       : [""];
   const filledToothNumbers = resolvedToothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
   const isCustomTreatment = isSectionCustomTreatment(activeSection);
-  const canEditToothNumbers = Boolean(onToothNumberEntriesChange || onTreatmentSectionsChange);
+  const canEditToothNumbers = isDraftMode || Boolean(onToothNumberEntriesChange || onTreatmentSectionsChange);
   const showToothNumberField = canEditToothNumbers;
 
   const updateToothNumberEntries = (nextEntries: string[]) => {
     const normalizedEntries = nextEntries.length > 0 ? nextEntries : [""];
+
+    if (isDraftMode) {
+      setLocalDraft((current) => ({ ...current, toothNumberEntries: normalizedEntries }));
+      return;
+    }
 
     if (onToothNumberEntriesChange) {
       onToothNumberEntriesChange(normalizedEntries);
@@ -279,13 +335,30 @@ export function SelectTreatmentModal({
 
   const resolvedCanSave =
     canSave &&
-    allSectionsValid &&
+    allAssignedSectionsValid &&
     !isSaving;
 
   const unassignedTreatmentCount = sections.filter((section) => !section.selectedTreatmentId).length;
   const submitButtonTitle = unassignedTreatmentCount > 0
     ? `${unassignedTreatmentCount} unassigned treatment${unassignedTreatmentCount === 1 ? "" : "s"}`
     : undefined;
+
+  const handleSave = () => {
+    const savedSections = sections.filter((section) => section.selectedTreatmentId !== null && section.selectedTreatmentId !== undefined);
+    if (isDraftMode) {
+      void onSaveDraft?.({
+        ...localDraft,
+        sections: savedSections,
+        manualPrice: selectedPriceValue,
+      });
+      return;
+    }
+    if (isMultiSectionMode && onTreatmentSectionsChange) {
+      onTreatmentSectionsChange(savedSections);
+    }
+    void onSave?.();
+  };
+  const hasTreatmentSidebar = isDraftMode || Boolean(onDiscountChange || onTreatmentNotesChange);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -505,8 +578,8 @@ export function SelectTreatmentModal({
 
 
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
-            <div className="border-b border-slate-100 p-4 sm:p-5 lg:border-b-0 lg:border-r">
+          <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl ${hasTreatmentSidebar ? "lg:grid lg:grid-cols-[0.95fr_1fr]" : ""}`}>
+            <div className={`p-4 sm:p-5 ${hasTreatmentSidebar ? "border-b border-slate-100 lg:border-b-0 lg:border-r" : ""}`}>
               <div className="flex items-center gap-2 text-sm font-black text-slate-800">
                 <ClipboardList className="h-4 w-4 text-blue-600" />
                 Treatment Summary
@@ -552,33 +625,72 @@ export function SelectTreatmentModal({
                         onSelectedPriceChange?.(event.target.value);
                       }
                     }}
-                    disabled={!(onSelectedPriceChange || onTreatmentSectionsChange) || isSaving}
+                    disabled={!(isDraftMode || onSelectedPriceChange || onTreatmentSectionsChange) || isSaving}
                     className="h-12 border-0 bg-transparent text-right text-3xl font-black text-blue-600 shadow-none focus-visible:ring-0"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="grid content-start gap-3 bg-slate-50/70 p-4 sm:grid-cols-2 sm:p-5">
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Catalog Price</p>
-                <p className="mt-2 flex items-center gap-2 text-lg font-black text-slate-950">
-                  <Tag className="h-4 w-4 text-emerald-600" />
-                  {formatTreatmentCurrency(
-                    getBookingTreatmentsCatalogPrice(
-                      sections.map((sec) => ({
-                        price: sec.selectedPrice === undefined || sec.selectedPrice === null ? getSectionTreatment(sec)?.price : Number(sec.selectedPrice),
-                        label: getSectionTreatment(sec)?.label,
-                      }))
-                    )
-                  )}
-                </p>
+            {hasTreatmentSidebar ? (
+              <div className="space-y-3 bg-slate-50/70 p-4 sm:p-5">
+                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-2xl">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                      <Tag className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor="visit-treatment-discount" className="text-xs font-semibold text-slate-500">Discount</Label>
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <span className="text-sm font-black text-slate-950">₱</span>
+                        <Input
+                          id="visit-treatment-discount"
+                          type="number"
+                          min={0}
+                          value={isDraftMode ? localDraft.discount : discount}
+                          onChange={(event) => {
+                            if (isDraftMode) {
+                              setLocalDraft((current) => ({ ...current, discount: event.target.value }));
+                            } else {
+                              onDiscountChange?.(event.target.value);
+                            }
+                          }}
+                          disabled={!(isDraftMode || onDiscountChange) || isSaving}
+                          className="h-7 flex-1 border-0 bg-transparent px-0 text-lg font-black text-slate-950 shadow-none focus-visible:ring-0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="visit-treatment-notes" className="text-sm font-black text-slate-800">
+                    Treatment Notes <span className="font-semibold text-slate-500">(Optional)</span>
+                  </Label>
+                  <div className="relative mt-2">
+                    <Textarea
+                      id="visit-treatment-notes"
+                      value={isDraftMode ? localDraft.treatmentNotes : treatmentNotes}
+                      onChange={(event) => {
+                        if (isDraftMode) {
+                          setLocalDraft((current) => ({ ...current, treatmentNotes: event.target.value }));
+                        } else {
+                          onTreatmentNotesChange?.(event.target.value);
+                        }
+                      }}
+                      disabled={!(isDraftMode || onTreatmentNotesChange) || isSaving}
+                      maxLength={250}
+                      placeholder="Add any notes or special instructions..."
+                      className="min-h-[5.75rem] resize-none rounded-xl border-slate-200 bg-white px-3 py-3 pr-14 text-sm font-semibold text-slate-700 shadow-sm focus-visible:ring-2 focus-visible:ring-blue-200 sm:rounded-2xl"
+                    />
+                    <span className="pointer-events-none absolute bottom-3 right-4 text-xs font-semibold text-slate-500">
+                      {(isDraftMode ? localDraft.treatmentNotes : treatmentNotes).length} / 250
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 sm:col-span-2">
-                <p className="text-xs font-black uppercase tracking-widest text-blue-500">Estimated Cost</p>
-                <p className="mt-2 text-2xl font-black text-blue-700">{formatTreatmentCurrency(selectedPriceNumber)}</p>
-              </div>
-            </div>
+            ) : null}
+
           </div>
         </div>
 
@@ -595,7 +707,7 @@ export function SelectTreatmentModal({
           <Button
             type="button"
             className="h-12 flex-1 rounded-2xl bg-blue-600 text-sm font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
-            onClick={() => void onSave?.()}
+            onClick={handleSave}
             disabled={!resolvedCanSave}
             title={submitButtonTitle}
           >

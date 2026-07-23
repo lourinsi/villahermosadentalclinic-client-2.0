@@ -143,9 +143,12 @@ import {
   normalizeBookingDuration,
   normalizeBookingPaymentMethod,
   normalizeBookingToothNumbers,
+  appointmentToTreatmentDraft,
+  treatmentDraftToPayload,
   NO_PAYMENT_METHOD_LABEL,
   type BookingInitialStep,
 } from "./sharedBookingLogic";
+import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 import { SelectDoctorModal } from "./SelectDoctorModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
@@ -2788,6 +2791,64 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             price: updated.price ?? Math.max(0, nextPrice),
             toothNumbers: (updated as any).toothNumbers ?? nextToothNumbers,
             treatments: (updated as any).treatments ?? nextTreatments,
+          } as Appointment)
+          : apt;
+
+      setPatientAppointments((current) => current.map(patchAppointment));
+      setMockAppointmentHistoryLocal((current) => current.map(patchAppointment));
+      refreshAppointments();
+      refreshPatients();
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId },
+          })
+        );
+      } catch { }
+
+      toast.success("Treatment updated");
+      closeUpdateTreatmentModal(true);
+    } catch (error) {
+      console.error("[PatientProfile] Failed to update treatment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update treatment");
+    } finally {
+      setIsUpdatingVisitTreatment(false);
+    }
+  };
+
+  const handleSaveVisitTreatmentDraft = async (draft: TreatmentSelectionDraft) => {
+    const appointmentId = String(updateTreatmentAppointment?.id || "");
+    if (!appointmentId) {
+      toast.error("Could not find appointment to update");
+      return;
+    }
+
+    const duration = normalizeBookingDuration((updateTreatmentAppointment as any).duration || 30);
+    const payload = treatmentDraftToPayload(draft, activeTreatmentOptions, duration);
+    const firstUpdatedTreatment = (payload.treatments as any[])?.[0] || {
+      type: payload.type,
+      customType: payload.customType,
+      duration,
+      price: payload.price,
+    };
+
+    setIsUpdatingVisitTreatment(true);
+    try {
+      const updated = await updateAppointment(appointmentId, payload as Partial<Appointment>);
+
+      const patchAppointment = (apt: Appointment) =>
+        String(apt.id) === appointmentId
+          ? ({
+            ...apt,
+            ...updated,
+            type: updated.type ?? firstUpdatedTreatment.type,
+            customType: firstUpdatedTreatment.customType ?? updated.customType,
+            duration: updated.duration ?? duration,
+            price: updated.price ?? Math.max(0, Number(firstUpdatedTreatment.price) || 0),
+            discount: (updated as any).discount ?? payload.discount,
+            treatmentNotes: (updated as any).treatmentNotes ?? payload.treatmentNotes,
+            toothNumbers: (updated as any).toothNumbers ?? payload.toothNumbers,
+            treatments: (updated as any).treatments ?? payload.treatments,
           } as Appointment)
           : apt;
 
@@ -6427,62 +6488,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           title="Update Treatment"
           description={updateTreatmentAppointment ? `${updateTreatmentCurrentLabel || "Visit"} for ${patientDisplayName}` : patientDisplayName}
           treatments={activeTreatmentOptions}
-          selectedTreatmentId={selectedVisitTreatmentId}
-          currentTreatmentLabel={updateTreatmentCurrentLabel}
-          customTreatmentName={customVisitTreatmentName}
-          selectedPrice={visitTreatmentPrice}
-          toothNumberEntries={visitTreatmentToothNumberEntries}
-          treatmentSections={selectedVisitTreatmentSections ?? undefined}
-          onCustomTreatmentNameChange={(nextValue, sectionIndex) => {
-            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
-              ? selectedVisitTreatmentSections
-              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
-            ).map((section, index) => index === (sectionIndex ?? 0) ? { ...section, customTreatmentName: nextValue } : section);
-            setSelectedVisitTreatmentSections(nextSections);
-            const firstSection = nextSections[0];
-            setCustomVisitTreatmentName(firstSection.customTreatmentName || "");
-          }}
-          onSelectedPriceChange={(nextValue, sectionIndex) => {
-            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
-              ? selectedVisitTreatmentSections
-              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
-            ).map((section, index) => index === (sectionIndex ?? 0) ? { ...section, selectedPrice: nextValue } : section);
-            setSelectedVisitTreatmentSections(nextSections);
-            const firstSection = nextSections[0];
-            setVisitTreatmentPrice(String(firstSection.selectedPrice ?? ""));
-          }}
-          onToothNumberEntriesChange={setVisitTreatmentToothNumberEntries}
-          onTreatmentSectionsChange={setSelectedVisitTreatmentSections}
-          onTreatmentSelect={(treatment, sectionIndex) => {
-            const nextSections = (selectedVisitTreatmentSections && selectedVisitTreatmentSections.length > 0
-              ? selectedVisitTreatmentSections
-              : [{ selectedTreatmentId: selectedVisitTreatmentId, currentTreatmentLabel: updateTreatmentCurrentLabel, customTreatmentName: customVisitTreatmentName, selectedPrice: visitTreatmentPrice }]
-            ).map((section, index) => index === (sectionIndex ?? 0)
-              ? {
-                  ...section,
-                  selectedTreatmentId: treatment.id,
-                  selectedPrice: String(Math.max(0, Number(treatment.price || section.selectedPrice || 0))),
-                  customTreatmentName: treatment.id === OTHER_APPOINTMENT_TYPE_INDEX
-                    ? String(section.customTreatmentName || updateTreatmentCurrentLabel || "").trim()
-                    : "",
-                }
-              : section);
-            setSelectedVisitTreatmentSections(nextSections);
-            const firstSection = nextSections[0];
-            setSelectedVisitTreatmentId(firstSection.selectedTreatmentId ?? null);
-            setVisitTreatmentPrice(String(firstSection.selectedPrice ?? ""));
-            if (treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX) {
-              setCustomVisitTreatmentName("");
-            } else if (!customVisitTreatmentName.trim()) {
-              setCustomVisitTreatmentName(updateTreatmentCurrentLabel);
-            }
-          }}
+          draft={appointmentToTreatmentDraft(updateTreatmentAppointment, activeTreatmentOptions)}
+          onSaveDraft={handleSaveVisitTreatmentDraft}
           allowAddTreatment={true}
           allowRemoveTreatment={true}
-          onSave={handleSaveVisitTreatment}
           onCancel={() => closeUpdateTreatmentModal()}
           isSaving={isUpdatingVisitTreatment}
-          canSave={canSaveVisitTreatment}
         />
         <AlertDialog
           open={Boolean(similarVisitTreatmentPrompt)}
