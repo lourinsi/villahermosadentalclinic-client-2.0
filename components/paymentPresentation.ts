@@ -11,9 +11,9 @@ export type PaymentMethodOption = {
 
 export const PAYMENT_METHOD_OPTIONS: readonly PaymentMethodOption[] = [
   { value: "cash", label: "Cash" },
-  { value: "bank_transfer", label: "Bank Transfer" },
   { value: "credit_card", label: "Card", shortLabel: "Card" },
   { value: "gcash", label: "GCash" },
+  { value: "bank_transfer", label: "Bank Transfer" },
   { value: "check", label: "Check" },
   { value: "ach", label: "ACH Transfer" },
 ] as const;

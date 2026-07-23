@@ -13,7 +13,7 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { buildModalMemoryKey, readModalMemory, usePersistentModalMemory } from "@/hooks/usePersistentModalMemory";
 import { toast } from "sonner";
-import { Banknote, Calendar as CalendarIcon, Check, CheckCircle, CreditCard, Edit, History, Loader2, X } from "lucide-react";
+import { Banknote, Calendar as CalendarIcon, Check, CheckCircle, ChevronDown, ChevronUp, CreditCard, Edit, History, Loader2, X } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { formatWordyDate } from "@/lib/utils";
@@ -172,6 +172,7 @@ export function BookingPaymentPage({
 }: BookingPaymentPageProps) {
   const internalPaymentDateInputRef = useRef<HTMLInputElement | null>(null);
   const effectivePaymentDateInputRef = paymentDateInputRef ?? internalPaymentDateInputRef;
+  const [showMorePaymentMethods, setShowMorePaymentMethods] = useState(false);
   const paymentMethods = useMemo(() => {
     const baseOptions = methodOptions?.length ? methodOptions : DEFAULT_PAYMENT_METHOD_OPTIONS;
     const normalizedCurrentMethod = normalizePaymentMethod(paymentMethod);
@@ -189,6 +190,19 @@ export function BookingPaymentPage({
       },
     ];
   }, [methodOptions, paymentMethod]);
+
+  const visiblePaymentMethods = useMemo(() => {
+    if (showMorePaymentMethods) return paymentMethods;
+    const normalizedCurrent = normalizePaymentMethod(paymentMethod);
+    const isCurrentInTop3 = paymentMethods.slice(0, 3).some((pm) => normalizePaymentMethod(pm.id) === normalizedCurrent);
+    if (!isCurrentInTop3 && normalizedCurrent) {
+      const selectedOption = paymentMethods.find((pm) => normalizePaymentMethod(pm.id) === normalizedCurrent);
+      if (selectedOption) {
+        return [...paymentMethods.slice(0, 3), selectedOption];
+      }
+    }
+    return paymentMethods.slice(0, 3);
+  }, [paymentMethods, showMorePaymentMethods, paymentMethod]);
   const openNativePaymentDatePicker = useCallback(() => {
     if (paymentDateDisabled) return;
 
@@ -313,7 +327,7 @@ export function BookingPaymentPage({
         <div className="space-y-4 pt-6">
           <p className="text-base font-semibold text-gray-900">Payment Method</p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3 sm:gap-4">
-            {paymentMethods.map((pm) => {
+            {visiblePaymentMethods.map((pm) => {
               const isSelected = normalizePaymentMethod(paymentMethod) === normalizePaymentMethod(pm.id);
               return <button
                 key={pm.id}
@@ -338,6 +352,28 @@ export function BookingPaymentPage({
               </button>;
             })}
           </div>
+          {paymentMethods.length > 3 && (
+            <div className="pt-1">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowMorePaymentMethods((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+              >
+                {showMorePaymentMethods ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    Show less options
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    See more payment options ({paymentMethods.length - 3} more)
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
 
         {(transactionIdField || notesField) && (
