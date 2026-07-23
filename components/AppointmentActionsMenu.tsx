@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Eye, History, Stethoscope, Calendar as CalendarIcon, RotateCcw, Pencil, Plus, User, Loader2 } from "lucide-react";
+import { Eye, History, Stethoscope, Calendar as CalendarIcon, RotateCcw, Pencil, Plus, User, Loader2, Check, X, DollarSign } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -272,51 +272,177 @@ export function createVisitHistoryActions(handlers: {
 
 /**
  * Helper function to create requests view overflow menu actions
- * Used in RequestsView for secondary appointment actions
+ * Used in RequestsView for appointment actions
  */
-export function createRequestsOverflowActions(handlers: {
-  onChangeTreatment?: () => void;
-  onChangeDoctor?: () => void;
-  onReschedule?: () => void;
-  onViewDetails?: () => void;
-}, state: {
-  canChangeTreatment?: boolean;
-  canChangeDoctor?: boolean;
-  canReschedule?: boolean;
-  isDoctorUnassigned?: boolean;
-} = {}): AppointmentActionConfig[] {
+export function createRequestsOverflowActions(
+  handlers: {
+    onViewDetails?: () => void;
+    onOpen?: () => void;
+    onViewHistory?: () => void;
+    onApprove?: () => void;
+    onReject?: () => void;
+    onCancel?: () => void;
+    onPayNow?: () => void;
+    onRecordPayment?: () => void;
+    onAddPayment?: () => void;
+    onEditPayment?: () => void;
+    onChangeTreatment?: () => void;
+    onUpdateTreatment?: () => void;
+    onChangeDoctor?: () => void;
+    onAssignDoctor?: () => void;
+    onReschedule?: () => void;
+    onChangeSchedule?: () => void;
+    onRepeatSchedule?: () => void;
+    onRestoreAppointment?: () => void;
+    onGoToPatient?: () => void;
+    onGoToDoctor?: () => void;
+  },
+  state: {
+    canApprove?: boolean;
+    canReject?: boolean;
+    canCancel?: boolean;
+    canPayNow?: boolean;
+    canRecordPayment?: boolean;
+    canChangeTreatment?: boolean;
+    canUpdateTreatment?: boolean;
+    canChangeDoctor?: boolean;
+    canAssignDoctor?: boolean;
+    canReschedule?: boolean;
+    canChangeSchedule?: boolean;
+    canRepeatSchedule?: boolean;
+    canRestoreAppointment?: boolean;
+    canGoToPatient?: boolean;
+    canGoToDoctor?: boolean;
+    isDoctorUnassigned?: boolean;
+    isTBD?: boolean;
+    rejectLabel?: string;
+    approveLabel?: string;
+    isOpeningPaymentEdit?: boolean;
+    isLoadingTreatmentOptions?: boolean;
+  } = {}
+): AppointmentActionConfig[] {
+  const viewDetailsHandler = handlers.onViewDetails || handlers.onOpen;
+  const viewHistoryHandler = handlers.onViewHistory;
+  const approveHandler = handlers.onApprove;
+  const rejectHandler = handlers.onReject || handlers.onCancel;
+  const paymentHandler = handlers.onPayNow || handlers.onRecordPayment || handlers.onAddPayment || handlers.onEditPayment;
+  const treatmentHandler = handlers.onChangeTreatment || handlers.onUpdateTreatment;
+  const doctorHandler = handlers.onChangeDoctor || handlers.onAssignDoctor;
+  const scheduleHandler = handlers.onReschedule || handlers.onChangeSchedule;
+  const repeatScheduleHandler = handlers.onRepeatSchedule;
+  const restoreHandler = handlers.onRestoreAppointment;
+  const goToPatientHandler = handlers.onGoToPatient;
+  const goToDoctorHandler = handlers.onGoToDoctor;
+
+  const rejectLabelText = state.rejectLabel || (state.isTBD ? "Cancel" : "Reject");
+  const approveLabelText = state.approveLabel || (state.isTBD ? "Mark completed" : "Approve");
+
   return [
+    {
+      id: "view-details",
+      label: "View Details",
+      icon: <Eye className="h-4 w-4" />,
+      onSelect: viewDetailsHandler || (() => {}),
+      hidden: !viewDetailsHandler,
+    },
+    {
+      id: "view-history",
+      label: "View history",
+      icon: <History className="h-4 w-4" />,
+      onSelect: viewHistoryHandler || (() => {}),
+      hidden: !viewHistoryHandler,
+    },
+    {
+      id: "approve",
+      label: approveLabelText,
+      icon: <Check className="h-4 w-4 text-emerald-600" />,
+      disabled: state.canApprove === false,
+      onSelect: approveHandler || (() => {}),
+      hidden: !approveHandler,
+    },
+    {
+      id: "reject",
+      label: rejectLabelText,
+      icon: <X className="h-4 w-4 text-rose-600" />,
+      isDangerous: true,
+      disabled: state.canReject === false && state.canCancel === false,
+      onSelect: rejectHandler || (() => {}),
+      hidden: !rejectHandler,
+    },
+    {
+      id: "pay-now",
+      label: handlers.onEditPayment ? "Edit payment" : handlers.onAddPayment ? "Add payment" : "Pay now",
+      icon: handlers.onEditPayment ? <Pencil className="h-4 w-4" /> : <DollarSign className="h-4 w-4 text-emerald-600" />,
+      disabled: state.canPayNow === false && state.canRecordPayment === false,
+      isLoading: state.isOpeningPaymentEdit,
+      onSelect: paymentHandler || (() => {}),
+      hidden: !paymentHandler,
+    },
     {
       id: "change-treatment",
       label: "Change treatment",
       icon: <Stethoscope className="h-4 w-4" />,
-      disabled: !state.canChangeTreatment,
-      onSelect: handlers.onChangeTreatment || (() => {}),
-      hidden: !handlers.onChangeTreatment,
+      disabled: (state.canChangeTreatment === false && state.canUpdateTreatment === false) || state.isLoadingTreatmentOptions,
+      isLoading: state.isLoadingTreatmentOptions,
+      onSelect: treatmentHandler || (() => {}),
+      hidden: !treatmentHandler,
     },
     {
       id: "change-doctor",
       label: state.isDoctorUnassigned ? "Assign Doctor" : "Change Doctor",
-      icon: <Stethoscope className="h-4 w-4" />,
-      disabled: !state.canChangeDoctor,
-      onSelect: handlers.onChangeDoctor || (() => {}),
-      hidden: !handlers.onChangeDoctor,
+      icon: <Stethoscope className="h-4 w-4 text-violet-600" />,
+      disabled: state.canChangeDoctor === false && state.canAssignDoctor === false,
+      onSelect: doctorHandler || (() => {}),
+      hidden: !doctorHandler,
     },
     {
       id: "reschedule",
       label: "Reschedule",
       icon: <CalendarIcon className="h-4 w-4" />,
-      disabled: !state.canReschedule,
-      onSelect: handlers.onReschedule || (() => {}),
-      hidden: !handlers.onReschedule,
+      disabled: state.canReschedule === false && state.canChangeSchedule === false,
+      onSelect: scheduleHandler || (() => {}),
+      hidden: !scheduleHandler,
     },
     {
-      id: "view-details",
-      label: "View Details",
-      icon: <Eye className="h-4 w-4" />,
-      onSelect: handlers.onViewDetails || (() => {}),
-      hidden: !handlers.onViewDetails,
+      id: "repeat-schedule",
+      label: "Repeat Schedule",
+      icon: <RotateCcw className="h-4 w-4" />,
+      disabled: state.canRepeatSchedule === false,
+      onSelect: repeatScheduleHandler || (() => {}),
+      hidden: !repeatScheduleHandler,
+    },
+    {
+      id: "restore-appointment",
+      label: "Restore Appointment",
+      icon: <RotateCcw className="h-4 w-4" />,
+      disabled: state.canRestoreAppointment === false,
+      onSelect: restoreHandler || (() => {}),
+      hidden: !restoreHandler,
+    },
+    {
+      id: "separator-navigation",
+      label: "",
+      icon: null,
       separator: true,
+      onSelect: () => {},
+      hidden: !goToPatientHandler && !goToDoctorHandler,
+    },
+    {
+      id: "go-to-patient",
+      label: "Go to patient",
+      icon: <User className="h-4 w-4" />,
+      disabled: state.canGoToPatient === false,
+      onSelect: goToPatientHandler || (() => {}),
+      hidden: !goToPatientHandler,
+    },
+    {
+      id: "go-to-doctor",
+      label: "Go to doctor",
+      icon: <Stethoscope className="h-4 w-4" />,
+      disabled: state.canGoToDoctor === false,
+      onSelect: goToDoctorHandler || (() => {}),
+      hidden: !goToDoctorHandler,
     },
   ];
 }
+
