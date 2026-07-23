@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList, Settings } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
-import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -64,7 +63,6 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
-  const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
   const {
     approvalDialogAppointment,
     approvalDialogMode,
@@ -261,24 +259,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           onConfirm={confirmApprovalAction}
         />
         
-        {/* Support editing appointments from notifications */}
-        {isBookingModalOpen && (
-          <BookingModalWrapper
-            open={isBookingModalOpen}
-            onOpenChange={(open) => {
-              if (!open) {
-                closeEditModal();
-                closeCreateModal();
-              }
-            }}
-            appointmentToEdit={selectedAppointment}
-            defaultDate={newAppointmentDate}
-            defaultTime={newAppointmentTime}
-            defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
-            doctorName={newAppointmentDoctorName}
-            appointmentCreationMode={newAppointmentCreationMode}
-          />
-        )}
+        {/* Booking modal is globally handled by GlobalBookingModalWrapper */}
       </div>
     </div>
   );

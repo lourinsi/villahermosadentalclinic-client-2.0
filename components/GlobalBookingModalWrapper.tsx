@@ -15,6 +15,9 @@ export function GlobalBookingModalWrapper() {
     closePatientBookingModal,
     isCreateModalOpen,
     closeCreateModal,
+    isEditModalOpen,
+    closeEditModal,
+    selectedAppointment,
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentPatientId,
@@ -22,14 +25,15 @@ export function GlobalBookingModalWrapper() {
     newAppointmentCreationMode,
   } = useAppointmentModal();
 
-  // Open modal for either patient-specific booking flow or the generic create flow
-  const shouldOpen = Boolean(isPatientBookingModalOpen || isCreateModalOpen);
+  // Open modal for patient-specific booking flow, generic create flow, or edit flow
+  const shouldOpen = Boolean(isPatientBookingModalOpen || isCreateModalOpen || isEditModalOpen);
   if (!shouldOpen) return null;
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       if (isPatientBookingModalOpen) closePatientBookingModal();
       if (isCreateModalOpen) closeCreateModal();
+      if (isEditModalOpen) closeEditModal();
     }
   };
 
@@ -37,11 +41,12 @@ export function GlobalBookingModalWrapper() {
     <BookingModalWrapper
       open={shouldOpen}
       onOpenChange={handleOpenChange}
+      appointmentToEdit={isEditModalOpen ? (selectedAppointment || undefined) : undefined}
       defaultDate={newAppointmentDate}
       defaultTime={newAppointmentTime}
       defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
       doctorName={newAppointmentDoctorName}
-      appointmentCreationMode={isCreateModalOpen ? newAppointmentCreationMode : undefined}
+      appointmentCreationMode={newAppointmentCreationMode}
     />
   );
 }
