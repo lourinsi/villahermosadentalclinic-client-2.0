@@ -111,6 +111,7 @@ export function SelectTreatmentModal({
   saveLabel = "Save Treatment",
 }: SelectTreatmentModalProps) {
   const isDraftMode = Boolean(draft && onSaveDraft);
+  const [isPriceEditable, setIsPriceEditable] = useState(false);
   const [localDraft, setLocalDraft] = useState<TreatmentSelectionDraft>(() => draft || {
     sections: [],
     toothNumberEntries: [""],
@@ -275,6 +276,12 @@ export function SelectTreatmentModal({
   const activeSection = sections[0] || { selectedPrice: isDraftMode ? localDraft.manualPrice : selectedPrice };
   const selectedTreatment = getSectionTreatment(activeSection);
   const selectedPriceValue = isDraftMode ? localDraft.manualPrice : getSectionPriceValue(activeSection);
+  const basePrice = Math.max(0, Number(selectedPriceValue) || 0);
+  const currentDiscount = isDraftMode ? localDraft.discount : discount;
+  const discountAmount = Math.max(0, Number(currentDiscount) || 0);
+  const hasDiscount = discountAmount > 0;
+  const discountedPrice = Math.max(0, basePrice - discountAmount);
+  const canEditPrice = (isDraftMode || Boolean(onSelectedPriceChange || onTreatmentSectionsChange)) && !isSaving;
   const treatmentLabels = sections.map((section) => {
     const sectionTreatment = getSectionTreatment(section);
     const isCustom = sectionTreatment?.id === OTHER_APPOINTMENT_TYPE_INDEX;
@@ -578,18 +585,23 @@ export function SelectTreatmentModal({
 
 
 
-          <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl ${hasTreatmentSidebar ? "lg:grid lg:grid-cols-[0.95fr_1fr]" : ""}`}>
-            <div className={`p-4 sm:p-5 ${hasTreatmentSidebar ? "border-b border-slate-100 lg:border-b-0 lg:border-r" : ""}`}>
-              <div className="flex items-center gap-2 text-sm font-black text-slate-800">
-                <ClipboardList className="h-4 w-4 text-blue-600" />
-                Treatment Summary
+          <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm sm:rounded-2xl lg:grid lg:grid-cols-[0.95fr_1fr]">
+            <div className={`relative overflow-hidden p-3.5 sm:p-5 ${hasTreatmentSidebar ? "border-b border-gray-200/80 lg:border-b-0 lg:border-r" : ""}`}>
+              <div className="relative z-10 flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                  <ClipboardList className="h-[18px] w-[18px]" />
+                </div>
+                <h3 className="text-base font-black text-gray-900">Treatment Summary</h3>
               </div>
-              <p className="mt-3 text-xs font-black uppercase tracking-widest text-slate-400">Selected Service</p>
-              <p className="mt-1 text-lg font-black text-slate-950">{treatmentLabels.join(", ")}</p>
 
-              {showToothNumberField ? (
-                <div className="mt-5 border-t border-slate-100 pt-4">
-                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">Tooth No./s</p>
+              <div className="relative z-10 mt-3 grid gap-3 border-t border-gray-200 pt-3 sm:mt-4 sm:grid-cols-2 sm:gap-4 sm:pt-4 lg:grid-cols-1">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500">Service</p>
+                  <p className="mt-1 text-sm font-black text-gray-900">{treatmentLabels.join(", ")}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-gray-500">Tooth No./s</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {filledToothNumbers.length > 0 ? (
                       filledToothNumbers.map((toothNumber, index) => (
@@ -598,37 +610,54 @@ export function SelectTreatmentModal({
                         </span>
                       ))
                     ) : (
-                      <span className="text-sm font-semibold text-slate-400">No teeth selected</span>
+                      <span className="text-sm font-semibold text-gray-400">No teeth selected</span>
                     )}
                   </div>
                 </div>
-              ) : null}
+              </div>
 
-              <div className="mt-5">
-                <Label htmlFor="visit-treatment-price" className="text-xs font-black uppercase tracking-widest text-slate-500">
-                  Manual Price
-                </Label>
-                  <div className="mt-2 flex items-center rounded-2xl border border-blue-100 bg-blue-50/40 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-200">
-                  <span className="shrink-0 text-xl font-black text-blue-600">{"\u20b1"}</span>
-                  <Input
-                    id="visit-treatment-price"
-                    type="number"
-                    min={0}
-                    step={1}
-                    inputMode="decimal"
-                    value={selectedPriceValue}
-                    onChange={(event) => {
-                      // In multi-section mode, update the first/active section; otherwise call single handler
-                      if (isMultiSectionMode) {
-                        handleSectionSelectedPriceChange(0, event.target.value);
-                      } else {
-                        onSelectedPriceChange?.(event.target.value);
-                      }
-                    }}
-                    disabled={!(isDraftMode || onSelectedPriceChange || onTreatmentSectionsChange) || isSaving}
-                    className="h-12 border-0 bg-transparent text-right text-3xl font-black text-blue-600 shadow-none focus-visible:ring-0"
-                  />
+              <div
+                onClick={() => {
+                  if (canEditPrice && !isPriceEditable) setIsPriceEditable(true);
+                }}
+                className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canEditPrice ? "cursor-pointer" : "cursor-default"}`}
+              >
+                {hasDiscount && !isPriceEditable && (
+                  <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{basePrice.toLocaleString()}</p>
+                )}
+                <div className="mt-1.5 flex items-center text-blue-600">
+                  <span className="mr-2 text-2xl font-black sm:text-3xl">&#8369;</span>
+                  {isPriceEditable && canEditPrice ? (
+                    <input
+                      id="visit-treatment-price"
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="decimal"
+                      value={selectedPriceValue}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(event) => {
+                        if (isMultiSectionMode) {
+                          handleSectionSelectedPriceChange(0, event.target.value);
+                        } else {
+                          onSelectedPriceChange?.(event.target.value);
+                        }
+                      }}
+                      onBlur={() => setIsPriceEditable(false)}
+                      className="w-[130px] appearance-none border-b-2 border-blue-200 bg-transparent p-0 text-3xl font-black text-blue-600 outline-none ring-0 transition-all placeholder:text-blue-200 focus:border-blue-500 sm:w-[160px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      placeholder={String(basePrice)}
+                      autoFocus
+                    />
+                  ) : (
+                    <span className="text-3xl font-black tracking-tight sm:text-4xl">
+                      {discountedPrice.toLocaleString()}
+                    </span>
+                  )}
                 </div>
+              </div>
+
+              <div className="pointer-events-none absolute bottom-4 right-4 hidden h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-3xl text-blue-600 md:flex">
+                🦷
               </div>
             </div>
 

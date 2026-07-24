@@ -1594,9 +1594,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, appointmentToEdit, modalStep, selectedPatient, selectedTime, runAutoPreselect]);
 
   // Price calculations - handle custom types
-  // finalPrice is the base price (before discount) - used in payment calculations
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (servicePriceByName[appointmentType] || 0);
-  const finalPrice = Number(customPrice) > 0 ? Number(customPrice) : basePrice;
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -2219,13 +2217,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     : (appointmentToEdit?.price !== undefined && appointmentToEdit?.balance !== undefined)
       ? Math.max(0, appointmentToEdit.price - appointmentToEdit.balance)
       : 0;
-  const discountAmount = Math.max(0, Number(discount) || 0);
-  const hasDiscount = discountAmount > 0;
-  const discountedPrice = Math.max(0, finalPrice - discountAmount);
-  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
-  const paymentAmountNow = parseFloat(amountToPay) || 0;
-  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
-  const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const primaryTreatmentName = appointmentType.split(",")[0].trim();
   const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === primaryTreatmentName);
   const selectedTreatmentCatalogPrice = selectedTreatmentOption
@@ -2262,14 +2253,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       ]
     )
   );
-  const mainBase = Number(customPrice) > 0
-    ? Number(customPrice)
-    : (appointmentType === "Other" ? Number(finalPrice) : catalogMainBase);
   const selectedTreatmentBasePrice = Math.max(
     0,
     Number(customPrice) > 0 ? Number(customPrice) : catalogTreatmentPrice
   );
-  const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
+  const finalPrice = selectedTreatmentBasePrice;
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  const hasDiscount = discountAmount > 0;
+  const discountedPrice = Math.max(0, finalPrice - discountAmount);
+  const selectedTreatmentTotal = discountedPrice;
+  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const paymentAmountNow = parseFloat(amountToPay) || 0;
+  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
+  const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
+  const mainBase = Number(customPrice) > 0
+    ? Number(customPrice)
+    : (appointmentType === "Other" ? Number(finalPrice) : catalogMainBase);
   const filledToothNumbers = toothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
   const treatmentNotesCount = treatmentNotes.length;
   const bookingConflictWarnings = getBookingConflictWarnings({
@@ -4034,7 +4033,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             />
                           ) : (
                             <span className="text-3xl font-black tracking-tight sm:text-4xl">
-                              {(Number(customPrice) > 0 ? Number(customPrice) : selectedTreatmentTotal).toLocaleString()}
+                              {selectedTreatmentTotal.toLocaleString()}
                             </span>
                           )}
                         </div>
