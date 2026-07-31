@@ -419,19 +419,15 @@ export function SelectTreatmentModal({
         <div data-tour-id="booking-treatment-step" className="max-h-[72dvh] space-y-4 overflow-y-auto bg-gray-50/70 px-5 py-6 custom-scrollbar sm:px-7">
           {sections.map((section, sectionIndex) => {
             const sectionTreatment = getSectionTreatment(section);
-            const sectionPriceValue = getSectionPriceValue(section);
             const sectionIsCustomTreatment = isSectionCustomTreatment(section);
 
             return (
-              <div key={sectionIndex} className="rounded-xl border border-blue-100 bg-white p-3.5 shadow-sm sm:p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div key={sectionIndex} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">
+                    <p className="text-sm font-black text-gray-700">
                       {getSectionLabel(section, sectionIndex)}
                     </p>
-                    {section.currentTreatmentLabel ? (
-                      <p className="mt-1 text-sm font-black text-slate-950">{section.currentTreatmentLabel}</p>
-                    ) : null}
                   </div>
                   {allowRemoveTreatment && sections.length > 1 ? (
                     <Button
@@ -447,28 +443,25 @@ export function SelectTreatmentModal({
                   ) : null}
                 </div>
 
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-xl border border-blue-100 bg-white p-3.5 shadow-sm sm:p-5">
-                    <Label className="text-sm font-black text-slate-800">Treatment Service</Label>
-                    <Select
+                <Select
                       value={section.selectedTreatmentId === null || section.selectedTreatmentId === undefined ? "" : String(section.selectedTreatmentId)}
                       onValueChange={(value) => {
                         const treatment = treatments.find((option) => String(option.id) === value);
                         if (treatment) handleSectionTreatmentSelect(sectionIndex, treatment);
                       }}
                     >
-                      <SelectTrigger className="mt-2.5 h-auto min-h-[4.25rem] rounded-xl border border-blue-100 bg-blue-50/30 px-4 py-3 text-left shadow-none hover:bg-blue-50/60 focus:ring-2 focus:ring-blue-200 sm:min-h-[4.75rem]">
+                      <SelectTrigger className="mt-3 h-auto min-h-[4.25rem] rounded-xl border border-blue-100 bg-blue-50/30 px-3 py-2.5 text-left shadow-none hover:bg-blue-50/60 focus:ring-2 focus:ring-blue-200 focus:ring-offset-0 sm:min-h-[5.25rem] sm:rounded-2xl sm:px-4 sm:py-3">
                         {sectionTreatment ? (
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-lg shadow-sm ring-1 ring-blue-100">
+                          <div className="flex min-w-0 items-center gap-3 pr-2">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-lg text-blue-600 shadow-inner sm:h-12 sm:w-12 sm:text-xl">
                               {sectionTreatment.icon || <ClipboardList className="h-5 w-5 text-blue-600" />}
                             </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-base font-black text-slate-950">{sectionTreatment.label}</p>
-                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-slate-500">
-                                <span className="inline-flex items-center gap-1">
-                                  <Tag className="h-3.5 w-3.5 text-emerald-500" />
-                                  {formatTreatmentCurrency(sectionTreatment.price)}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-black text-gray-900 sm:text-base">{sectionTreatment.label}</p>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold text-gray-500">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Tag className="h-4 w-4 text-blue-600" />
+                                  <span className="text-[0.72em]">{"\u20b1"}</span>{Number(sectionTreatment.price || 0).toLocaleString()}
                                 </span>
                               </div>
                             </div>
@@ -515,7 +508,6 @@ export function SelectTreatmentModal({
                         })}
                       </SelectContent>
                     </Select>
-                  </div>
 
                   {sectionIsCustomTreatment ? (
                     <div className="space-y-2 rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -532,7 +524,6 @@ export function SelectTreatmentModal({
                     </div>
                   ) : null}
 
-                </div>
               </div>
             );
           })}
