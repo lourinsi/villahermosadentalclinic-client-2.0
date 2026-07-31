@@ -54,7 +54,7 @@ import {
 } from "./sharedBookingLogic";
 import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
-import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
+import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors, normalizePaymentStatus } from "@/lib/status-colors";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
@@ -1089,6 +1089,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const nextPaymentStatusNorm = normalizeBookingHistoryStatus(nextPaymentStatus || displayedSnapshot?.paymentStatus);
   const displayedStatusColors = getDefaultAppointmentStatusColors(nextStatus || displayedSnapshot?.status);
   const displayedPaymentStatusColors = getDefaultPaymentStatusColors(nextPaymentStatus || displayedSnapshot?.paymentStatus);
+  const isOverdueAppointment =
+    normalizeAppointmentStatus(nextStatus || displayedSnapshot?.status) === "tbd" &&
+    !["paid", "over-paid"].includes(normalizePaymentStatus(nextPaymentStatus || displayedSnapshot?.paymentStatus));
 
   const prevScheduleLabel = prevState ? `${formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
   const nextScheduleLabel = nextState ? `${formatWordyDate(nextState.date, { fallback: String(nextState.date || "No date") })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
@@ -3162,6 +3165,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         {stateLabel.toUpperCase()}
                       </span>
                     )}
+                    {isOverdueAppointment ? (
+                      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-amber-700 sm:px-4 sm:py-2 sm:text-xs">
+                        Overdue
+                      </span>
+                    ) : null}
                   </DialogTitle>
                   <DialogDescription className="mt-1.5 text-left text-sm font-semibold leading-5 text-slate-500 sm:mt-3 sm:text-base sm:leading-6">
                     <span className="block truncate">{timestampPrefix} {snapshotDate}</span>

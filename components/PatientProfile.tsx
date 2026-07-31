@@ -1068,6 +1068,12 @@ const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn)
 const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
   Boolean(appointment?.deleted) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
+const isOverdueTreatmentHistoryAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) => {
+  const appointmentStatus = normalizeAppointmentStatus(String(appointment?.status || ""));
+  const paymentStatus = normalizePaymentStatus(String(appointment?.paymentStatus || ""));
+  const isFullyPaid = paymentStatus === "paid" || paymentStatus === "over-paid";
+  return appointmentStatus === "tbd" && !isFullyPaid;
+};
 const getEditablePaymentId = (txn: RecentTransaction) => {
   if (isStoredPaymentLogRow(txn)) return "";
   if (isSoftDeletedPaymentTransaction(txn)) return "";
@@ -3071,9 +3077,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
-      const normalizedStatus = normalizeAppointmentStatus(String(apt.status || ""));
       if (!canSeeDeletedAppointments && isSoftDeletedAppointment(apt)) return false;
-      if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
+      if (historyPaymentStatusFilter === "overdue") {
+        if (!isOverdueTreatmentHistoryAppointment(apt)) return false;
+      } else if (historyPaymentStatusFilter !== "all" && normalizePaymentStatus(String(apt.paymentStatus || "")) !== historyPaymentStatusFilter) {
+        return false;
+      }
       if (historyDoctorFilter !== 'all' && getVisitDoctorName(apt) !== historyDoctorFilter) return false;
 
       if (historyProcedureFilter !== 'all') {
@@ -5501,6 +5510,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         includeDeleted={effectiveRole === "admin"}
                                         onChange={(nextStatus) => handleVisitStatusChange(appointment, nextStatus)}
                                       />
+                                      {isOverdueTreatmentHistoryAppointment(appointment) ? (
+                                        <Badge className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-50">Overdue</Badge>
+                                      ) : null}
                                       <span className="inline-flex min-w-0 items-center gap-1 text-slate-500">
                                         <FileText className="h-3.5 w-3.5 shrink-0" />
                                         <span className="truncate">{notesText}</span>
@@ -5939,6 +5951,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     />
                                     <span className="text-slate-400">/</span>
                                     {getPaymentStatusBadge(String(appointment.paymentStatus || "unpaid"))}
+                                    {isOverdueTreatmentHistoryAppointment(appointment) ? (
+                                      <Badge className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-50">Overdue</Badge>
+                                    ) : null}
                                   </div>
                                 </TableCell>
                                 <TableCell className="font-medium">
