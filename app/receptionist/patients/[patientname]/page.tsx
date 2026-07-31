@@ -154,15 +154,48 @@ export default function ReceptionistPatientProfilePage() {
     const loadPatient = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(
-          apiUrl(`/api/patients?page=1&limit=20&search=${encodeURIComponent(patientName)}&status=all`),
-          { headers: getAuthHeaders(), credentials: "include" }
-        );
-        const result = await response.json().catch(() => null);
-        const patients = Array.isArray(result?.data) ? result.data as Patient[] : [];
-        const normalizedRouteName = patientName.trim().toLowerCase();
-        const exactMatch = patients.find((item) => normalizePatientName(item).toLowerCase() === normalizedRouteName);
-        const resolvedPatient = exactMatch || patients[0] || null;
+        let resolvedPatient: Patient | null = null;
+
+        try {
+          const directRes = await fetch(
+            apiUrl(`/api/patients/${encodeURIComponent(patientName)}`),
+            { headers: getAuthHeaders(), credentials: "include" }
+          );
+          if (directRes.ok) {
+            const directJson = await directRes.json().catch(() => null);
+            const foundPatient = (directJson?.data || directJson) as Patient | null;
+            if (foundPatient && (foundPatient.id || foundPatient.name || foundPatient.firstName)) {
+              resolvedPatient = foundPatient;
+            }
+          }
+        } catch {
+          // Fallback to search
+        }
+
+        if (!resolvedPatient) {
+          const response = await fetch(
+            apiUrl(`/api/patients?page=1&limit=50&search=${encodeURIComponent(patientName)}&status=all`),
+            { headers: getAuthHeaders(), credentials: "include" }
+          );
+          const result = await response.json().catch(() => null);
+          const patients = Array.isArray(result?.data) ? (result.data as Patient[]) : [];
+          const normalizedRouteName = patientName.trim().toLowerCase();
+
+          const exactMatch = patients.find(
+            (item) =>
+              String(item.id || "").toLowerCase() === normalizedRouteName ||
+              normalizePatientName(item).toLowerCase() === normalizedRouteName ||
+              (item.name && item.name.trim().toLowerCase() === normalizedRouteName)
+          );
+
+          const partialMatch = patients.find(
+            (item) =>
+              normalizePatientName(item).toLowerCase().includes(normalizedRouteName) ||
+              normalizedRouteName.includes(normalizePatientName(item).toLowerCase())
+          );
+
+          resolvedPatient = exactMatch || partialMatch || (patients.length === 1 ? patients[0] : null);
+        }
 
         if (mounted) {
           setPatient(resolvedPatient);

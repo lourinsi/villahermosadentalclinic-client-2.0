@@ -17,7 +17,7 @@ import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersis
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag, RotateCcw } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag, RotateCcw, Search } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -61,6 +61,9 @@ import useSharedBookingLogic, {
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   getBookingDoctorInitials as getDoctorInitials,
+  getBookingDiscountedPrice,
+  getBookingPriceBeforeDiscount,
+  getBookingTreatmentSearchResults,
   buildBookingTreatmentNotesPayload,
   buildBookingTreatmentsPayload,
   getBookingTreatmentsCatalogPrice,
@@ -432,6 +435,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const { effectiveRole } = useAdminViewMode();
   const { doctors, reloadDoctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, deleteAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
+  const { openPaymentFor } = usePaymentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
   const { options: serviceOptions } = useAppointmentTypeOptions(open);
@@ -460,6 +464,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [duration, setDuration] = useState<string>("30");
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
+  const [primaryTreatmentSearch, setPrimaryTreatmentSearch] = useState("");
+  const [additionalTreatmentSearches, setAdditionalTreatmentSearches] = useState<Record<number, string>>({});
+  const primaryTreatmentSearchInputRef = useRef<HTMLInputElement>(null);
+  const additionalTreatmentSearchInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [notes, setNotes] = useState<string>("");
   const [treatmentNotes, setTreatmentNotes] = useState<string>("");
   const [toothNumberEntries, setToothNumberEntries] = useState<string[]>([""]);
@@ -549,6 +557,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
+  const [isSubSelectPatientOpen, setIsSubSelectPatientOpen] = useState(false);
+  const [isSubSelectDoctorOpen, setIsSubSelectDoctorOpen] = useState(false);
+  const [isSubSelectTreatmentOpen, setIsSubSelectTreatmentOpen] = useState(false);
+  const [isSubSelectScheduleOpen, setIsSubSelectScheduleOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
   const [snapshotIsHistorical, setSnapshotIsHistorical] = useState(false);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
@@ -1590,9 +1602,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, appointmentToEdit, modalStep, selectedPatient, selectedTime, runAutoPreselect]);
 
   // Price calculations - handle custom types
-  // finalPrice is the base price (before discount) - used in payment calculations
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (servicePriceByName[appointmentType] || 0);
-  const finalPrice = Number(customPrice) > 0 ? Number(customPrice) : basePrice;
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -1606,10 +1616,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         userRole: user?.role,
         timestamp: new Date().toISOString()
       });
-      // Reset custom price when appointment type changes (unless in edit mode)
-      if (!isEditMode) {
-        setCustomPrice("0");
-      }
     }
   }, [appointmentType, user?.role, duration, isEditMode, servicePriceByName]);
 
@@ -1637,11 +1643,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   const handleTreatmentSelect = useCallback((treatmentName: string) => {
     setAppointmentType(treatmentName);
+    // A manually entered price is authoritative and must survive treatment changes.
+    if (Number(customPrice) <= 0) {
+      setCustomPrice("0");
+    }
     setDeclinedTreatmentSuggestion(null);
     if (treatmentName !== "Other") {
       setCustomAppointmentTypeName("");
     }
-  }, []);
+  }, [customPrice]);
 
   const handleCustomTreatmentNameChange = useCallback((value: string) => {
     const normalizedInput = normalizeTreatmentInput(value);
@@ -1655,8 +1665,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setAppointmentType(suggestion.treatment);
     setCustomAppointmentTypeName("");
     setDeclinedTreatmentSuggestion(null);
-    setCustomPrice("0");
-  }, []);
+    if (Number(customPrice) <= 0) {
+      setCustomPrice("0");
+    }
+  }, [customPrice]);
 
   const declineExistingTreatmentSuggestion = useCallback((suggestion: ExistingTreatmentSuggestion) => {
     setDeclinedTreatmentSuggestion({
@@ -1831,6 +1843,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const existingTreatments = getBookingTreatmentsValue(appointmentToEdit);
       if (existingTreatments.length > 0) {
         const [firstTreatment, ...remainingTreatments] = existingTreatments;
+        const firstTreatmentName = getAppointmentTypeName(firstTreatment.type, firstTreatment.customType);
+        const normalizedFirstTreatmentName = firstTreatmentName.split(",")[0].trim();
+        setAppointmentType(firstTreatment.type === 6 ? "Other" : normalizedFirstTreatmentName);
+        if (firstTreatment.type === 6) {
+          setCustomAppointmentTypeName(String(firstTreatment.customType || ""));
+        }
         setTreatmentNotes(getBookingTreatmentNotesValue(appointmentToEdit));
         setToothNumberEntries(getBookingToothNumberEntries(getBookingToothNumbersValue(appointmentToEdit)));
         setAdditionalTreatmentSections(
@@ -2207,16 +2225,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     : (appointmentToEdit?.price !== undefined && appointmentToEdit?.balance !== undefined)
       ? Math.max(0, appointmentToEdit.price - appointmentToEdit.balance)
       : 0;
-  const discountAmount = Math.max(0, Number(discount) || 0);
-  const hasDiscount = discountAmount > 0;
-  const discountedPrice = Math.max(0, finalPrice - discountAmount);
-  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
-  const paymentAmountNow = parseFloat(amountToPay) || 0;
-  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
-  const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
-  const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === appointmentType);
+  const primaryTreatmentName = appointmentType.split(",")[0].trim();
+  const selectedTreatmentOption = bookingTreatmentOptions.find((option) => option.name === primaryTreatmentName);
+  const selectedTreatmentCatalogPrice = selectedTreatmentOption
+    ? (servicePriceByName[selectedTreatmentOption.name] || 0)
+    : 0;
   const selectedTreatmentName = [
-    appointmentType === "Other" ? customAppointmentTypeName || "Other" : appointmentType
+    primaryTreatmentName === "Other" ? customAppointmentTypeName || "Other" : primaryTreatmentName
   ]
     .concat(
       additionalTreatmentSections
@@ -2230,12 +2245,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     .filter(Boolean)
     .join(", ") || "Selected Treatment";
   // Catalog base price is the sum of the main selected service plus any additional sections
-  const mainBase = appointmentType === "Other" ? Number(customPrice === "0" ? finalPrice : customPrice) : (servicePriceByName[appointmentType] || 0);
-  const selectedTreatmentBasePrice = Math.max(
+  const catalogMainBase = appointmentType === "Other" ? 0 : (servicePriceByName[appointmentType] || 0);
+  const catalogTreatmentPrice = Math.max(
     0,
     getBookingTreatmentsCatalogPrice(
       [
-        { price: mainBase, label: appointmentType },
+        { price: catalogMainBase, label: appointmentType },
         ...additionalTreatmentSections.map((section) => ({
           price:
             section.appointmentType === "Other"
@@ -2246,7 +2261,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       ]
     )
   );
-  const selectedTreatmentTotal = Math.max(0, selectedTreatmentBasePrice - discountAmount);
+  const selectedTreatmentBasePrice = Math.max(
+    0,
+    Number(customPrice) > 0 ? Number(customPrice) : catalogTreatmentPrice
+  );
+  const finalPrice = selectedTreatmentBasePrice;
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  const hasDiscount = discountAmount > 0;
+  const discountedPrice = getBookingDiscountedPrice(finalPrice, discountAmount);
+  const selectedTreatmentTotal = discountedPrice;
+  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const paymentAmountNow = parseFloat(amountToPay) || 0;
+  const isPaymentDateDisabled = isBookingPaymentDateDisabled(amountToPay, paymentMethod);
+  const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
+  const mainBase = Number(customPrice) > 0
+    ? Number(customPrice)
+    : (appointmentType === "Other" ? Number(finalPrice) : catalogMainBase);
   const filledToothNumbers = toothNumberEntries.map((entry) => entry.trim()).filter(Boolean);
   const treatmentNotesCount = treatmentNotes.length;
   const bookingConflictWarnings = getBookingConflictWarnings({
@@ -3264,6 +3294,27 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  const handleAddPaymentFromSummary = () => {
+    if (!appointmentToEdit?.id) {
+      setIsConfirmSummaryOpen(false);
+      setModalStep("payment");
+      return;
+    }
+
+    setIsConfirmSummaryOpen(false);
+    openPaymentFor(
+      {
+        ...appointmentToEdit,
+        patientId: selectedPatient,
+        price: finalPrice,
+        discount: Number(discount) || 0,
+        totalPaid: previouslyPaidAmount,
+      } as any,
+      selectedPatient,
+      summaryPatientName
+    );
+  };
+
   const openPaymentDatePicker = () => {
     if (isPaymentDateDisabled) return;
 
@@ -3702,22 +3753,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
                 <SelectTreatmentModal>
-                  <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
-                    <div className="flex items-center justify-between gap-3">
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+                    <div className="border-b border-gray-100 pb-3 text-sm font-black text-gray-700 sm:pb-4">
                       <Label htmlFor="improved-booking-treatment-select" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
-                        Treatment Service
+                        Treatment 1
                       </Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAddAdditionalTreatmentSection}
-                        disabled={isPatientReadonly}
-                      >
-                        + Add treatment
-                      </Button>
                     </div>
-                    <Select value={appointmentType} onValueChange={handleTreatmentSelect} disabled={isPatientReadonly}>
+                    <Select value={primaryTreatmentName} onValueChange={(value) => { handleTreatmentSelect(value); setPrimaryTreatmentSearch(""); }} disabled={isPatientReadonly}>
                         <SelectTrigger
                           id="improved-booking-treatment-select"
                           data-tour-id="booking-treatment-select"
@@ -3729,11 +3771,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                 {selectedTreatmentOption.icon}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-black text-gray-900 sm:text-base">{selectedTreatmentName}</p>
+                                <p className="truncate text-sm font-black text-gray-900 sm:text-base">{primaryTreatmentName}</p>
                                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold text-gray-500">
                                   <span className="inline-flex items-center gap-1.5">
                                     <Tag className="h-4 w-4 text-blue-600" />
-                                    <span className="text-[0.72em]">{"\u20b1"}</span>{selectedTreatmentBasePrice.toLocaleString()}
+                                    <span className="text-[0.72em]">{"\u20b1"}</span>{selectedTreatmentCatalogPrice.toLocaleString()}
                                   </span>
                                 </div>
                               </div>
@@ -3742,8 +3784,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             <SelectValue placeholder="Choose treatment" />
                           )}
                         </SelectTrigger>
-                        <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
-                          {bookingTreatmentOptions.map((t) => {
+                        <SelectContent
+                          className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl"
+                          onKeyDownCapture={(event) => {
+                            if (event.target instanceof HTMLInputElement) event.stopPropagation();
+                          }}
+                        >
+                          <div className="sticky top-0 z-10 w-full border-b border-gray-100 bg-white p-2">
+                            <label className="flex w-full cursor-text items-center gap-2 rounded-xl border border-gray-200 bg-slate-50 px-3">
+                              <Search className="h-4 w-4 text-slate-400" />
+                              <div className="min-w-0 flex-1">
+                                <Input
+                                  ref={primaryTreatmentSearchInputRef}
+                                  autoFocus
+                                  value={primaryTreatmentSearch}
+                                  onChange={(event) => {
+                                    setPrimaryTreatmentSearch(event.target.value);
+                                    requestAnimationFrame(() => primaryTreatmentSearchInputRef.current?.focus());
+                                  }}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                  onKeyDownCapture={(event) => event.stopPropagation()}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  placeholder="Search treatments"
+                                  className="h-9 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </label>
+                          </div>
+                          {getBookingTreatmentSearchResults(bookingTreatmentOptions, primaryTreatmentSearch, (t) => [t.name], (t) => t.name === "Other").map((t) => {
                             const optionPrice = servicePriceByName[t.name] || 0;
                             const disabled = isTreatmentOptionDisabled(t.name);
 
@@ -3773,6 +3841,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </SelectContent>
                       </Select>
                   </div>
+
+
                     {appointmentType === "Other" && (
                       <div className="space-y-3">
                         <Input
@@ -3837,7 +3907,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <div>
                                 <Select
                                   value={section.appointmentType || ""}
-                                  onValueChange={(value) => handleUpdateAdditionalTreatmentService(sectionIndex, value)}
+                                  onValueChange={(value) => {
+                                    handleUpdateAdditionalTreatmentService(sectionIndex, value);
+                                    setAdditionalTreatmentSearches((current) => ({ ...current, [sectionIndex]: "" }));
+                                  }}
                                   disabled={isPatientReadonly}
                                 >
                                   <SelectTrigger
@@ -3850,8 +3923,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                       <SelectValue placeholder="Choose treatment" />
                                     )}
                                   </SelectTrigger>
-                                  <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
-                                    {bookingTreatmentOptions.map((t) => {
+                                  <SelectContent
+                                    className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl"
+                                    onKeyDownCapture={(event) => {
+                                      if (event.target instanceof HTMLInputElement) event.stopPropagation();
+                                    }}
+                                  >
+                                    <div className="sticky top-0 z-10 w-full border-b border-gray-100 bg-white p-2">
+                                      <label className="flex w-full cursor-text items-center gap-2 rounded-xl border border-gray-200 bg-slate-50 px-3">
+                                        <Search className="h-4 w-4 text-slate-400" />
+                                        <div className="min-w-0 flex-1">
+                                          <Input
+                                            ref={(element) => {
+                                              additionalTreatmentSearchInputRefs.current[sectionIndex] = element;
+                                            }}
+                                            autoFocus
+                                            value={additionalTreatmentSearches[sectionIndex] || ""}
+                                            onChange={(event) => {
+                                              setAdditionalTreatmentSearches((current) => ({ ...current, [sectionIndex]: event.target.value }));
+                                              requestAnimationFrame(() => additionalTreatmentSearchInputRefs.current[sectionIndex]?.focus());
+                                            }}
+                                            onKeyDown={(event) => event.stopPropagation()}
+                                            onKeyDownCapture={(event) => event.stopPropagation()}
+                                            onPointerDown={(event) => event.stopPropagation()}
+                                            placeholder="Search treatments"
+                                            className="h-9 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                                          />
+                                        </div>
+                                      </label>
+                                    </div>
+                                    {getBookingTreatmentSearchResults(bookingTreatmentOptions, additionalTreatmentSearches[sectionIndex], (t) => [t.name], (t) => t.name === "Other").map((t) => {
                                       const optionPrice = servicePriceByName[t.name] || 0;
                                       const disabled = isTreatmentOptionDisabled(t.name, sectionIndex);
 
@@ -3898,7 +3999,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         ))}
                       </div>
                     )}
-
+                  <div className="rounded-xl border border-dashed border-blue-100 bg-white p-4 text-center shadow-sm sm:rounded-2xl">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleAddAdditionalTreatmentSection}
+                      disabled={isPatientReadonly}
+                      className="rounded-xl border-gray-300 px-5 font-bold text-slate-900 hover:bg-blue-50"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add treatment
+                    </Button>
+                  </div>
                   <div className="rounded-xl border border-gray-200/80 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-5">
                     <div className="flex items-center justify-between gap-4">
                       <Label htmlFor="improved-booking-tooth-number-0" className="text-base font-black tracking-tight text-gray-900 sm:text-lg">
@@ -3989,10 +4101,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         }}
                         className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
                       >
-                        <p className="text-sm font-semibold text-gray-700">Estimated Cost</p>
-                        <p className="text-xs font-semibold text-gray-500">Catalog Price</p>
-                        <p className="mt-1 text-sm font-black text-gray-900">&#8369;{selectedTreatmentBasePrice.toLocaleString()}</p>
-                        {hasDiscount && !isPriceEditable && (
+                        {hasDiscount && (
                           <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{finalPrice.toLocaleString()}</p>
                         )}
                         <div className="mt-1.5 flex items-center text-blue-600">
@@ -4000,21 +4109,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           {isPriceEditable && canManagePricing ? (
                             <input
                               type="number"
-                              value={customPrice === "0" ? finalPrice : customPrice}
+                              value={selectedTreatmentTotal}
                               onClick={(e) => e.stopPropagation()}
-                              onChange={(e) => setCustomPrice(e.target.value)}
+                              onChange={(e) => {
+                                setCustomPrice(String(getBookingPriceBeforeDiscount(e.target.value, discountAmount)));
+                              }}
                               onBlur={() => setIsPriceEditable(false)}
                               className="w-[130px] appearance-none border-b-2 border-blue-200 bg-transparent p-0 text-3xl font-black text-blue-600 outline-none ring-0 transition-all placeholder:text-blue-200 focus:border-blue-500 sm:w-[160px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              placeholder={String(finalPrice)}
+                              placeholder={String(selectedTreatmentTotal)}
                               autoFocus
                             />
                           ) : (
-                            <span className="text-3xl font-black tracking-tight sm:text-4xl">{selectedTreatmentTotal.toLocaleString()}</span>
+                            <span className="text-3xl font-black tracking-tight sm:text-4xl">
+                              {selectedTreatmentTotal.toLocaleString()}
+                            </span>
                           )}
                         </div>
                         {isPriceEditable && canManagePricing && (
                           <p className="mt-2 text-xs font-semibold text-blue-500">
-                            Reflected total: &#8369;{Math.max(0, selectedTreatmentBasePrice - discountAmount).toLocaleString()}
+                            Catalog price: &#8369;{Math.max(0, catalogTreatmentPrice - discountAmount).toLocaleString()}
                           </p>
                         )}
                       </div>
@@ -4024,7 +4137,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     </div>
 
-                    <div className="space-y-2.5 p-3.5 sm:space-y-3 sm:p-5">
+                    <div className="space-y-3 p-3.5 sm:p-5">
                       <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:rounded-2xl">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
@@ -4433,6 +4546,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onRepeatOptionChange={setRepeatOption}
         onCustomRepeatDateChange={setCustomRepeatDate}
         patientId={selectedPatient}
+        onPatientClick={() => setIsSubSelectPatientOpen(true)}
+        onDoctorClick={() => setIsSubSelectDoctorOpen(true)}
+        onServiceClick={() => setIsSubSelectTreatmentOpen(true)}
+        onScheduleClick={() => setIsSubSelectScheduleOpen(true)}
+        onToothNumbersChange={(newVal) => setToothNumberEntries(getBookingToothNumberEntries(newVal))}
+        onDurationChange={(dur) => setDuration(dur)}
+        onTreatmentNotesChange={(notes) => setTreatmentNotes(notes)}
+        onFinalPriceChange={canManagePricing ? (price) => setCustomPrice(String(price)) : undefined}
+        onAddPayment={handleAddPaymentFromSummary}
         
         getPersonInitials={getPersonInitials}
         getDoctorInitials={getDoctorInitials}
@@ -4445,6 +4567,140 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         isPatientLevelBookingMode={isPatientLevelBookingMode}
         isCartAppointmentStatus={isCartAppointmentStatus}
         userRole={effectiveRole}
+      />
+
+      {/* Submodal 1: Select Patient */}
+      <SelectPatientModal
+        open={isSubSelectPatientOpen}
+        onOpenChange={setIsSubSelectPatientOpen}
+        draft={{
+          patient: selectedPatient
+            ? { id: selectedPatient, name: summaryPatientName || "Current patient" }
+            : null,
+        }}
+        canCreatePatients={!isPatientReadonly}
+        onSaveDraft={({ patient }) => {
+          if (!patient) return;
+          setSelectedPatient(patient.id);
+          setIsSubSelectPatientOpen(false);
+        }}
+      />
+
+      {/* Submodal 2: Select Doctor */}
+      <SelectDoctorModal
+        open={isSubSelectDoctorOpen}
+        onOpenChange={setIsSubSelectDoctorOpen}
+        title="Assign Doctor"
+        description="Select the dentist for this appointment."
+        doctors={(doctors || []) as any[]}
+        draft={{
+          doctor: (doctors || []).find((doctor: any) => ((doctor as any).value || doctor.name) === selectedDoctor) || null,
+        }}
+        showAddDoctorButton
+        onDoctorAdded={() => void reloadDoctors()}
+        onSaveDraft={({ doctor: doc }) => {
+          if (!doc) return;
+          const val = (doc as any).value || doc.name;
+          setSelectedDoctor(val);
+          setIsSubSelectDoctorOpen(false);
+        }}
+      />
+
+      {/* Submodal 3: Select Service/Treatment */}
+      <SelectTreatmentModal
+        open={isSubSelectTreatmentOpen}
+        onOpenChange={setIsSubSelectTreatmentOpen}
+        treatments={bookingTreatmentOptions.map((opt, idx) => ({
+          id: idx + 1,
+          label: opt.name,
+          value: opt.name,
+          price: servicePriceByName[opt.name] || 0,
+        }))}
+        draft={{
+          sections: [
+            {
+              selectedTreatmentId: bookingTreatmentOptions.findIndex((t) => t.name === primaryTreatmentName) + 1 || null,
+              currentTreatmentLabel: primaryTreatmentName,
+              customTreatmentName: customAppointmentTypeName,
+              selectedPrice: customPrice,
+            },
+            ...additionalTreatmentSections.map((section) => ({
+              selectedTreatmentId: bookingTreatmentOptions.findIndex((t) => t.name === section.appointmentType) + 1 || null,
+              currentTreatmentLabel: section.appointmentType || "",
+              customTreatmentName: section.customAppointmentTypeName || "",
+              selectedPrice: String(servicePriceByName[section.appointmentType || ""] || 0),
+            })),
+          ],
+          toothNumberEntries,
+          manualPrice: customPrice,
+          discount,
+          treatmentNotes,
+        }}
+        onSaveDraft={(draft) => {
+          const sections = draft.sections;
+          const [primarySection, ...additionalSections] = sections;
+          if (!primarySection) {
+            setAppointmentType("");
+            setCustomAppointmentTypeName("");
+            setAdditionalTreatmentSections([]);
+          } else {
+            const primaryTreatment = bookingTreatmentOptions.find(
+              (_, index) => index + 1 === primarySection.selectedTreatmentId
+            );
+
+            if (primaryTreatment) {
+              setAppointmentType(primaryTreatment.name);
+              setCustomAppointmentTypeName(
+                primaryTreatment.name === "Other" ? primarySection.customTreatmentName || "" : ""
+              );
+            }
+
+            setAdditionalTreatmentSections(
+              additionalSections.flatMap((section) => {
+                const treatment = bookingTreatmentOptions.find(
+                  (_, index) => index + 1 === section.selectedTreatmentId
+                );
+                if (!treatment) return [];
+                return [{
+                  appointmentType: treatment.name,
+                  customAppointmentTypeName:
+                    treatment.name === "Other" ? section.customTreatmentName || "" : "",
+                }];
+              })
+            );
+          }
+          setCustomPrice(draft.manualPrice);
+          setDiscount(draft.discount);
+          setTreatmentNotes(draft.treatmentNotes);
+          setToothNumberEntries(draft.toothNumberEntries);
+          setIsSubSelectTreatmentOpen(false);
+        }}
+        allowAddTreatment
+        allowRemoveTreatment
+        onCancel={() => setIsSubSelectTreatmentOpen(false)}
+      />
+
+      {/* Submodal 4: Select Schedule */}
+      <SelectScheduleModal
+        open={isSubSelectScheduleOpen}
+        onOpenChange={setIsSubSelectScheduleOpen}
+        draft={{
+          selectedDate,
+          selectedTime,
+          selectedDuration: duration,
+        }}
+        onSaveDraft={(draft) => {
+          setDuration(draft.selectedDuration);
+          setIsSubSelectScheduleOpen(false);
+        }}
+        onDateClick={() => {
+          setIsDatePickerOpen(true);
+        }}
+        onTimeClick={() => {
+          setIsTimePickerOpen(true);
+        }}
+        onSave={() => setIsSubSelectScheduleOpen(false)}
+        onCancel={() => setIsSubSelectScheduleOpen(false)}
       />
 
       <OverpaymentConfirmDialog

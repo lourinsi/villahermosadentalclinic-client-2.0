@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toBookingPatientOption } from "./sharedBookingLogic";
+import type { PatientSelectionDraft } from "./universalSelectModalDrafts";
 
 export type PatientSelectOption = {
   id: string;
@@ -41,6 +42,9 @@ type SelectPatientModalProps = {
   title?: string;
   description?: string;
   confirmLabel?: string;
+  /** Preferred scalable API: one selected-patient draft emitted on Save. */
+  draft?: PatientSelectionDraft<PatientSelectOption>;
+  onSaveDraft?: (draft: PatientSelectionDraft<PatientSelectOption>) => void | Promise<void>;
   onConfirm?: (patient: PatientSelectOption) => void | Promise<void>;
 };
 
@@ -54,12 +58,14 @@ export function SelectPatientModal({
   title = "Select Patient",
   description = "Who is this appointment for?",
   confirmLabel = "Save Patient",
+  draft,
+  onSaveDraft,
   onConfirm,
 }: SelectPatientModalProps) {
   const isStandalone = typeof open === "boolean" && typeof onOpenChange === "function";
   const { openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const [patients, setPatients] = useState<PatientSelectOption[]>([]);
-  const [selectedPatient, setSelectedPatient] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState(() => String(draft?.patient?.id || selectedPatientId || ""));
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
@@ -132,6 +138,11 @@ export function SelectPatientModal({
   }, [isStandalone, open, selectedPatientId, selectedPatientName]);
 
   useEffect(() => {
+    if (!open || !draft) return;
+    setSelectedPatient(String(draft.patient?.id || ""));
+  }, [open, draft]);
+
+  useEffect(() => {
     if (!isStandalone || !open || !lastAddedPatient || !lastAddedPatientAt) return;
     if (lastHandledAddedPatientAtRef.current === lastAddedPatientAt) return;
 
@@ -163,7 +174,11 @@ export function SelectPatientModal({
 
     setIsSaving(true);
     try {
-      await onConfirm?.(selectedPatientRecord);
+      if (onSaveDraft) {
+        await onSaveDraft({ patient: selectedPatientRecord });
+      } else {
+        await onConfirm?.(selectedPatientRecord);
+      }
       onOpenChange(false);
     } finally {
       setIsSaving(false);

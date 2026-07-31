@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Calendar, Clock, Loader2, Stethoscope, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import type { ScheduleSelectionDraft } from "./universalSelectModalDrafts";
 
 type StatusOption = {
   value: string;
@@ -32,12 +33,17 @@ type SelectScheduleModalProps = {
   selectedDate?: Date | string | null;
   selectedTime?: string | null;
   selectedDuration?: number | string | null;
+  /** Preferred scalable API: one schedule draft emitted on Save. */
+  draft?: ScheduleSelectionDraft;
+  onSaveDraft?: (draft: ScheduleSelectionDraft) => void | Promise<void>;
   onDurationChange?: (duration: string) => void;
   status?: string | null;
   statusOptions?: StatusOption[];
   onStatusChange?: (status: string) => void;
   onDateClick?: () => void;
   onTimeClick?: () => void;
+  onDateSelect?: (date: Date | string | null) => void;
+  onTimeSelect?: (time: string | null) => void;
   onSave?: () => void | Promise<void>;
   onCancel?: () => void;
   isSaving?: boolean;
@@ -87,18 +93,52 @@ export function SelectScheduleModal({
   selectedDate,
   selectedTime,
   selectedDuration,
+  draft,
+  onSaveDraft,
   onDurationChange,
   status,
   statusOptions,
   onStatusChange,
   onDateClick,
   onTimeClick,
+  onDateSelect,
+  onTimeSelect,
   onSave,
   onCancel,
   isSaving = false,
   canSave = true,
   saveLabel = "Save Schedule",
 }: SelectScheduleModalProps) {
+  const isDraftMode = Boolean(draft && onSaveDraft);
+  const [localDraft, setLocalDraft] = useState<ScheduleSelectionDraft>(() => draft || {
+    selectedDate: selectedDate || null,
+    selectedTime: String(selectedTime || ""),
+    selectedDuration: String(selectedDuration || ""),
+    status: status || undefined,
+  });
+
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const justOpened = Boolean(open) && !wasOpenRef.current;
+    wasOpenRef.current = Boolean(open);
+    if (!justOpened || !draft) return;
+    setLocalDraft(draft);
+  }, [open, draft]);
+
+  useEffect(() => {
+    if (!open || !isDraftMode) return;
+    if (selectedDate !== undefined) {
+      setLocalDraft((current) => ({ ...current, selectedDate: selectedDate || null }));
+    }
+  }, [open, isDraftMode, selectedDate]);
+
+  useEffect(() => {
+    if (!open || !isDraftMode) return;
+    if (selectedTime !== undefined) {
+      setLocalDraft((current) => ({ ...current, selectedTime: String(selectedTime || "") }));
+    }
+  }, [open, isDraftMode, selectedTime]);
+
   if (open === undefined) {
     return (
       <div data-tour-id="booking-schedule-step" className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
@@ -107,20 +147,25 @@ export function SelectScheduleModal({
     );
   }
 
-  const hasDate = hasUsableDate(selectedDate);
-  const hasTime = Boolean(String(selectedTime || "").trim());
+  const resolvedDate = isDraftMode ? localDraft.selectedDate : selectedDate;
+  const resolvedTime = isDraftMode ? localDraft.selectedTime : selectedTime;
+  const resolvedDuration = isDraftMode ? localDraft.selectedDuration : selectedDuration;
+  const resolvedStatus = isDraftMode ? localDraft.status : status;
+  const hasDate = hasUsableDate(resolvedDate);
+  const rawTimeStr = String(resolvedTime || "").trim();
+  const hasTime = Boolean(rawTimeStr && rawTimeStr !== "undefined" && rawTimeStr !== "null");
   const selectedDateLabel = hasDate
-    ? formatWordyDate(selectedDate as Date | string, { fallback: "Select date" })
+    ? formatWordyDate(resolvedDate as Date | string, { fallback: "Select date" })
     : "Select date";
-  const selectedTimeLabel = hasTime ? formatTimeTo12h(String(selectedTime)) : "Select time";
-  const durationValue = selectedDuration ? String(selectedDuration) : "";
+  const selectedTimeLabel = hasTime ? formatTimeTo12h(rawTimeStr) : "Select time";
+  const durationValue = resolvedDuration ? String(resolvedDuration) : "";
   const durationOptions = [30, 60, 90, 120];
-  const endTimeLabel = formatEndTime(selectedTime, durationValue);
+  const endTimeLabel = formatEndTime(resolvedTime, durationValue);
   const timeRangeLabel = hasTime && endTimeLabel
-    ? `${formatTimeTo12h(String(selectedTime))} – ${endTimeLabel}`
+    ? `${formatTimeTo12h(rawTimeStr)} – ${endTimeLabel}`
     : "Choose a time and duration";
-  const showDurationInput = typeof onDurationChange === "function" || selectedDuration != null;
-  const showStatusSelect = Array.isArray(statusOptions) && statusOptions.length > 0 && typeof onStatusChange === "function";
+  const showDurationInput = isDraftMode || typeof onDurationChange === "function" || selectedDuration != null;
+  const showStatusSelect = Array.isArray(statusOptions) && statusOptions.length > 0 && (isDraftMode || typeof onStatusChange === "function");
   const showExtraFields = showDurationInput || showStatusSelect;
   const resolvedCanSave = canSave && hasDate && hasTime && !isSaving;
 
@@ -227,8 +272,11 @@ export function SelectScheduleModal({
                     </Label>
                     <Select
                       value={durationValue}
-                      onValueChange={(value) => onDurationChange?.(value)}
-                      disabled={!hasDate || typeof onDurationChange !== "function"}
+                      onValueChange={(value) => {
+                        if (isDraftMode) setLocalDraft((current) => ({ ...current, selectedDuration: value }));
+                        onDurationChange?.(value);
+                      }}
+                      disabled={!hasDate || !(isDraftMode || typeof onDurationChange === "function")}
                     >
                       <SelectTrigger
                         id="select-schedule-duration"
@@ -253,8 +301,11 @@ export function SelectScheduleModal({
                       Status
                     </Label>
                     <Select
-                      value={status || "scheduled"}
-                      onValueChange={(value) => onStatusChange?.(value)}
+                      value={resolvedStatus || "scheduled"}
+                      onValueChange={(value) => {
+                        if (isDraftMode) setLocalDraft((current) => ({ ...current, status: value }));
+                        onStatusChange?.(value);
+                      }}
                       disabled={!showStatusSelect}
                     >
                       <SelectTrigger
@@ -298,7 +349,7 @@ export function SelectScheduleModal({
           <Button
             type="button"
             className="h-12 flex-1 rounded-2xl bg-blue-600 text-sm font-black text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
-            onClick={() => void onSave?.()}
+            onClick={() => isDraftMode ? void onSaveDraft?.(localDraft) : void onSave?.()}
             disabled={!resolvedCanSave}
           >
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

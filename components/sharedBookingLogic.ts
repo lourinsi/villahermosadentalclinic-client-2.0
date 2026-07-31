@@ -15,6 +15,8 @@ import {
   getDefaultPaymentStatusColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
+import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import type { TreatmentSelectionDraft, TreatmentSelectionSection } from "./universalSelectModalDrafts";
 
 export {
   CART_APPOINTMENT_STATUS,
@@ -32,6 +34,39 @@ export type BookingInitialStep = BookingStep;
 type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | 'receptionist' | '';
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past' | 'edit';
+
+/** The amount the patient owes after a fixed peso discount is applied. */
+export function getBookingDiscountedPrice(price?: unknown, discount?: unknown) {
+  const basePrice = Math.max(0, Number(price) || 0);
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  return Math.max(0, basePrice - discountAmount);
+}
+
+/** Converts an editable final amount back to the pre-discount appointment price. */
+export function getBookingPriceBeforeDiscount(finalPrice?: unknown, discount?: unknown) {
+  const amountDue = Math.max(0, Number(finalPrice) || 0);
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  return amountDue + discountAmount;
+}
+
+/** Case-insensitive matching used by treatment pickers throughout booking flows. */
+export function matchesBookingTreatmentSearch(query?: unknown, ...candidates: unknown[]) {
+  const normalizedQuery = String(query || "").trim().toLocaleLowerCase();
+  if (!normalizedQuery) return true;
+  return candidates.some((candidate) => String(candidate || "").toLocaleLowerCase().includes(normalizedQuery));
+}
+
+/** Returns matching treatments and always keeps the custom-treatment option available. */
+export function getBookingTreatmentSearchResults<T>(
+  options: T[],
+  query: unknown,
+  getCandidates: (option: T) => unknown[],
+  isFallback: (option: T) => boolean
+) {
+  const matches = options.filter((option) => matchesBookingTreatmentSearch(query, ...getCandidates(option)));
+  const fallbackOptions = options.filter(isFallback);
+  return matches.some(isFallback) ? matches : [...matches, ...fallbackOptions];
+}
 
 export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
 type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];
@@ -1336,6 +1371,45 @@ export function getBookingTreatmentsValue(appointment?: any): BookingTreatment[]
   return [];
 }
 
+/**
+ * Presentation-safe treatment details for bookings that may use either the
+ * current `treatments` array or a legacy primary type/customType shape.
+ * Tooth numbers belong to the booking (not an individual treatment), so they
+ * are intentionally returned as one separate detail line.
+ */
+export function getBookingTreatmentDisplay(
+  appointment: any,
+  resolveTreatmentName: (type: number, customType?: string) => string
+) {
+  const treatments = getBookingTreatmentsValue(appointment);
+  const sources = [
+    appointment,
+    appointment?.newState,
+    appointment?.appointment,
+    appointment?.data,
+    appointment?.previousState,
+  ];
+  const legacySource = sources.find((source) => source && typeof source === "object") || {};
+  const resolveLabel = (type: number, customType?: string) => {
+    const resolved = resolveTreatmentName(type, customType);
+    return customType && /^(?:unknown|other)$/i.test(String(resolved).trim())
+      ? customType
+      : resolved || customType || String(type);
+  };
+  const labels = (treatments.length > 0
+    ? treatments.map((treatment) => resolveLabel(treatment.type, treatment.customType))
+    : [resolveLabel(Number(legacySource.type), legacySource.customType)]
+  )
+    .map((label) => String(label || "").trim())
+    .filter(Boolean);
+  const toothNumbers = getBookingToothNumbersValue(appointment);
+
+  return {
+    labels: labels.length > 0 ? labels : ["Selected treatment"],
+    toothDetail: toothNumbers ? `Tooth # ${toothNumbers}` : "",
+  };
+}
+
 export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toothNumbers?: unknown) {
   return {
     treatmentNotes: normalizeBookingTreatmentNotes(treatmentNotes),
@@ -1346,6 +1420,111 @@ export function buildBookingTreatmentNotesPayload(treatmentNotes?: unknown, toot
 export function buildBookingTreatmentsPayload(treatments?: unknown) {
   const normalized = normalizeBookingTreatments(treatments);
   return normalized.length > 0 ? { treatments: normalized } : {};
+}
+
+export type TreatmentOptionLike = {
+  id: number;
+  label?: string;
+  value?: string;
+  price?: number;
+};
+
+export function appointmentToTreatmentDraft(
+  appointment: any,
+  treatmentOptions: TreatmentOptionLike[] = []
+): TreatmentSelectionDraft {
+  const toothNumberEntries = getBookingToothNumberEntries(getBookingToothNumbersValue(appointment));
+  const treatmentNotes = getBookingTreatmentNotesValue(appointment) || "";
+  const discount = String(Math.max(0, Number(appointment?.discount) || 0));
+  const rawTreatments = getBookingTreatmentsValue(appointment);
+
+  const appointmentPrice = Number(appointment?.price);
+  const hasStoredAppointmentPrice = Number.isFinite(appointmentPrice) && appointmentPrice >= 0;
+  const sections: TreatmentSelectionSection[] = rawTreatments.length > 0
+    ? rawTreatments.map((t: any) => {
+        const typeNum = Number(t.type);
+        const sectionId = Number.isInteger(typeNum) ? typeNum : OTHER_APPOINTMENT_TYPE_INDEX;
+        const matched = treatmentOptions.find((opt) => opt.id === sectionId);
+        const customName = sectionId === OTHER_APPOINTMENT_TYPE_INDEX
+          ? String(t.customType || appointment?.customType || "").trim()
+          : "";
+        // A single-treatment appointment's stored price is authoritative. Its
+        // treatments array can retain a catalog price from before a manual edit.
+        const priceSource = rawTreatments.length === 1 && hasStoredAppointmentPrice
+          ? appointmentPrice
+          : t.price ?? matched?.price ?? appointment?.price ?? 0;
+        const priceVal = String(Number(priceSource));
+        return {
+          selectedTreatmentId: sectionId,
+          currentTreatmentLabel: matched?.label || matched?.value || "",
+          customTreatmentName: customName,
+          selectedPrice: priceVal,
+        };
+      })
+    : (() => {
+        const typeNum = Number(appointment?.type);
+        const sectionId = Number.isInteger(typeNum) ? typeNum : OTHER_APPOINTMENT_TYPE_INDEX;
+        const matched = treatmentOptions.find((opt) => opt.id === sectionId);
+        const customName = sectionId === OTHER_APPOINTMENT_TYPE_INDEX
+          ? String(appointment?.customType || "").trim()
+          : "";
+        const priceVal = String(Number(appointment?.price ?? matched?.price ?? 0));
+        return [{
+          selectedTreatmentId: sectionId,
+          currentTreatmentLabel: matched?.label || matched?.value || "",
+          customTreatmentName: customName,
+          selectedPrice: priceVal,
+        }];
+      })();
+
+  const manualPrice = sections[0]?.selectedPrice !== undefined ? String(sections[0].selectedPrice) : String(appointment?.price ?? 0);
+
+  return {
+    sections,
+    toothNumberEntries,
+    manualPrice,
+    discount,
+    treatmentNotes,
+  };
+}
+
+export function treatmentDraftToPayload(
+  draft: TreatmentSelectionDraft,
+  treatmentOptions: TreatmentOptionLike[] = [],
+  duration: number = 30
+) {
+  const sections = draft.sections && draft.sections.length > 0 ? draft.sections : [];
+  const updatedTreatments = sections.map((section) => {
+    const selectedOption = treatmentOptions.find((opt) => opt.id === section.selectedTreatmentId) || { id: OTHER_APPOINTMENT_TYPE_INDEX, price: 0 };
+    const isCustom = selectedOption.id === OTHER_APPOINTMENT_TYPE_INDEX;
+    const priceVal = Number(section.selectedPrice ?? selectedOption.price ?? 0);
+    return {
+      type: selectedOption.id,
+      customType: isCustom ? String(section.customTreatmentName || "").trim() || undefined : undefined,
+      duration: duration,
+      price: Math.max(0, priceVal),
+    };
+  });
+
+  const firstTreatment = updatedTreatments[0] || {
+    type: OTHER_APPOINTMENT_TYPE_INDEX,
+    customType: undefined,
+    duration,
+    price: Math.max(0, Number(draft.manualPrice) || 0),
+  };
+
+  const toothNumbers = normalizeBookingToothNumbers(draft.toothNumberEntries);
+
+  return {
+    type: firstTreatment.type,
+    customType: firstTreatment.customType,
+    duration,
+    price: firstTreatment.price,
+    discount: Math.max(0, Number(draft.discount) || 0),
+    treatmentNotes: draft.treatmentNotes,
+    ...buildBookingTreatmentsPayload(updatedTreatments),
+    toothNumbers,
+  };
 }
 
 // Compute catalog price for booking treatments. If a priceMap is provided (e.g., from service catalog or APPOINTMENT_PRICES),

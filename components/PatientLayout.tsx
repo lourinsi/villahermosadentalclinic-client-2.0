@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart, Bell, LayoutDashboard, Settings } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
-import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -62,7 +61,6 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
-  const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
 
   const handleReschedule = async (appointmentId: string) => {
     console.log(`[PatientLayout] Attempting to reschedule/view appointment: ${appointmentId}`);
@@ -218,23 +216,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
           isHistorical={appointmentSnapshotIsHistorical}
         />
         
-        {/* Support editing/viewing appointments from notifications */}
-        {isBookingModalOpen && (
-          <BookingModalWrapper
-            open={isBookingModalOpen}
-            onOpenChange={(open) => {
-              if (!open) {
-                closeEditModal();
-                closeCreateModal();
-              }
-            }}
-            appointmentToEdit={selectedAppointment}
-            defaultDate={newAppointmentDate}
-            defaultTime={newAppointmentTime}
-            defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
-            appointmentCreationMode={newAppointmentCreationMode}
-          />
-        )}
+        {/* Booking modal is globally handled by GlobalBookingModalWrapper */}
       </div>
     </div>
   );

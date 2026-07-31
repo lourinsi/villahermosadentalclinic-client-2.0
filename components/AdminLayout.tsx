@@ -15,7 +15,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
-import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -126,7 +125,6 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
   } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
-  const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
   const mustChangePassword = Boolean(user?.mustChangePassword && isReceptionistLevelRole(user?.role));
   const visibleNavItems = navItems.filter((item) => !item.hideForReceptionist || !isReceptionistView);
   const mobilePrimaryNavItems = visibleNavItems.filter((item) =>
@@ -639,24 +637,7 @@ export const AdminLayoutShell = ({ children, portalTitle, theme }: AdminLayoutSh
           onConfirm={confirmApprovalAction}
         />
         
-        {/* Support editing appointments from notifications */}
-        {isBookingModalOpen && (
-          <BookingModalWrapper
-            open={isBookingModalOpen}
-            onOpenChange={(open) => {
-              if (!open) {
-                closeEditModal();
-                closeCreateModal();
-              }
-            }}
-            appointmentToEdit={selectedAppointment}
-            defaultDate={newAppointmentDate}
-            defaultTime={newAppointmentTime}
-            defaultPatientId={isCreateModalOpen ? newAppointmentPatientId : undefined}
-            doctorName={newAppointmentDoctorName}
-            appointmentCreationMode={newAppointmentCreationMode}
-          />
-        )}
+        {/* Booking modal is globally handled by GlobalBookingModalWrapper */}
       </div>
       <Dialog
         open={mustChangePassword && isPasswordPromptOpen}

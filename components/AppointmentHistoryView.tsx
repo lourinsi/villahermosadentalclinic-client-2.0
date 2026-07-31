@@ -49,7 +49,10 @@ import {
   normalizeBookingHistoryStatus,
   parseLocalDateOnly,
   findNextAvailableRepeatSlot,
+  appointmentToTreatmentDraft,
+  treatmentDraftToPayload,
 } from "./sharedBookingLogic";
+import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
@@ -1953,7 +1956,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
   const canUseSnapshotActions = Boolean(!actionsDisabled && appointmentId);
   const managementBasePath = getManagementBasePath(pathname);
-  const patientRouteName = isIgnorablePatientName(patientName) ? "" : patientName;
+  const patientRouteName = (isIgnorablePatientName(patientName) ? "" : patientName) || displayedSnapshot?.patientId || patientRecord?.id || "";
   const doctorRouteName = displayedDoctorName || "";
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
@@ -2688,6 +2691,57 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         price: updated?.price ?? firstUpdatedTreatment.price,
         toothNumbers: updated?.toothNumbers ?? appointmentToothNumbers ?? current.toothNumbers,
         treatments: updated?.treatments ?? current.treatments ?? updatedTreatments,
+      }));
+      setLatestComparisonSnapshot(null);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("appointments:updated", {
+            detail: { appointment: updated, appointmentId: String(appointmentId) },
+          })
+        );
+        window.dispatchEvent(new Event("refreshNotifications"));
+      } catch {}
+
+      toast.success("Treatment updated");
+      closeChangeTreatmentModal(true);
+    } catch (error) {
+      console.error("[AppointmentHistoryView] Failed to update treatment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update treatment");
+    } finally {
+      setIsSavingTreatmentChange(false);
+    }
+  };
+
+  const handleSaveTreatmentDraft = async (draft: TreatmentSelectionDraft) => {
+    if (!appointmentId) {
+      toast.error("No appointment id available");
+      return;
+    }
+
+    const appointmentDuration = normalizeBookingDuration(displayedSnapshot?.duration || 30);
+    const payload = treatmentDraftToPayload(draft, activeTreatmentOptions, appointmentDuration);
+    const firstUpdatedTreatment = (payload.treatments as any[])?.[0] || {
+      type: payload.type,
+      customType: payload.customType,
+      duration: appointmentDuration,
+      price: payload.price,
+    };
+
+    setIsSavingTreatmentChange(true);
+    try {
+      const updated = await updateAppointment(String(appointmentId), payload as Partial<Appointment>);
+
+      setDisplayedSnapshot((current: any) => ({
+        ...current,
+        ...updated,
+        type: updated?.type ?? firstUpdatedTreatment.type,
+        customType: firstUpdatedTreatment.customType ?? updated?.customType,
+        duration: updated?.duration ?? appointmentDuration,
+        price: updated?.price ?? firstUpdatedTreatment.price,
+        discount: updated?.discount ?? payload.discount,
+        treatmentNotes: updated?.treatmentNotes ?? payload.treatmentNotes,
+        toothNumbers: updated?.toothNumbers ?? payload.toothNumbers ?? current.toothNumbers,
+        treatments: updated?.treatments ?? current.treatments ?? payload.treatments,
       }));
       setLatestComparisonSnapshot(null);
       try {
@@ -4010,91 +4064,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         title="Change Treatment"
         description={patientName ? `${typeName} for ${patientName}` : typeName}
         treatments={activeTreatmentOptions}
-        treatmentSections={selectedTreatmentSections ?? undefined}
-        onTreatmentSectionsChange={setSelectedTreatmentSections}
-        toothNumberEntries={treatmentToothNumberEntries}
-        onToothNumberEntriesChange={setTreatmentToothNumberEntries}
+        draft={appointmentToTreatmentDraft(displayedSnapshot, activeTreatmentOptions)}
+        onSaveDraft={handleSaveTreatmentDraft}
         allowAddTreatment={true}
         allowRemoveTreatment={true}
-        onSave={handleSaveTreatmentChange}
         onCancel={() => closeChangeTreatmentModal()}
         isSaving={isSavingTreatmentChange}
-        canSave={canSaveTreatmentChange}
         saveLabel="Save Treatment"
       />
 
-      <Dialog open={isAssignDoctorOpen} onOpenChange={(nextOpen) => !isAssigningDoctor && setIsAssignDoctorOpen(nextOpen)}>
-        <DialogContent
-          showCloseButton={false}
-          className="!fixed !bottom-0 !left-0 !top-auto !flex max-h-[88dvh] w-full max-w-full !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[1.5rem] border-none bg-white p-0 shadow-2xl data-[state=open]:slide-in-from-bottom-8 sm:!bottom-auto sm:!left-[50%] sm:!top-[50%] sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-[1.5rem]"
-        >
-          <DialogHeader className="shrink-0 border-b border-slate-100 px-5 pb-4 pt-3 shadow-sm sm:px-6">
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                  <Stethoscope className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 text-left">
-                  <DialogTitle className="truncate text-xl font-black tracking-tight text-slate-950">Assign Doctor</DialogTitle>
-                  <DialogDescription className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">
-                    {patientName ? `${typeName} for ${patientName}` : typeName}
-                  </DialogDescription>
-                </div>
-              </div>
-              <Button type="button" variant="ghost" size="icon" onClick={() => setIsAssignDoctorOpen(false)} disabled={isAssigningDoctor} className="h-10 w-10 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close assign doctor">
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 custom-scrollbar sm:px-6">
-            <SelectDoctorModal className="mx-auto max-w-[38rem]" onDoctorAdded={() => void reloadDoctors()}>
-              {isLoadingDoctors ? (
-                <div className="flex min-h-40 items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm font-bold text-slate-500 shadow-sm">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
-                  Loading doctors
-                </div>
-              ) : doctors.length === 0 ? (
-                <div className="rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
-                  <p className="text-sm font-black text-slate-900">No doctors available</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">Add a doctor record first, then assign this appointment.</p>
-                </div>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {doctors.map((doctor: any) => {
-                    const doctorAvatar = resolveImageSource(pickImageSource(doctor.profilePicture, doctor.profilePictureUrl));
-
-                    return (
-                      <button
-                        key={doctor.id || doctor.name}
-                        type="button"
-                        onClick={() => handleAssignDoctor(doctor)}
-                        disabled={isAssigningDoctor}
-                        className="group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm">
-                          {doctorAvatar ? <AvatarImage src={doctorAvatar} alt={doctor.name} className="object-cover" /> : null}
-                          <AvatarFallback className="rounded-2xl bg-blue-50 text-sm font-black text-blue-700">
-                            {getInitials(doctor.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-black leading-tight text-slate-950">{resolveDoctorName(doctor.name)}</p>
-                          <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-slate-500">{doctor.specialization || doctor.role || "Dental specialist"}</p>
-                        </div>
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
-                          {isAssigningDoctor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </SelectDoctorModal>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SelectDoctorModal
+        open={isAssignDoctorOpen}
+        onOpenChange={(nextOpen) => !isAssigningDoctor && setIsAssignDoctorOpen(nextOpen)}
+        title="Assign Doctor"
+        description={patientName ? `${typeName} for ${patientName}` : typeName}
+        doctors={doctors.map((doctor: any) => ({
+          ...doctor,
+          name: resolveDoctorName(doctor.name),
+          avatar: resolveImageSource(pickImageSource(doctor.profilePicture, doctor.profilePictureUrl)),
+        }))}
+        isLoading={isLoadingDoctors}
+        isSaving={isAssigningDoctor}
+        onDoctorAdded={() => void reloadDoctors()}
+        onSelect={handleAssignDoctor}
+      />
 
       <ApproveRejectDialog open={isApproveConfirmOpen} onOpenChange={setIsApproveConfirmOpen} mode="approve" appointment={displayedSnapshot} onConfirm={performApprove} isProcessing={isProcessingAction} />
       <ApproveRejectDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen} mode="reject" appointment={displayedSnapshot} onConfirm={performReject} isProcessing={isProcessingAction} />
