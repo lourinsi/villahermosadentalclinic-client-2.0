@@ -13,6 +13,7 @@ import {
   CircleDot,
   ClipboardList,
   Clock,
+  CreditCard,
   Loader2,
   Pencil,
   RotateCcw,
@@ -136,6 +137,8 @@ interface ConfirmAppointmentModalProps {
   onToothNumbersChange?: (value: string) => void;
   onDurationChange?: (duration: string) => void;
   onTreatmentNotesChange?: (treatmentNotes: string) => void;
+  onFinalPriceChange?: (price: number) => void;
+  onAddPayment?: () => void;
 
   // Utilities
   getPersonInitials: (name?: string) => string;
@@ -194,6 +197,8 @@ export function ConfirmAppointmentModal({
   onToothNumbersChange,
   onDurationChange,
   onTreatmentNotesChange,
+  onFinalPriceChange,
+  onAddPayment,
   getPersonInitials,
   getDoctorInitials,
   getBookingStatusLabel,
@@ -215,6 +220,8 @@ export function ConfirmAppointmentModal({
   const [customRepeatDatePickerOpen, setCustomRepeatDatePickerOpen] = useState(false);
   const [isToothEditorOpen, setIsToothEditorOpen] = useState(false);
   const [localToothNumbers, setLocalToothNumbers] = useState(String(toothNumbers || ""));
+  const [isFinalPriceEditing, setIsFinalPriceEditing] = useState(false);
+  const [localFinalPrice, setLocalFinalPrice] = useState(String(discountedPrice));
 
   useEffect(() => {
     setRepeatOption(repeatOptionProp);
@@ -224,6 +231,10 @@ export function ConfirmAppointmentModal({
     setLocalToothNumbers(String(toothNumbers || ""));
     setIsToothEditorOpen(false);
   }, [toothNumbers, open]);
+
+  useEffect(() => {
+    if (!isFinalPriceEditing) setLocalFinalPrice(String(discountedPrice));
+  }, [discountedPrice, isFinalPriceEditing]);
 
   useEffect(() => {
     setCustomRepeatDate(customRepeatDateProp);
@@ -282,6 +293,15 @@ export function ConfirmAppointmentModal({
 
   const handleConfirmClick = () => {
     return onConfirm({ repeatOption, customRepeatDate });
+  };
+
+  const commitFinalPrice = () => {
+    const parsedPrice = Number(localFinalPrice);
+    const nextPrice = Number.isFinite(parsedPrice) ? Math.max(0, parsedPrice) : discountedPrice;
+    setLocalFinalPrice(String(nextPrice));
+    // The appointment stores its price before discount; this editor shows the final amount due.
+    onFinalPriceChange?.(nextPrice + Math.max(0, discount));
+    setIsFinalPriceEditing(false);
   };
 
   return (
@@ -665,7 +685,42 @@ export function ConfirmAppointmentModal({
                         ₱{finalPrice.toLocaleString()}
                       </span>
                     )}
-                    <p className="text-5xl font-black tracking-tight text-blue-600 sm:text-6xl">₱{discountedPrice.toLocaleString()}</p>
+                    {onFinalPriceChange ? (
+                      isFinalPriceEditing ? (
+                        <div className="flex items-center text-blue-600">
+                          <span className="text-5xl font-black sm:text-6xl">₱</span>
+                          <input
+                            autoFocus
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={localFinalPrice}
+                            onChange={(event) => setLocalFinalPrice(event.target.value)}
+                            onBlur={commitFinalPrice}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") commitFinalPrice();
+                              if (event.key === "Escape") {
+                            setLocalFinalPrice(String(discountedPrice));
+                                setIsFinalPriceEditing(false);
+                              }
+                            }}
+                            aria-label="Edit final price"
+                            className="w-52 bg-transparent text-5xl font-black tracking-tight outline-none sm:text-6xl"
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onDoubleClick={() => setIsFinalPriceEditing(true)}
+                          className="cursor-text text-left text-5xl font-black tracking-tight text-blue-600 underline decoration-blue-200 decoration-2 underline-offset-8 transition hover:decoration-blue-600 sm:text-6xl"
+                          aria-label={`Double-click to edit final price, currently ${discountedPrice}`}
+                        >
+                          ₱{discountedPrice.toLocaleString()}
+                        </button>
+                      )
+                    ) : (
+                      <p className="text-5xl font-black tracking-tight text-blue-600 sm:text-6xl">₱{discountedPrice.toLocaleString()}</p>
+                    )}
                     {discount > 0 && (
                       <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-widest text-emerald-700 shadow-sm">
                         Saved ₱{discount.toLocaleString()}
@@ -675,8 +730,17 @@ export function ConfirmAppointmentModal({
                 </div>
 
                 <div className="min-w-0 sm:justify-self-end sm:text-right">
-                  <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Payment Status</p>
-                  {canManagePaymentStatuses ? (
+                  {/* <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Payment Status</p> */}
+                  {onAddPayment ? (
+                    <button
+                      type="button"
+                      onClick={onAddPayment}
+                      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-6 text-base font-black uppercase tracking-wide text-blue-700 shadow-sm transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 sm:w-[190px]"
+                    >
+                      <CreditCard className="h-5 w-5" />
+                      Add Payment
+                    </button>
+                  ) : canManagePaymentStatuses ? (
                     <Select value={paymentStatus} onValueChange={onPaymentStatusChange}>
                       <SelectTrigger
                         className={`h-14 w-full rounded-full border border-slate-200 px-6 text-base font-black uppercase tracking-wide shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:w-[190px] ${getPaymentStatusOption(paymentStatus)?.bgColor || "bg-white"} ${getPaymentStatusOption(paymentStatus)?.textColor || "text-slate-900"}`}

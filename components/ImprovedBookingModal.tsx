@@ -432,6 +432,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const { effectiveRole } = useAdminViewMode();
   const { doctors, reloadDoctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, deleteAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
+  const { openPaymentFor } = usePaymentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
   const { options: serviceOptions } = useAppointmentTypeOptions(open);
@@ -3286,6 +3287,27 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  const handleAddPaymentFromSummary = () => {
+    if (!appointmentToEdit?.id) {
+      setIsConfirmSummaryOpen(false);
+      setModalStep("payment");
+      return;
+    }
+
+    setIsConfirmSummaryOpen(false);
+    openPaymentFor(
+      {
+        ...appointmentToEdit,
+        patientId: selectedPatient,
+        price: finalPrice,
+        discount: Number(discount) || 0,
+        totalPaid: previouslyPaidAmount,
+      } as any,
+      selectedPatient,
+      summaryPatientName
+    );
+  };
+
   const openPaymentDatePicker = () => {
     if (isPaymentDateDisabled) return;
 
@@ -4465,6 +4487,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onToothNumbersChange={(newVal) => setToothNumberEntries(getBookingToothNumberEntries(newVal))}
         onDurationChange={(dur) => setDuration(dur)}
         onTreatmentNotesChange={(notes) => setTreatmentNotes(notes)}
+        onFinalPriceChange={canManagePricing ? (price) => setCustomPrice(String(price)) : undefined}
+        onAddPayment={handleAddPaymentFromSummary}
         
         getPersonInitials={getPersonInitials}
         getDoctorInitials={getDoctorInitials}
