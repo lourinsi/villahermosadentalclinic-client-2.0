@@ -446,6 +446,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     const isDeleted = isSoftDeletedAppointment(request);
     const isActionable = isPendingRequestStatus(request.status);
     const canPay = canPromptPayment(request);
+    const displayName = getCurrentPatientName(request);
+    const patientTarget = (displayName && displayName !== "No patient assigned" ? displayName : "") || request.patientId || "";
 
     return (
       <AppointmentActionsMenu
@@ -459,9 +461,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             onChangeTreatment: !isDeleted ? () => openTreatmentCell(request) : undefined,
             onChangeDoctor: !isDeleted ? () => setDoctorCellAppointment(request) : undefined,
             onReschedule: !isDeleted ? () => openScheduleCell(request) : undefined,
-            onGoToPatient: request.patientId ? () => {
+            onGoToPatient: patientTarget ? () => {
               const basePath = effectiveRole === "receptionist" ? "/receptionist" : "/admin";
-              router.push(`${basePath}/patients/${encodeURIComponent(request.patientId)}`);
+              router.push(`${basePath}/patients/${encodeURIComponent(patientTarget)}`);
             } : undefined,
           },
           {
@@ -474,7 +476,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             isDoctorUnassigned: !request.doctor,
             rejectLabel: canonicalStatus(request.status) === "tbd" ? "Cancel" : "Reject",
             approveLabel: canonicalStatus(request.status) === "tbd" ? "Mark completed" : "Approve",
-            canGoToPatient: Boolean(request.patientId),
+            canGoToPatient: Boolean(patientTarget),
           }
         )}
         triggerVariant="ghost"

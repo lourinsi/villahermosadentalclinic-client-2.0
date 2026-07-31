@@ -1956,7 +1956,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && !isAppointmentOpen);
   const canUseSnapshotActions = Boolean(!actionsDisabled && appointmentId);
   const managementBasePath = getManagementBasePath(pathname);
-  const patientRouteName = isIgnorablePatientName(patientName) ? "" : patientName;
+  const patientRouteName = (isIgnorablePatientName(patientName) ? "" : patientName) || displayedSnapshot?.patientId || patientRecord?.id || "";
   const doctorRouteName = displayedDoctorName || "";
   const canGoToPatient = Boolean(patientRouteName);
   const canGoToDoctor = Boolean(doctorRouteName);
