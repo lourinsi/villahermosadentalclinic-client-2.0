@@ -61,6 +61,8 @@ import useSharedBookingLogic, {
   getBookingStatusLabel,
   CART_APPOINTMENT_STATUS,
   getBookingDoctorInitials as getDoctorInitials,
+  getBookingDiscountedPrice,
+  getBookingPriceBeforeDiscount,
   buildBookingTreatmentNotesPayload,
   buildBookingTreatmentsPayload,
   getBookingTreatmentsCatalogPrice,
@@ -2261,7 +2263,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const finalPrice = selectedTreatmentBasePrice;
   const discountAmount = Math.max(0, Number(discount) || 0);
   const hasDiscount = discountAmount > 0;
-  const discountedPrice = Math.max(0, finalPrice - discountAmount);
+  const discountedPrice = getBookingDiscountedPrice(finalPrice, discountAmount);
   const selectedTreatmentTotal = discountedPrice;
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = parseFloat(amountToPay) || 0;
@@ -4037,7 +4039,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         }}
                         className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canManagePricing ? "cursor-pointer" : "cursor-default"}`}
                       >
-                        {hasDiscount && !isPriceEditable && (
+                        {hasDiscount && (
                           <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{finalPrice.toLocaleString()}</p>
                         )}
                         <div className="mt-1.5 flex items-center text-blue-600">
@@ -4045,12 +4047,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           {isPriceEditable && canManagePricing ? (
                             <input
                               type="number"
-                              value={customPrice === "0" ? finalPrice : customPrice}
+                              value={selectedTreatmentTotal}
                               onClick={(e) => e.stopPropagation()}
-                              onChange={(e) => setCustomPrice(e.target.value)}
+                              onChange={(e) => {
+                                setCustomPrice(String(getBookingPriceBeforeDiscount(e.target.value, discountAmount)));
+                              }}
                               onBlur={() => setIsPriceEditable(false)}
                               className="w-[130px] appearance-none border-b-2 border-blue-200 bg-transparent p-0 text-3xl font-black text-blue-600 outline-none ring-0 transition-all placeholder:text-blue-200 focus:border-blue-500 sm:w-[160px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              placeholder={String(finalPrice)}
+                              placeholder={String(selectedTreatmentTotal)}
                               autoFocus
                             />
                           ) : (

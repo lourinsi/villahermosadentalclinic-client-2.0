@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
+import { getBookingDiscountedPrice, getBookingPriceBeforeDiscount } from "./sharedBookingLogic";
 import type { TreatmentSelectionDraft, TreatmentSelectionSection } from "./universalSelectModalDrafts";
 
 type TreatmentOption = {
@@ -112,6 +113,7 @@ export function SelectTreatmentModal({
 }: SelectTreatmentModalProps) {
   const isDraftMode = Boolean(draft && onSaveDraft);
   const [isPriceEditable, setIsPriceEditable] = useState(false);
+  const [editingFinalPrice, setEditingFinalPrice] = useState("");
   const [localDraft, setLocalDraft] = useState<TreatmentSelectionDraft>(() => draft || {
     sections: [],
     toothNumberEntries: [""],
@@ -280,8 +282,19 @@ export function SelectTreatmentModal({
   const currentDiscount = isDraftMode ? localDraft.discount : discount;
   const discountAmount = Math.max(0, Number(currentDiscount) || 0);
   const hasDiscount = discountAmount > 0;
-  const discountedPrice = Math.max(0, basePrice - discountAmount);
+  const discountedPrice = getBookingDiscountedPrice(basePrice, discountAmount);
   const canEditPrice = (isDraftMode || Boolean(onSelectedPriceChange || onTreatmentSectionsChange)) && !isSaving;
+  const beginFinalPriceEdit = () => {
+    setEditingFinalPrice(String(discountedPrice));
+    setIsPriceEditable(true);
+  };
+  const commitFinalPriceEdit = () => {
+    const parsedPrice = Number(editingFinalPrice);
+    if (!editingFinalPrice.trim() || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      setEditingFinalPrice(String(discountedPrice));
+    }
+    setIsPriceEditable(false);
+  };
   const treatmentLabels = sections.map((section) => {
     const sectionTreatment = getSectionTreatment(section);
     const isCustom = sectionTreatment?.id === OTHER_APPOINTMENT_TYPE_INDEX;
@@ -616,13 +629,8 @@ export function SelectTreatmentModal({
                 </div>
               </div>
 
-              <div
-                onClick={() => {
-                  if (canEditPrice && !isPriceEditable) setIsPriceEditable(true);
-                }}
-                className={`relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4 ${canEditPrice ? "cursor-pointer" : "cursor-default"}`}
-              >
-                {hasDiscount && !isPriceEditable && (
+              <div className="relative z-10 mt-3 border-t border-dashed border-gray-200 pt-3 sm:mt-4 sm:pt-4">
+                {hasDiscount && (
                   <p className="mt-2 text-sm font-bold text-gray-400 line-through">&#8369;{basePrice.toLocaleString()}</p>
                 )}
                 <div className="mt-1.5 flex items-center text-blue-600">
@@ -634,20 +642,45 @@ export function SelectTreatmentModal({
                       min={0}
                       step={1}
                       inputMode="decimal"
-                      value={selectedPriceValue}
+                      value={editingFinalPrice}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(event) => {
-                        if (isMultiSectionMode) {
-                          handleSectionSelectedPriceChange(0, event.target.value);
+                        const nextFinalPrice = event.target.value;
+                        setEditingFinalPrice(nextFinalPrice);
+                        if (!nextFinalPrice.trim()) return;
+
+                        const parsedPrice = Number(nextFinalPrice);
+                        if (!Number.isFinite(parsedPrice) || parsedPrice < 0) return;
+
+                        const nextBasePrice = String(getBookingPriceBeforeDiscount(parsedPrice, discountAmount));
+                        if (isDraftMode || isMultiSectionMode) {
+                          handleSectionSelectedPriceChange(0, nextBasePrice);
                         } else {
-                          onSelectedPriceChange?.(event.target.value);
+                          onSelectedPriceChange?.(nextBasePrice);
                         }
                       }}
-                      onBlur={() => setIsPriceEditable(false)}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onBlur={commitFinalPriceEdit}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Escape") {
+                          setEditingFinalPrice(String(discountedPrice));
+                          setIsPriceEditable(false);
+                        }
+                      }}
                       className="w-[130px] appearance-none border-b-2 border-blue-200 bg-transparent p-0 text-3xl font-black text-blue-600 outline-none ring-0 transition-all placeholder:text-blue-200 focus:border-blue-500 sm:w-[160px] sm:text-4xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      placeholder={String(basePrice)}
+                      placeholder={String(discountedPrice)}
                       autoFocus
                     />
+                  ) : canEditPrice ? (
+                    <button
+                      type="button"
+                      onClick={beginFinalPriceEdit}
+                      className="cursor-text text-left text-3xl font-black tracking-tight text-blue-600 underline decoration-blue-200 decoration-2 underline-offset-8 transition hover:decoration-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-4 sm:text-4xl"
+                      aria-label={`Edit final treatment price, currently ${discountedPrice}`}
+                    >
+                      {discountedPrice.toLocaleString()}
+                    </button>
                   ) : (
                     <span className="text-3xl font-black tracking-tight sm:text-4xl">
                       {discountedPrice.toLocaleString()}

@@ -711,9 +711,9 @@ export function ConfirmAppointmentModal({
                       ) : (
                         <button
                           type="button"
-                          onDoubleClick={() => setIsFinalPriceEditing(true)}
+                          onClick={() => setIsFinalPriceEditing(true)}
                           className="cursor-text text-left text-5xl font-black tracking-tight text-blue-600 underline decoration-blue-200 decoration-2 underline-offset-8 transition hover:decoration-blue-600 sm:text-6xl"
-                          aria-label={`Double-click to edit final price, currently ${discountedPrice}`}
+                          aria-label={`Edit final price, currently ${discountedPrice}`}
                         >
                           ₱{discountedPrice.toLocaleString()}
                         </button>

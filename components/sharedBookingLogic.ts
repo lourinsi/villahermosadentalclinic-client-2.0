@@ -35,6 +35,20 @@ type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | 'receptionis
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past' | 'edit';
 
+/** The amount the patient owes after a fixed peso discount is applied. */
+export function getBookingDiscountedPrice(price?: unknown, discount?: unknown) {
+  const basePrice = Math.max(0, Number(price) || 0);
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  return Math.max(0, basePrice - discountAmount);
+}
+
+/** Converts an editable final amount back to the pre-discount appointment price. */
+export function getBookingPriceBeforeDiscount(finalPrice?: unknown, discount?: unknown) {
+  const amountDue = Math.max(0, Number(finalPrice) || 0);
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  return amountDue + discountAmount;
+}
+
 export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
 type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];
 
@@ -1405,6 +1419,8 @@ export function appointmentToTreatmentDraft(
   const discount = String(Math.max(0, Number(appointment?.discount) || 0));
   const rawTreatments = getBookingTreatmentsValue(appointment);
 
+  const appointmentPrice = Number(appointment?.price);
+  const hasStoredAppointmentPrice = Number.isFinite(appointmentPrice) && appointmentPrice >= 0;
   const sections: TreatmentSelectionSection[] = rawTreatments.length > 0
     ? rawTreatments.map((t: any) => {
         const typeNum = Number(t.type);
@@ -1413,7 +1429,12 @@ export function appointmentToTreatmentDraft(
         const customName = sectionId === OTHER_APPOINTMENT_TYPE_INDEX
           ? String(t.customType || appointment?.customType || "").trim()
           : "";
-        const priceVal = String(Number(t.price ?? matched?.price ?? appointment?.price ?? 0));
+        // A single-treatment appointment's stored price is authoritative. Its
+        // treatments array can retain a catalog price from before a manual edit.
+        const priceSource = rawTreatments.length === 1 && hasStoredAppointmentPrice
+          ? appointmentPrice
+          : t.price ?? matched?.price ?? appointment?.price ?? 0;
+        const priceVal = String(Number(priceSource));
         return {
           selectedTreatmentId: sectionId,
           currentTreatmentLabel: matched?.label || matched?.value || "",
