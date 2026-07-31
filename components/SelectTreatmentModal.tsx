@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ClipboardList, Loader2, Plus, Tag, X } from "lucide-react";
+import { Check, ClipboardList, Loader2, Plus, Search, Tag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
-import { getBookingDiscountedPrice, getBookingPriceBeforeDiscount } from "./sharedBookingLogic";
+import { getBookingDiscountedPrice, getBookingPriceBeforeDiscount, getBookingTreatmentSearchResults } from "./sharedBookingLogic";
 import type { TreatmentSelectionDraft, TreatmentSelectionSection } from "./universalSelectModalDrafts";
 
 type TreatmentOption = {
@@ -25,6 +25,62 @@ type TreatmentOption = {
   value?: string;
   icon?: string;
   price?: number;
+};
+
+type CustomTreatmentSuggestion = {
+  treatment: TreatmentOption;
+  normalizedInput: string;
+  isExact: boolean;
+};
+
+const normalizeTreatmentName = (value: string) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const treatmentEditDistance = (first: string, second: string) => {
+  if (first === second) return 0;
+  if (!first) return second.length;
+  if (!second) return first.length;
+
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  const current = Array(second.length + 1).fill(0);
+
+  for (let firstIndex = 1; firstIndex <= first.length; firstIndex += 1) {
+    current[0] = firstIndex;
+    for (let secondIndex = 1; secondIndex <= second.length; secondIndex += 1) {
+      current[secondIndex] = Math.min(
+        current[secondIndex - 1] + 1,
+        previous[secondIndex] + 1,
+        previous[secondIndex - 1] + (first[firstIndex - 1] === second[secondIndex - 1] ? 0 : 1)
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[second.length];
+};
+
+const findCustomTreatmentSuggestion = (
+  value: string,
+  treatmentOptions: TreatmentOption[]
+): CustomTreatmentSuggestion | null => {
+  const normalizedInput = normalizeTreatmentName(value);
+  if (normalizedInput.length < 4) return null;
+
+  const closest = treatmentOptions
+    .filter((treatment) => treatment.id !== OTHER_APPOINTMENT_TYPE_INDEX)
+    .map((treatment) => ({ treatment, distance: treatmentEditDistance(normalizedInput, normalizeTreatmentName(treatment.label)) }))
+    .sort((first, second) => first.distance - second.distance || first.treatment.label.length - second.treatment.label.length)[0];
+
+  if (!closest) return null;
+  const maxDistance = normalizedInput.length >= 7 ? 2 : 1;
+  const ratio = closest.distance / Math.max(normalizedInput.length, closest.treatment.label.length);
+  return closest.distance <= maxDistance && ratio <= 0.35
+    ? { treatment: closest.treatment, normalizedInput, isExact: closest.distance === 0 }
+    : null;
 };
 
 export type SelectTreatmentModalSection = TreatmentSelectionSection;
@@ -114,6 +170,9 @@ export function SelectTreatmentModal({
   const isDraftMode = Boolean(draft && onSaveDraft);
   const [isPriceEditable, setIsPriceEditable] = useState(false);
   const [editingFinalPrice, setEditingFinalPrice] = useState("");
+  const [treatmentSearches, setTreatmentSearches] = useState<Record<number, string>>({});
+  const [declinedCustomTreatmentSuggestions, setDeclinedCustomTreatmentSuggestions] = useState<Record<number, string>>({});
+  const treatmentSearchInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [localDraft, setLocalDraft] = useState<TreatmentSelectionDraft>(() => draft || {
     sections: [],
     toothNumberEntries: [""],
@@ -207,6 +266,10 @@ export function SelectTreatmentModal({
   };
 
   const handleSectionCustomTreatmentNameChange = (sectionIndex: number, value: string) => {
+    const normalizedInput = normalizeTreatmentName(value);
+    setDeclinedCustomTreatmentSuggestions((current) =>
+      current[sectionIndex] === normalizedInput ? current : { ...current, [sectionIndex]: "" }
+    );
     updateSectionValue(sectionIndex, { customTreatmentName: value });
   };
 
@@ -364,7 +427,21 @@ export function SelectTreatmentModal({
     : undefined;
 
   const handleSave = () => {
-    const savedSections = sections.filter((section) => section.selectedTreatmentId !== null && section.selectedTreatmentId !== undefined);
+    const savedSections = sections
+      .map((section, sectionIndex) => {
+        if (section.selectedTreatmentId !== OTHER_APPOINTMENT_TYPE_INDEX) return section;
+        const suggestion = findCustomTreatmentSuggestion(String(section.customTreatmentName || ""), treatments);
+        if (!suggestion || declinedCustomTreatmentSuggestions[sectionIndex] === suggestion.normalizedInput) return section;
+
+        const currentPrice = Number(section.selectedPrice);
+        return {
+          ...section,
+          selectedTreatmentId: suggestion.treatment.id,
+          customTreatmentName: "",
+          selectedPrice: String(Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : suggestion.treatment.price ?? 0),
+        };
+      })
+      .filter((section) => section.selectedTreatmentId !== null && section.selectedTreatmentId !== undefined);
     if (isDraftMode) {
       void onSaveDraft?.({
         ...localDraft,
@@ -420,6 +497,14 @@ export function SelectTreatmentModal({
           {sections.map((section, sectionIndex) => {
             const sectionTreatment = getSectionTreatment(section);
             const sectionIsCustomTreatment = isSectionCustomTreatment(section);
+            const customTreatmentSuggestion = sectionIsCustomTreatment
+              ? findCustomTreatmentSuggestion(String(section.customTreatmentName || ""), treatments)
+              : null;
+            const showCustomTreatmentSuggestion = Boolean(
+              customTreatmentSuggestion &&
+              !customTreatmentSuggestion.isExact &&
+              declinedCustomTreatmentSuggestions[sectionIndex] !== customTreatmentSuggestion.normalizedInput
+            );
 
             return (
               <div key={sectionIndex} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
@@ -447,7 +532,10 @@ export function SelectTreatmentModal({
                       value={section.selectedTreatmentId === null || section.selectedTreatmentId === undefined ? "" : String(section.selectedTreatmentId)}
                       onValueChange={(value) => {
                         const treatment = treatments.find((option) => String(option.id) === value);
-                        if (treatment) handleSectionTreatmentSelect(sectionIndex, treatment);
+                        if (treatment) {
+                          handleSectionTreatmentSelect(sectionIndex, treatment);
+                          setTreatmentSearches((current) => ({ ...current, [sectionIndex]: "" }));
+                        }
                       }}
                     >
                       <SelectTrigger className="mt-3 h-auto min-h-[4.25rem] rounded-xl border border-blue-100 bg-blue-50/30 px-3 py-2.5 text-left shadow-none hover:bg-blue-50/60 focus:ring-2 focus:ring-blue-200 focus:ring-offset-0 sm:min-h-[5.25rem] sm:rounded-2xl sm:px-4 sm:py-3">
@@ -470,8 +558,36 @@ export function SelectTreatmentModal({
                           <SelectValue placeholder="Choose a treatment service" />
                         )}
                       </SelectTrigger>
-                      <SelectContent className="max-h-[18rem] rounded-2xl border-blue-100 bg-white p-2 shadow-xl">
-                        {treatments.map((treatment) => {
+                      <SelectContent
+                        className="max-h-[18rem] rounded-2xl border-blue-100 bg-white p-2 shadow-xl"
+                        onKeyDownCapture={(event) => {
+                          if (event.target instanceof HTMLInputElement) event.stopPropagation();
+                        }}
+                      >
+                        <div className="sticky top-0 z-10 mb-1 w-full border-b border-gray-100 bg-white pb-2">
+                          <label className="flex w-full cursor-text items-center gap-2 rounded-xl border border-gray-200 bg-slate-50 px-3">
+                            <Search className="h-4 w-4 text-slate-400" />
+                            <div className="min-w-0 flex-1">
+                              <Input
+                                ref={(element) => {
+                                  treatmentSearchInputRefs.current[sectionIndex] = element;
+                                }}
+                                autoFocus
+                                value={treatmentSearches[sectionIndex] || ""}
+                                onChange={(event) => {
+                                  setTreatmentSearches((current) => ({ ...current, [sectionIndex]: event.target.value }));
+                                  requestAnimationFrame(() => treatmentSearchInputRefs.current[sectionIndex]?.focus());
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                onKeyDownCapture={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                placeholder="Search treatments"
+                                className="h-9 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                              />
+                            </div>
+                          </label>
+                        </div>
+                        {getBookingTreatmentSearchResults(treatments, treatmentSearches[sectionIndex], (treatment) => [treatment.label, treatment.value], (treatment) => treatment.id === OTHER_APPOINTMENT_TYPE_INDEX).map((treatment) => {
                           const isOther = treatment.id === OTHER_APPOINTMENT_TYPE_INDEX;
                           const isSelectedByOtherSection = sections.some(
                             (section, currentIndex) =>
@@ -521,6 +637,42 @@ export function SelectTreatmentModal({
                         placeholder="Type treatment name"
                         className="h-12 rounded-xl border-blue-100 bg-blue-50/30 font-bold text-slate-900 shadow-none focus-visible:ring-blue-200"
                       />
+                      {showCustomTreatmentSuggestion && customTreatmentSuggestion ? (
+                        <div className="flex flex-col gap-3 rounded-xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-sm font-black text-slate-900">
+                              Did you mean {customTreatmentSuggestion.treatment.label}?
+                            </p>
+                            <p className="mt-0.5 text-xs font-semibold text-blue-700/70">
+                              Yes is the default and will use the catalog treatment and price.
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => handleSectionTreatmentSelect(sectionIndex, customTreatmentSuggestion.treatment)}
+                              className="bg-blue-600 font-black text-white hover:bg-blue-700"
+                            >
+                              <Check className="mr-1.5 h-3.5 w-3.5" />
+                              Yes
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setDeclinedCustomTreatmentSuggestions((current) => ({
+                                ...current,
+                                [sectionIndex]: customTreatmentSuggestion.normalizedInput,
+                              }))}
+                              className="font-black"
+                            >
+                              <X className="mr-1.5 h-3.5 w-3.5" />
+                              No
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 

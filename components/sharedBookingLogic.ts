@@ -49,6 +49,25 @@ export function getBookingPriceBeforeDiscount(finalPrice?: unknown, discount?: u
   return amountDue + discountAmount;
 }
 
+/** Case-insensitive matching used by treatment pickers throughout booking flows. */
+export function matchesBookingTreatmentSearch(query?: unknown, ...candidates: unknown[]) {
+  const normalizedQuery = String(query || "").trim().toLocaleLowerCase();
+  if (!normalizedQuery) return true;
+  return candidates.some((candidate) => String(candidate || "").toLocaleLowerCase().includes(normalizedQuery));
+}
+
+/** Returns matching treatments and always keeps the custom-treatment option available. */
+export function getBookingTreatmentSearchResults<T>(
+  options: T[],
+  query: unknown,
+  getCandidates: (option: T) => unknown[],
+  isFallback: (option: T) => boolean
+) {
+  const matches = options.filter((option) => matchesBookingTreatmentSearch(query, ...getCandidates(option)));
+  const fallbackOptions = options.filter(isFallback);
+  return matches.some(isFallback) ? matches : [...matches, ...fallbackOptions];
+}
+
 export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
 type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];
 

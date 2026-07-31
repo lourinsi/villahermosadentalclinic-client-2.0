@@ -17,7 +17,7 @@ import { buildModalMemoryKey, usePersistentModalMemory } from "@/hooks/usePersis
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag, RotateCcw } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus, Check, X, Lock, ClipboardList, ShieldCheck, Tag, RotateCcw, Search } from "lucide-react";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -63,6 +63,7 @@ import useSharedBookingLogic, {
   getBookingDoctorInitials as getDoctorInitials,
   getBookingDiscountedPrice,
   getBookingPriceBeforeDiscount,
+  getBookingTreatmentSearchResults,
   buildBookingTreatmentNotesPayload,
   buildBookingTreatmentsPayload,
   getBookingTreatmentsCatalogPrice,
@@ -463,6 +464,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [duration, setDuration] = useState<string>("30");
   const [discount, setDiscount] = useState<string>("0");
   const [customPrice, setCustomPrice] = useState<string>("0");
+  const [primaryTreatmentSearch, setPrimaryTreatmentSearch] = useState("");
+  const [additionalTreatmentSearches, setAdditionalTreatmentSearches] = useState<Record<number, string>>({});
+  const primaryTreatmentSearchInputRef = useRef<HTMLInputElement>(null);
+  const additionalTreatmentSearchInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [notes, setNotes] = useState<string>("");
   const [treatmentNotes, setTreatmentNotes] = useState<string>("");
   const [toothNumberEntries, setToothNumberEntries] = useState<string[]>([""]);
@@ -3754,7 +3759,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         Treatment 1
                       </Label>
                     </div>
-                    <Select value={primaryTreatmentName} onValueChange={handleTreatmentSelect} disabled={isPatientReadonly}>
+                    <Select value={primaryTreatmentName} onValueChange={(value) => { handleTreatmentSelect(value); setPrimaryTreatmentSearch(""); }} disabled={isPatientReadonly}>
                         <SelectTrigger
                           id="improved-booking-treatment-select"
                           data-tour-id="booking-treatment-select"
@@ -3779,8 +3784,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             <SelectValue placeholder="Choose treatment" />
                           )}
                         </SelectTrigger>
-                        <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
-                          {bookingTreatmentOptions.map((t) => {
+                        <SelectContent
+                          className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl"
+                          onKeyDownCapture={(event) => {
+                            if (event.target instanceof HTMLInputElement) event.stopPropagation();
+                          }}
+                        >
+                          <div className="sticky top-0 z-10 w-full border-b border-gray-100 bg-white p-2">
+                            <label className="flex w-full cursor-text items-center gap-2 rounded-xl border border-gray-200 bg-slate-50 px-3">
+                              <Search className="h-4 w-4 text-slate-400" />
+                              <div className="min-w-0 flex-1">
+                                <Input
+                                  ref={primaryTreatmentSearchInputRef}
+                                  autoFocus
+                                  value={primaryTreatmentSearch}
+                                  onChange={(event) => {
+                                    setPrimaryTreatmentSearch(event.target.value);
+                                    requestAnimationFrame(() => primaryTreatmentSearchInputRef.current?.focus());
+                                  }}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                  onKeyDownCapture={(event) => event.stopPropagation()}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  placeholder="Search treatments"
+                                  className="h-9 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </label>
+                          </div>
+                          {getBookingTreatmentSearchResults(bookingTreatmentOptions, primaryTreatmentSearch, (t) => [t.name], (t) => t.name === "Other").map((t) => {
                             const optionPrice = servicePriceByName[t.name] || 0;
                             const disabled = isTreatmentOptionDisabled(t.name);
 
@@ -3876,7 +3907,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <div>
                                 <Select
                                   value={section.appointmentType || ""}
-                                  onValueChange={(value) => handleUpdateAdditionalTreatmentService(sectionIndex, value)}
+                                  onValueChange={(value) => {
+                                    handleUpdateAdditionalTreatmentService(sectionIndex, value);
+                                    setAdditionalTreatmentSearches((current) => ({ ...current, [sectionIndex]: "" }));
+                                  }}
                                   disabled={isPatientReadonly}
                                 >
                                   <SelectTrigger
@@ -3889,8 +3923,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                       <SelectValue placeholder="Choose treatment" />
                                     )}
                                   </SelectTrigger>
-                                  <SelectContent className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl">
-                                    {bookingTreatmentOptions.map((t) => {
+                                  <SelectContent
+                                    className="max-h-[18rem] rounded-2xl border border-gray-100 shadow-2xl"
+                                    onKeyDownCapture={(event) => {
+                                      if (event.target instanceof HTMLInputElement) event.stopPropagation();
+                                    }}
+                                  >
+                                    <div className="sticky top-0 z-10 w-full border-b border-gray-100 bg-white p-2">
+                                      <label className="flex w-full cursor-text items-center gap-2 rounded-xl border border-gray-200 bg-slate-50 px-3">
+                                        <Search className="h-4 w-4 text-slate-400" />
+                                        <div className="min-w-0 flex-1">
+                                          <Input
+                                            ref={(element) => {
+                                              additionalTreatmentSearchInputRefs.current[sectionIndex] = element;
+                                            }}
+                                            autoFocus
+                                            value={additionalTreatmentSearches[sectionIndex] || ""}
+                                            onChange={(event) => {
+                                              setAdditionalTreatmentSearches((current) => ({ ...current, [sectionIndex]: event.target.value }));
+                                              requestAnimationFrame(() => additionalTreatmentSearchInputRefs.current[sectionIndex]?.focus());
+                                            }}
+                                            onKeyDown={(event) => event.stopPropagation()}
+                                            onKeyDownCapture={(event) => event.stopPropagation()}
+                                            onPointerDown={(event) => event.stopPropagation()}
+                                            placeholder="Search treatments"
+                                            className="h-9 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                                          />
+                                        </div>
+                                      </label>
+                                    </div>
+                                    {getBookingTreatmentSearchResults(bookingTreatmentOptions, additionalTreatmentSearches[sectionIndex], (t) => [t.name], (t) => t.name === "Other").map((t) => {
                                       const optionPrice = servicePriceByName[t.name] || 0;
                                       const disabled = isTreatmentOptionDisabled(t.name, sectionIndex);
 
