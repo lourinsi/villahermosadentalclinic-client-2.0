@@ -1,5 +1,5 @@
-import { QuestionnaireView } from "@/components/QuestionnaireView";
+import { redirect } from "next/navigation";
 
 export default function ReceptionistQuestionnairePage() {
-  return <QuestionnaireView />;
+  redirect("/receptionist/patients");
 }

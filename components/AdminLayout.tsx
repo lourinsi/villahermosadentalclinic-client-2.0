@@ -53,7 +53,6 @@ const navItems = [
   { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/doctors", label: "Find Doctors", icon: Stethoscope, hideForReceptionist: true },
   { path: "/services", label: "Services", icon: ListChecks },
-  { path: "/questionnaire", label: "Questionnaire", icon: ClipboardList },
   { path: "/finance", label: "Finance", icon: DollarSign },
   { path: "/staff", label: "Staff", icon: Shield },
   { path: "/notifications", label: "Notifications", icon: Bell },
