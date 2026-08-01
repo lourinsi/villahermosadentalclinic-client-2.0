@@ -80,7 +80,7 @@ import PatientAvatar from "./PatientAvatar";
 import DeletePaymentDialog from "./DeletePaymentDialog";
 import SignatureInputModal from "./SignatureInputModal";
 import { CurrencyText } from "./CurrencyAmount";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -122,6 +122,9 @@ import {
 } from "@/lib/patient-profile-draft";
 import {
   loadQuestionnaireQuestions,
+  addCustomQuestion,
+  deleteCustomQuestion,
+  QUESTIONNAIRE_SECTION_IDENTITIES,
   type QuestionnaireQuestion,
 } from "@/lib/questionnaire-questions";
 import PatientUnsavedChangesDialog, { getVisiblePatientChanges } from "./PatientUnsavedChangesDialog";
@@ -328,46 +331,73 @@ const physicianInformationComparable = (physicianInformation: PhysicianInformati
   officeNumber: physicianInformation.officeNumber.trim(),
 });
 
-const CONSENT_VERSION = "focused-informed-consent-v1";
+const CONSENT_VERSION = "pda-informed-consent-v2";
 
 const CONSENT_ACKNOWLEDGEMENTS = [
   {
     id: "treatment",
-    title: "Treatment to be done",
+    title: "1. TREATMENT TO BE DONE",
     description:
-      "Consent is given for explained dental care, including diagnostic images, cleaning, periodontal treatment, restorations, crowns, bridges, extractions, root canal therapy, dentures, local anesthesia, and surgical care when needed.",
+      "I understand and consent to have any treatment done by the dentist after the procedure, the risks & benefits & cost have been fully explained. These treatments include, but are not limited to, x-rays, cleanings, periodontal treatments, fillings, crowns, bridges, all types of extraction, root canals, &/or dentures, local anesthetics & surgical cases.",
   },
   {
     id: "medications",
-    title: "Drugs and medications",
+    title: "2. DRUGS & MEDICATIONS",
     description:
-      "The patient understands that antibiotics, pain relievers, anesthetics, and other medicines may cause side effects or allergic reactions that may require urgent care.",
+      "I understand that antibiotics, analgesics & other medications can cause allergic reactions like redness & swelling of tissues, pain, itching, vomiting &/or anaphylactic shock.",
   },
   {
     id: "treatmentPlanChanges",
-    title: "Changes in treatment plan",
+    title: "3. CHANGES IN TREATMENT PLAN",
     description:
-      "The patient authorizes clinically necessary changes, additions, or postponements if conditions discovered during treatment require them.",
+      "I understand that during treatment it may be necessary to change/add procedures because of conditions found while working on the tooth that was not discovered during examination. For example, root canal therapy may be needed following routine restorative procedures. I give my permission to the dentist to make any/all changes and additions as necessary w/ my responsibility to pay all the costs agreed.",
   },
   {
-    id: "noGuarantee",
-    title: "No guaranteed result",
+    id: "radiograph",
+    title: "4. RADIOGRAPH",
     description:
-      "The patient understands that dentistry is not an exact science and that treatment results cannot be guaranteed in every situation.",
+      "I understand that an x-ray shot or a radiograph may be necessary as part of diagnostic aid to come up with tentative diagnosis of my Dental problem and to make a good treatment plan, but, this will not give me a 100% assurance for the accuracy of the treatment since all dental treatments are subject to unpredictable complications that later on may lead to sudden change of treatment plan and subject to new charges.",
   },
   {
-    id: "authorization",
-    title: "Authorization to proceed",
+    id: "removalOfTeeth",
+    title: "5. REMOVAL OF TEETH",
     description:
-      "The patient authorizes the clinic dentist and dental auxiliaries to perform the explained dental restorations and treatments.",
+      "I understand that alternatives to tooth removal (root canal therapy, crowns & periodontal surgery, etc.) & I completely understand these alternatives, including their risk & benefits prior to authorizing the dentist to remove teeth & any other structures necessary for reasons above. I understand that removing teeth does not always remove all the infections, if present, & it may be necessary to have further treatment. I understand the risk involved in having teeth removed, such as pain, swelling, spread of infection, dry socket, fractured jaw, loss of feeling on the teeth, lips, tongue & surrounding tissue that can last for an indefinite period of time. I understand that I may need further treatment under a specialist if complications arise during or following treatment.",
   },
   {
-    id: "financialResponsibility",
-    title: "Financial responsibility",
+    id: "crownsAndBridges",
+    title: "6. CROWNS (CAPS) & BRIDGES",
     description:
-      "The patient accepts responsibility for dental fees and agreed charges related to care, including collection or legal costs if an account becomes unpaid.",
+      "Preparing a tooth may irritate the nerve tissue in the center of the tooth, leaving the tooth extra sensitive to heat, cold & pressure. Treating such irritation may involve using special toothpastes, mouth rinses or root canal therapy. I understand that sometimes it is not possible to match the color of natural teeth exactly with artificial teeth. I further understand that I may be wearing temporary crowns, which may come off easily & that I must be careful to ensure that they are kept on until the permanent crowns are delivered. It is my responsibility to return for permanent cementation within 20 days from tooth preparation, as excessive days delay may allow for tooth movement, which may necessitate a remake of the crown, bridge or cap. I understand there will be additional charges for remakes due to my delay of permanent cementation, & I realize that final opportunity to make changes in my new crown, bridges or cap (including shape, fit, size, & color) will be before permanent cementation.",
+  },
+  {
+    id: "endodontics",
+    title: "7. ENDODONTICS (ROOT CANAL)",
+    description:
+      "I understand there is no guarantee that a root canal treatment will save a tooth & that complications can occur from the treatment & that occasionally root canal filling materials may extend through the tooth which does not necessarily affect the success of the treatment. I understand that endodontic files & drills are very fine instruments & stresses vented in their manufacture & calcifications present in teeth can cause them to break during use. I understand that referral to the endodontist may be necessary following any root canal treatment & I agree that I am responsible for any additional cost for treatment performed by the endodontist. I understand that a tooth may require removal in spite of all efforts to save it.",
+  },
+  {
+    id: "periodontalDisease",
+    title: "8. PERIODONTAL DISEASE",
+    description:
+      "I understand that periodontal disease is a serious condition causing gum & bone inflammation &/or loss & that can lead eventually to the loss of my teeth. I understand the alternative treatment plans to correct periodontal disease, including gum surgery tooth extractions with or without replacement. I understand that undertaking any dental procedures may have future adverse effect on my periodontal Conditions.",
+  },
+  {
+    id: "fillings",
+    title: "9. FILLINGS",
+    description:
+      "I understand that care must be exercised in chewing on fillings, especially during the first 24 hours to avoid breakage. I understand that a more extensive filling or a crown may be required, as additional decay or fracture may be discovered during treatment. I understand that significant sensitivity is a common, but usually temporary, after-effect of a newly placed filling. I further understand that filling a tooth may irritate the nerve tissue creating sensitivity & treating such sensitivity could require root canal therapy or extractions.",
+  },
+  {
+    id: "dentures",
+    title: "10. DENTURES",
+    description:
+      "I understand that wearing of dentures can be difficult. Sore spots, altered speech & difficulty in eating are common problems. Immediate dentures (placement of denture immediately after extractions) may be painful. Immediate dentures may require considerable adjusting & several relines. I understand that it is my responsibility to return for delivery of dentures. I understand that failure to keep my delivery appointment may result in poorly fitted dentures. If a remake is required due to my delays of more than 30 days, there will be additional charges. A permanent reline will be needed later, which is not included in the initial fee. I understand that all adjustment or alterations of any kind after this initial period is subject to charges.",
   },
 ] as const;
+
+const PDA_INFORMED_CONSENT_FINAL_STATEMENT =
+  "I understand that dentistry is not an exact science and that no dentist can properly guarantee accurate results all the time. I hereby authorize any of the doctors / dental auxiliaries to proceed with & perform the dental restorations & treatments as explained to me. I understand that these are subject to modification depending on undiagnosable circumstances that may arise during the course of treatment. I understand that regardless of any dental insurance coverage I may have, I am responsible for payment of dental fees, I agree to pay any attorney's fees, collection fee, or court costs that may be incurred to satisfy any obligation to this office. All treatment were properly explained to me & any untoward circumstances that may arise during the procedure, the attending dentist will not be held liable since it is my free will, with full trust & confidence in him/her, to undergo dental Treatment under his/her care.";
 
 type ConsentAcknowledgementId = (typeof CONSENT_ACKNOWLEDGEMENTS)[number]["id"];
 type ConsentAcknowledgements = Record<ConsentAcknowledgementId, boolean>;
@@ -1068,6 +1098,12 @@ const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn)
 const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) =>
   Boolean(appointment?.deleted) ||
   normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
+const isOverdueTreatmentHistoryAppointment = (appointment?: Partial<Appointment> | HistoryAppointment | null) => {
+  const appointmentStatus = normalizeAppointmentStatus(String(appointment?.status || ""));
+  const paymentStatus = normalizePaymentStatus(String(appointment?.paymentStatus || ""));
+  const isFullyPaid = paymentStatus === "paid" || paymentStatus === "over-paid";
+  return appointmentStatus === "tbd" && !isFullyPaid;
+};
 const getEditablePaymentId = (txn: RecentTransaction) => {
   if (isStoredPaymentLogRow(txn)) return "";
   if (isSoftDeletedPaymentTransaction(txn)) return "";
@@ -1593,6 +1629,54 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
   const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
+
+  // Custom questionnaire question creation state
+  const [isAddQuestionModalOpen, setIsAddQuestionModalOpen] = useState(false);
+  const [addQuestionTargetCategory, setAddQuestionTargetCategory] = useState<string>("general");
+  const [addQuestionTargetLabel, setAddQuestionTargetLabel] = useState<string>("General Medical Information");
+  const [newQuestionText, setNewQuestionText] = useState("");
+  const [isAddingQuestion, setIsAddingQuestion] = useState(false);
+
+  const handleOpenAddQuestionModal = (category: string, label: string) => {
+    setAddQuestionTargetCategory(category);
+    setAddQuestionTargetLabel(label);
+    setNewQuestionText("");
+    setIsAddQuestionModalOpen(true);
+  };
+
+  const handleConfirmAddQuestion = async () => {
+    const text = newQuestionText.trim();
+    if (!text) {
+      toast.error("Please enter a question text.");
+      return;
+    }
+    setIsAddingQuestion(true);
+    try {
+      const createdQ = await addCustomQuestion({
+        text,
+        category: addQuestionTargetCategory,
+        sectionId: addQuestionTargetCategory,
+      });
+      setQuestionnaireQuestions((prev) => [...prev.filter((q) => q.id !== createdQ.id), createdQ]);
+      toast.success(`Question added to ${addQuestionTargetLabel}!`);
+      setIsAddQuestionModalOpen(false);
+      setNewQuestionText("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add question.");
+    } finally {
+      setIsAddingQuestion(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (questionId: string) => {
+    try {
+      await deleteCustomQuestion(questionId);
+      setQuestionnaireQuestions((prev) => prev.filter((q) => q.id !== questionId));
+      toast.success("Question deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete question");
+    }
+  };
   const [isRecoveryDialogOpen, setIsRecoveryDialogOpen] = useState(false);
   const [isRecoverySaving, setIsRecoverySaving] = useState(false);
   const [editingToothNumberAptId, setEditingToothNumberAptId] = useState<string | null>(null);
@@ -1693,8 +1777,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   );
 
   const allConsentAcknowledgementsAccepted = React.useMemo(
-    () => CONSENT_ACKNOWLEDGEMENTS.every((item) => consentForm.acknowledgements[item.id]),
-    [consentForm.acknowledgements]
+    () => consentForm.accepted || CONSENT_ACKNOWLEDGEMENTS.every((item) => consentForm.acknowledgements[item.id]),
+    [consentForm.accepted, consentForm.acknowledgements]
   );
 
   const hasConsentSignature = Boolean(consentForm.patientSignatureImage);
@@ -1737,21 +1821,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const updateConsentField = <K extends keyof ConsentFormState>(field: K, value: ConsentFormState[K]) => {
     setConsentForm((current) => ({
       ...current,
-      accepted: false,
       [field]: value,
     }));
     setIsModified(true);
   };
 
-  const updateConsentAcknowledgement = (id: ConsentAcknowledgementId, checked: boolean) => {
-    setConsentForm((current) => ({
-      ...current,
-      accepted: false,
-      acknowledgements: {
-        ...current.acknowledgements,
-        [id]: checked,
-      },
-    }));
+  const updateConsentMasterAccepted = (checked: boolean) => {
+    setConsentForm((current) => {
+      const nextAcknowledgements = { ...current.acknowledgements };
+      CONSENT_ACKNOWLEDGEMENTS.forEach((item) => {
+        nextAcknowledgements[item.id] = checked;
+      });
+      return {
+        ...current,
+        accepted: checked,
+        acknowledgements: nextAcknowledgements,
+      };
+    });
     setIsModified(true);
   };
 
@@ -1871,6 +1957,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     }
   };
 
+  const getHistoryAppointmentType = React.useCallback((apt: Appointment) => {
+    return getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || "Appointment");
+  }, []);
+
   const handlePatientPhotoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -1889,7 +1979,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setIsPreparingPatientPhoto(true);
     try {
       const compressedDataUrl = await compressPatientPhoto(file);
-      setFormData(prev => ({ ...prev, profilePicture: compressedDataUrl }));
+      setFormData((prev) => ({ ...prev, profilePicture: compressedDataUrl }));
       setIsModified(true);
     } catch (error) {
       console.error("Error preparing patient photo:", error);
@@ -1900,13 +1990,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const handleRemovePatientPhoto = () => {
-    setFormData(prev => ({ ...prev, profilePicture: "" }));
+    setFormData((prev) => ({ ...prev, profilePicture: "" }));
     setIsModified(true);
   };
-
-  const getHistoryAppointmentType = React.useCallback((apt: Appointment) => {
-    return getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || "Appointment");
-  }, []);
 
   const createLegacyPaymentRow = React.useCallback((apt: Appointment): RecentTransaction | null => {
     const totalPaid = Number(apt.totalPaid || 0);
@@ -3071,9 +3157,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
-      const normalizedStatus = normalizeAppointmentStatus(String(apt.status || ""));
       if (!canSeeDeletedAppointments && isSoftDeletedAppointment(apt)) return false;
-      if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
+      if (historyPaymentStatusFilter === "overdue") {
+        if (!isOverdueTreatmentHistoryAppointment(apt)) return false;
+      } else if (historyPaymentStatusFilter !== "all" && normalizePaymentStatus(String(apt.paymentStatus || "")) !== historyPaymentStatusFilter) {
+        return false;
+      }
       if (historyDoctorFilter !== 'all' && getVisitDoctorName(apt) !== historyDoctorFilter) return false;
 
       if (historyProcedureFilter !== 'all') {
@@ -4591,7 +4680,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                   ...OTHER_MEDICAL_IDS,
                   ...WOMEN_ONLY_IDS
                 ]);
-                const additionalQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id));
+
+                const customGeneralQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id) && (q.category === "general" || q.sectionId === "general" || (!q.category && !q.sectionId)));
+                const customAllergyQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id) && (q.category === "allergies" || q.sectionId === "allergies"));
+                const customMedicalConditionQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id) && (q.category === "medical_conditions" || q.sectionId === "medical_conditions"));
+                const customOtherMedicalQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id) && (q.category === "other" || q.sectionId === "other"));
+
+                const categorizedCustomIds = new Set([
+                  ...customGeneralQuestions.map(q => q.id),
+                  ...customAllergyQuestions.map(q => q.id),
+                  ...customMedicalConditionQuestions.map(q => q.id),
+                  ...customOtherMedicalQuestions.map(q => q.id),
+                ]);
+                const remainingUncategorizedQuestions = questionnaireQuestions.filter(q => !baselineAllKnownIds.has(q.id) && !categorizedCustomIds.has(q.id));
 
                 const qPhysician = questionnaireQuestions.find(q => q.id === PHYSICIAN_INFORMATION_QUESTION_ID);
                 const qGoodHealth = questionnaireQuestions.find(q => q.id === "baseline_good_health");
@@ -4657,10 +4758,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                         {/* 1. GENERAL MEDICAL INFORMATION */}
                         <Card className={cardClass}>
-                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                              1. General Medical Information
-                            </CardTitle>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4 flex flex-row items-center justify-between gap-2">
+                            <div>
+                              <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                                1. General Medical Information
+                              </CardTitle>
+                              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                                <span>Identity: General Medical Information</span>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenAddQuestionModal("general", "General Medical Information")}
+                              className="h-8 gap-1.5 rounded-lg border-violet-200 bg-violet-50 px-2.5 text-xs font-bold text-violet-700 hover:bg-violet-100 hover:text-violet-800 shadow-none shrink-0"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>Add Question</span>
+                            </Button>
                           </CardHeader>
                           <CardContent className="p-5 space-y-1">
                             {/* Physician Information Question */}
@@ -4721,15 +4838,80 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             {renderRowToggle(qMedication, "medicationDetails", "If so, please specify.", "Specify medication details...")}
                             {renderRowToggle(qTobacco)}
                             {renderRowToggle(qDrugs)}
+
+                            {/* Custom General Medical Questions */}
+                            {customGeneralQuestions.length > 0 && (
+                              <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+                                <p className="text-[10px] font-extrabold uppercase tracking-wider text-violet-600">Added General Questions</p>
+                                {customGeneralQuestions.map((question) => {
+                                  const checked = Boolean(questionnaireAnswers[question.id]);
+                                  return (
+                                    <div key={question.id} className="space-y-2 py-3 border-b border-slate-100 last:border-b-0">
+                                      <div className="flex items-start justify-between gap-4">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-semibold text-slate-800 leading-tight">{question.text}</span>
+                                          <Badge variant="outline" className="text-[9px] text-violet-600 border-violet-200 bg-violet-50">Custom</Badge>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <ToggleGroup
+                                            type="single"
+                                            value={checked ? "yes" : "no"}
+                                            onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                            disabled={isSavingQuestionnaire}
+                                            aria-label={`Answer ${question.text}`}
+                                            className="h-8 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                            variant="outline"
+                                            size="sm"
+                                          >
+                                            <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                              Yes
+                                            </ToggleGroupItem>
+                                            <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                              No
+                                            </ToggleGroupItem>
+                                          </ToggleGroup>
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="ghost"
+                                            onClick={() => handleDeleteQuestion(question.id)}
+                                            className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                                            title="Delete question"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </CardContent>
                         </Card>
 
                         {/* 2. ALLERGIES */}
                         <Card className={cardClass}>
-                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                              2. Allergies
-                            </CardTitle>
+                          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4 flex flex-row items-center justify-between gap-2">
+                            <div>
+                              <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                                2. Allergies
+                              </CardTitle>
+                              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                                <span>Identity: Allergies</span>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenAddQuestionModal("allergies", "Allergies")}
+                              className="h-8 gap-1.5 rounded-lg border-violet-200 bg-violet-50 px-2.5 text-xs font-bold text-violet-700 hover:bg-violet-100 hover:text-violet-800 shadow-none shrink-0"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>Add Question</span>
+                            </Button>
                           </CardHeader>
                           <CardContent className="p-5 space-y-4">
                             <p className="text-xs font-semibold text-slate-500">
@@ -4770,6 +4952,40 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   </div>
                                 );
                               })}
+
+                              {customAllergyQuestions.map((question) => {
+                                const checked = Boolean(questionnaireAnswers[question.id]);
+                                return (
+                                  <div key={question.id} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-violet-100 bg-violet-50/20">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <Checkbox
+                                        id={`allergy-${question.id}`}
+                                        checked={checked}
+                                        onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                        disabled={isSavingQuestionnaire}
+                                        className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500 shrink-0"
+                                      />
+                                      <Label
+                                        htmlFor={`allergy-${question.id}`}
+                                        className="text-sm font-semibold text-slate-700 cursor-pointer truncate flex items-center gap-1.5"
+                                      >
+                                        <span className="truncate">{question.text}</span>
+                                        <Badge variant="outline" className="text-[9px] text-violet-600 border-violet-200 bg-white shrink-0">Custom</Badge>
+                                      </Label>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      onClick={() => handleDeleteQuestion(question.id)}
+                                      className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                                      title="Delete question"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </CardContent>
                         </Card>
@@ -4777,10 +4993,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
                       {/* 3. MEDICAL CONDITIONS (HISTORY) */}
                       <Card className={cardClass}>
-                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                            3. Medical Conditions (History)
-                          </CardTitle>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4 flex flex-row items-center justify-between gap-2">
+                          <div>
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              3. Medical Conditions (History)
+                            </CardTitle>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                              <span>Identity: Medical Conditions (History)</span>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleOpenAddQuestionModal("medical_conditions", "Medical Conditions (History)")}
+                            className="h-8 gap-1.5 rounded-lg border-violet-200 bg-violet-50 px-2.5 text-xs font-bold text-violet-700 hover:bg-violet-100 hover:text-violet-800 shadow-none shrink-0"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Add Question</span>
+                          </Button>
                         </CardHeader>
                         <CardContent className="p-5 space-y-4">
                           <p className="text-xs font-semibold text-slate-500">
@@ -4807,6 +5039,40 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 </div>
                               );
                             })}
+
+                            {customMedicalConditionQuestions.map((question) => {
+                              const checked = Boolean(questionnaireAnswers[question.id]);
+                              return (
+                                <div key={question.id} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-violet-100 bg-violet-50/20">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <Checkbox
+                                      id={`condition-${question.id}`}
+                                      checked={checked}
+                                      onCheckedChange={(val) => handleQuestionnaireAnswerChange(question.id, Boolean(val))}
+                                      disabled={isSavingQuestionnaire}
+                                      className="h-5 w-5 shrink-0 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                    />
+                                    <Label
+                                      htmlFor={`condition-${question.id}`}
+                                      className="text-sm font-semibold text-slate-700 cursor-pointer truncate flex items-center gap-1.5"
+                                    >
+                                      <span className="truncate">{question.text}</span>
+                                      <Badge variant="outline" className="text-[9px] text-violet-600 border-violet-200 bg-white shrink-0">Custom</Badge>
+                                    </Label>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleDeleteQuestion(question.id)}
+                                    className="h-7 w-7 shrink-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                    title="Delete question"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </CardContent>
                       </Card>
@@ -4816,10 +5082,26 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     <div className="space-y-6 lg:col-span-1">
                       {/* 4. OTHER MEDICAL DETAILS */}
                       <Card className={cardClass}>
-                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-                          <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                            4. Other Medical Details
-                          </CardTitle>
+                        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4 flex flex-row items-center justify-between gap-2">
+                          <div>
+                            <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                              4. Other Medical Details
+                            </CardTitle>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                              <span>Identity: Other Medical Details</span>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleOpenAddQuestionModal("other", "Other Medical Details")}
+                            className="h-8 gap-1.5 rounded-lg border-violet-200 bg-violet-50 px-2.5 text-xs font-bold text-violet-700 hover:bg-violet-100 hover:text-violet-800 shadow-none shrink-0"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Add Question</span>
+                          </Button>
                         </CardHeader>
                         <CardContent className="p-5 space-y-5">
                           {/* Bleeding Time */}
@@ -4942,12 +5224,60 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             />
                           </div>
 
+                          {/* Custom Other Medical Questions */}
+                          {customOtherMedicalQuestions.length > 0 && (
+                            <div className="pt-3 border-t border-slate-100 space-y-2">
+                              <p className="text-[10px] font-extrabold uppercase tracking-wider text-violet-600">Added Other Medical Questions</p>
+                              {customOtherMedicalQuestions.map((question) => {
+                                const checked = Boolean(questionnaireAnswers[question.id]);
+                                return (
+                                  <div key={question.id} className="space-y-2 py-2 border-b border-slate-100 last:border-b-0">
+                                    <div className="flex items-start justify-between gap-4">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-slate-800 leading-tight">{question.text}</span>
+                                        <Badge variant="outline" className="text-[9px] text-violet-600 border-violet-200 bg-violet-50">Custom</Badge>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <ToggleGroup
+                                          type="single"
+                                          value={checked ? "yes" : "no"}
+                                          onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                          disabled={isSavingQuestionnaire}
+                                          aria-label={`Answer ${question.text}`}
+                                          className="h-7 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                          variant="outline"
+                                          size="sm"
+                                        >
+                                          <ToggleGroupItem value="yes" className="h-6 px-2 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                            Yes
+                                          </ToggleGroupItem>
+                                          <ToggleGroupItem value="no" className="h-6 px-2 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                            No
+                                          </ToggleGroupItem>
+                                        </ToggleGroup>
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="ghost"
+                                          onClick={() => handleDeleteQuestion(question.id)}
+                                          className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                                          title="Delete question"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     </div>
 
-                    {/* Additional questions if they are dynamic */}
-                    {additionalQuestions.length > 0 && (
+                    {/* Remaining Uncategorized Custom Questions if any */}
+                    {remainingUncategorizedQuestions.length > 0 && (
                       <div className="col-span-full mt-4">
                         <Card className={cardClass}>
                           <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-5 py-4">
@@ -4956,27 +5286,39 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                            {additionalQuestions.map((question) => {
+                            {remainingUncategorizedQuestions.map((question) => {
                               const checked = Boolean(questionnaireAnswers[question.id]);
                               return (
                                 <div key={question.id} className="flex items-center justify-between gap-4 p-3 rounded-lg border border-slate-100 bg-slate-50/30">
                                   <span className="text-xs font-semibold text-slate-700">{question.text}</span>
-                                  <ToggleGroup
-                                    type="single"
-                                    value={checked ? "yes" : "no"}
-                                    onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
-                                    disabled={isSavingQuestionnaire}
-                                    className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
-                                    variant="outline"
-                                    size="sm"
-                                  >
-                                    <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
-                                      Yes
-                                    </ToggleGroupItem>
-                                    <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
-                                      No
-                                    </ToggleGroupItem>
-                                  </ToggleGroup>
+                                  <div className="flex items-center gap-2">
+                                    <ToggleGroup
+                                      type="single"
+                                      value={checked ? "yes" : "no"}
+                                      onValueChange={(value) => handleQuestionnaireAnswerChange(question.id, value === "yes")}
+                                      disabled={isSavingQuestionnaire}
+                                      className="h-8 overflow-hidden rounded-full border border-slate-200 bg-slate-50 p-0.5"
+                                      variant="outline"
+                                      size="sm"
+                                    >
+                                      <ToggleGroupItem value="yes" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        Yes
+                                      </ToggleGroupItem>
+                                      <ToggleGroupItem value="no" className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider data-[state=on]:bg-violet-600 data-[state=on]:text-white">
+                                        No
+                                      </ToggleGroupItem>
+                                    </ToggleGroup>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      onClick={() => handleDeleteQuestion(question.id)}
+                                      className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                                      title="Delete question"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
                               );
                             })}
@@ -4984,6 +5326,92 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         </Card>
                       </div>
                     )}
+
+                    {/* Add Question Dialog */}
+                    <Dialog open={isAddQuestionModalOpen} onOpenChange={setIsAddQuestionModalOpen}>
+                      <DialogContent className="sm:max-w-[450px]">
+                        <DialogHeader>
+                          <DialogTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                            <Plus className="h-5 w-5 text-violet-600" />
+                            Add Question to Section
+                          </DialogTitle>
+                          <DialogDescription>
+                            Create a new medical question under the <span className="font-bold text-violet-700">{addQuestionTargetLabel}</span> section.
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4 py-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                              Section Identity / Category
+                            </Label>
+                            <Select
+                              value={addQuestionTargetCategory}
+                              onValueChange={(val) => {
+                                setAddQuestionTargetCategory(val);
+                                setAddQuestionTargetLabel(QUESTIONNAIRE_SECTION_IDENTITIES[val] || val);
+                              }}
+                            >
+                              <SelectTrigger className="h-10 rounded-lg border-slate-200">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(QUESTIONNAIRE_SECTION_IDENTITIES).map(([catKey, catName]) => (
+                                  <SelectItem key={catKey} value={catKey}>
+                                    {catName}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label htmlFor="new-question-text" className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                              Question Text
+                            </Label>
+                            <Input
+                              id="new-question-text"
+                              value={newQuestionText}
+                              onChange={(e) => setNewQuestionText(e.target.value)}
+                              placeholder="e.g. Do you take blood pressure medication daily?"
+                              className="h-10 rounded-lg border-slate-200 focus-visible:ring-violet-200"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleConfirmAddQuestion();
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <DialogFooter className="gap-2 sm:gap-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsAddQuestionModalOpen(false)}
+                            disabled={isAddingQuestion}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={handleConfirmAddQuestion}
+                            disabled={isAddingQuestion || !newQuestionText.trim()}
+                            className="bg-violet-600 text-white hover:bg-violet-700"
+                          >
+                            {isAddingQuestion ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Adding...
+                              </>
+                            ) : (
+                              "Add Question"
+                            )}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 );
               })()}
@@ -5016,29 +5444,60 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     </div>
                   ) : (
                     <>
-                      <div className="space-y-2">
-                        {CONSENT_ACKNOWLEDGEMENTS.map((item, index) => (
-                          <label
-                            key={item.id}
-                            htmlFor={`patient-consent-${item.id}`}
-                            className="flex min-h-[74px] cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-violet-200 hover:bg-violet-50/30 sm:gap-4 sm:px-5"
-                          >
-                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-50 text-sm font-black text-violet-600">
-                              {index + 1}
-                            </span>
-                            <span className="min-w-0 flex-1 space-y-1 pr-1">
-                              <span className="block text-sm font-black leading-5 text-slate-950">{item.title}</span>
-                              <span className="block text-sm font-medium leading-5 text-slate-600">{item.description}</span>
-                            </span>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5 sm:p-6 space-y-6">
+                        <div className="flex items-center justify-between border-b border-slate-200/80 pb-4">
+                          <div>
+                            <h3 className="text-base font-black uppercase tracking-wide text-slate-900">
+                              INFORMED CONSENT (PDA DENTAL CHART STANDARD)
+                            </h3>
+                            <p className="text-xs font-medium text-slate-500 mt-0.5">
+                              Philippine Dental Association official informed consent terms and conditions
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="border-slate-300 bg-white font-bold text-slate-700">
+                            Official PDA Form
+                          </Badge>
+                        </div>
+
+                        <div className="max-h-[500px] overflow-y-auto space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-inner leading-relaxed">
+                          {CONSENT_ACKNOWLEDGEMENTS.map((item) => (
+                            <div key={item.id} className="space-y-1.5 border-b border-slate-100 pb-3.5 last:border-0 last:pb-0">
+                              <h4 className="text-sm font-black text-slate-950 tracking-tight">
+                                {item.title}
+                              </h4>
+                              <p className="text-sm font-normal text-slate-700 leading-relaxed">
+                                {item.description}
+                              </p>
+                            </div>
+                          ))}
+
+                          <div className="mt-4 rounded-xl border border-violet-100 bg-violet-50/60 p-4 text-sm text-violet-950 font-medium leading-relaxed italic">
+                            <p className="not-italic font-bold text-violet-900 mb-1 text-xs uppercase tracking-wider">
+                              Summary Disclaimer & Authorization:
+                            </p>
+                            "{PDA_INFORMED_CONSENT_FINAL_STATEMENT}"
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border-2 border-violet-200 bg-violet-50/50 p-4 sm:p-5 transition-colors hover:border-violet-300">
+                          <label htmlFor="pda-consent-master-checkbox" className="flex items-start gap-3.5 cursor-pointer">
                             <Checkbox
-                              id={`patient-consent-${item.id}`}
-                              checked={consentForm.acknowledgements[item.id]}
-                              onCheckedChange={(checked) => updateConsentAcknowledgement(item.id, checked === true)}
+                              id="pda-consent-master-checkbox"
+                              checked={consentForm.accepted}
+                              onCheckedChange={(checked) => updateConsentMasterAccepted(checked === true)}
                               disabled={isSavingConsent}
-                              className="shrink-0 rounded-full border-violet-400 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
+                              className="mt-0.5 h-6 w-6 shrink-0 rounded-md border-violet-400 text-violet-600 focus:ring-violet-500 data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600"
                             />
+                            <div className="space-y-1 min-w-0 flex-1">
+                              <span className="block text-sm font-black leading-snug text-slate-950">
+                                I have read, understood, and agree to all the terms and conditions of this Informed Consent.
+                              </span>
+                              <span className="block text-xs font-medium leading-relaxed text-slate-600">
+                                By checking this box, I acknowledge that all dental procedures, risks, costs, and terms outlined in the PDA Informed Consent form above have been explained to me and I authorize treatment under these terms.
+                              </span>
+                            </div>
                           </label>
-                        ))}
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
@@ -5501,6 +5960,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         includeDeleted={effectiveRole === "admin"}
                                         onChange={(nextStatus) => handleVisitStatusChange(appointment, nextStatus)}
                                       />
+                                      {isOverdueTreatmentHistoryAppointment(appointment) ? (
+                                        <Badge className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-50">Overdue</Badge>
+                                      ) : null}
                                       <span className="inline-flex min-w-0 items-center gap-1 text-slate-500">
                                         <FileText className="h-3.5 w-3.5 shrink-0" />
                                         <span className="truncate">{notesText}</span>
@@ -5939,6 +6401,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                     />
                                     <span className="text-slate-400">/</span>
                                     {getPaymentStatusBadge(String(appointment.paymentStatus || "unpaid"))}
+                                    {isOverdueTreatmentHistoryAppointment(appointment) ? (
+                                      <Badge className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-50">Overdue</Badge>
+                                    ) : null}
                                   </div>
                                 </TableCell>
                                 <TableCell className="font-medium">

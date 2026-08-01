@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X, AlertTriangle, Loader2 } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings, ListChecks, PanelLeftClose, PanelLeftOpen, Menu, X, AlertTriangle, Loader2, History } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import AppointmentHistoryView from "./AppointmentHistoryView";
@@ -49,11 +49,11 @@ export const adminLayoutTheme: AdminLayoutTheme = {
 const navItems = [
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/requests", label: "Requests", icon: ClipboardList },
+  { path: "/treatment-history", label: "Treatment History", icon: History },
   { path: "/patients", label: "Patients", icon: Users },
   { path: "/calendar", label: "Calendar", icon: Calendar },
   { path: "/doctors", label: "Find Doctors", icon: Stethoscope, hideForReceptionist: true },
   { path: "/services", label: "Services", icon: ListChecks },
-  { path: "/questionnaire", label: "Questionnaire", icon: ClipboardList },
   { path: "/finance", label: "Finance", icon: DollarSign },
   { path: "/staff", label: "Staff", icon: Shield },
   { path: "/notifications", label: "Notifications", icon: Bell },

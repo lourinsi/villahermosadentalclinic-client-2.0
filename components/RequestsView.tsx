@@ -3,7 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -49,7 +49,6 @@ import { getAppointmentTypeName } from "../lib/appointment-types";
 import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import {
   DropdownMenu,
@@ -101,6 +100,7 @@ import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { SetAppointmentPriceModal } from "./SetAppointmentPriceModal";
 import { ToothNumbersEditor } from "./ToothNumbersEditor";
+import AppointmentPatientChoiceDialog from "./AppointmentPatientChoiceDialog";
 import {
   getBookingToothNumberEntries,
   getBookingToothNumbersValue,
@@ -119,7 +119,6 @@ interface RequestsViewProps {
 }
 
 const REQUESTS_PER_PAGE = 10;
-const HISTORY_PER_PAGE = 10;
 
 const getTreatmentDisplay = (appointment: any) =>
   getBookingTreatmentDisplay(appointment, getAppointmentTypeName);
@@ -175,6 +174,7 @@ const getPatientImage = (appointment: any, patientRecord?: any) => {
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const router = useRouter();
+  const pathname = usePathname();
   const { effectiveRole } = useAdminViewMode();
   const {
     appointments,
@@ -198,14 +198,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [requestTotalPages, setRequestTotalPages] = useState(1);
   const [requestTotal, setRequestTotal] = useState(0);
   const [requestRefreshKey, setRequestRefreshKey] = useState(0);
-  const [history, setHistory] = useState<Appointment[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
-  const [historyTotalPages, setHistoryTotalPages] = useState(1);
-  const [historyTotal, setHistoryTotal] = useState(0);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState("requests");
-  const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
   const { refreshAppointments, openCreateModal } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -217,9 +209,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     handleViewCurrentSnapshot,
     handleViewAppointment,
     resetAppointmentSnapshot,
-  } = useNotificationAppointmentSnapshot([...appointments, ...requests, ...history]);
+  } = useNotificationAppointmentSnapshot([...appointments, ...requests]);
   const handleOpenSnapshotAppointment = async (appointmentId: string, appointmentSnapshotToOpen?: Appointment) => {
-    const appointment = [...appointments, ...requests, ...history].find((item: Appointment) => String(item.id) === String(appointmentId));
+    const appointment = [...appointments, ...requests].find((item: Appointment) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
     resetAppointmentSnapshot();
     const snapshotMatchesAppointment = appointmentSnapshotToOpen?.id && String(appointmentSnapshotToOpen.id) === String(appointmentId);
@@ -372,14 +364,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [pendingSortColumn, setPendingSortColumn] = useState<string | null>(null);
   const [pendingSortDirection, setPendingSortDirection] = useState<"asc" | "desc">("asc");
 
-  // History filters state
-  const [historySearchTerm, setHistorySearchTerm] = useState("");
-  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
-  const [historyDateFilter, setHistoryDateFilter] = useState("");
-  const [historyDoctorFilter, setHistoryDoctorFilter] = useState("all");
-  const [historySortColumn, setHistorySortColumn] = useState<string | null>(null);
-  const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("asc");
-  
   // Confirmation dialog state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState<{appointment: Appointment, newStatus: Appointment['status']} | null>(null);
@@ -391,6 +375,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // Reject confirmation dialog state
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingRejectAppointment, setPendingRejectAppointment] = useState<Appointment | null>(null);
+  const [patientChoiceAppointment, setPatientChoiceAppointment] = useState<Appointment | null>(null);
   const [patientCellAppointment, setPatientCellAppointment] = useState<Appointment | null>(null);
   const [scheduleCellAppointment, setScheduleCellAppointment] = useState<Appointment | null>(null);
   const [scheduleDate, setScheduleDate] = useState<Date | null>(null);
@@ -420,7 +405,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       };
       const updated = await updateAppointment(appointmentId, patch);
       setRequests((prev) => prev.map((r) => String(r.id) === appointmentId ? { ...r, ...updated, ...patch } : r));
-      setHistory((prev) => prev.map((h) => String(h.id) === appointmentId ? { ...h, ...updated, ...patch } : h));
       refreshAppointments();
       toast.success("Tooth numbers updated");
     } catch (err) {
@@ -462,7 +446,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             onChangeDoctor: !isDeleted ? () => setDoctorCellAppointment(request) : undefined,
             onReschedule: !isDeleted ? () => openScheduleCell(request) : undefined,
             onGoToPatient: patientTarget ? () => {
-              const basePath = effectiveRole === "receptionist" ? "/receptionist" : "/admin";
+              const basePath = pathname.startsWith("/receptionist") ? "/receptionist" : "/admin";
               router.push(`${basePath}/patients/${encodeURIComponent(patientTarget)}`);
             } : undefined,
           },
@@ -679,152 +663,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     setRequestRefreshKey((key) => key + 1);
   }, []);
 
-  const fetchHistory = useCallback(async (page = 1, signal?: AbortSignal) => {
-    try {
-      setIsHistoryLoading(true);
-
-      const params = new URLSearchParams({
-        view: "history",
-        page: String(page),
-        limit: String(HISTORY_PER_PAGE),
-      });
-      const search = historySearchTerm.trim();
-      const selectedDoctor = doctorFilter || (historyDoctorFilter !== "all" ? historyDoctorFilter : "");
-
-      if (search) params.set("search", search);
-      if (historyStatusFilter !== "all") params.set("status", historyStatusFilter);
-      if (selectedDoctor) params.set("doctor", selectedDoctor);
-      if (historyDateFilter) {
-        params.set("startDate", historyDateFilter);
-        params.set("endDate", historyDateFilter);
-      }
-      if (historySortColumn) {
-        params.set("sortBy", historySortColumn);
-        params.set("sortDirection", historySortDirection);
-      }
-
-      const response = await fetch(apiUrl(`/api/appointments?${params.toString()}`), {
-        credentials: "include",
-        headers: getAuthHeaders(),
-        signal,
-      });
-      const result = await response.json();
-
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Failed to fetch appointment history");
-      }
-
-      const data = (result.data || []).map((appointment: Appointment) => ({
-        ...appointment,
-        status: getAppointmentStatusForDisplay(appointment),
-      }));
-      const serverReturnedPage = Boolean(result.meta);
-      const clientFilteredData = data.filter((appointment: Appointment) => {
-        const appointmentIsDeleted = isSoftDeletedAppointment(appointment);
-        if (
-          isPatientCartStatus(appointment.status) ||
-          (!isHistoryStatus(appointment.status) && !(canSeeDeletedAppointments && appointmentIsDeleted))
-        ) {
-          return false;
-        }
-
-        if (doctorFilter && (appointment.doctor || "").toLowerCase() !== doctorFilter.toLowerCase()) {
-          return false;
-        }
-
-        if (
-          search &&
-          !getCurrentPatientName(appointment).toLowerCase().includes(search.toLowerCase()) &&
-          !getTreatmentDisplay(appointment).labels.join(" ").toLowerCase().includes(search.toLowerCase()) &&
-          !getTreatmentDisplay(appointment).toothDetail.toLowerCase().includes(search.toLowerCase())
-        ) {
-          return false;
-        }
-
-        if (historyStatusFilter !== "all" && canonicalStatus(appointment.status) !== canonicalStatus(historyStatusFilter)) {
-          return false;
-        }
-
-        if (historyDateFilter && appointment.date !== historyDateFilter) {
-          return false;
-        }
-
-        return true;
-      });
-      const clientSortedData = sortAppointmentsForColumn(
-        clientFilteredData,
-        historySortColumn,
-        historySortColumn ? historySortDirection : "desc",
-        "date"
-      );
-      const total = Number(result.meta?.total ?? clientFilteredData.length);
-      const nextTotalPages = Math.max(
-        1,
-        Number(result.meta?.totalPages) || Math.ceil(total / HISTORY_PER_PAGE)
-      );
-      const visibleHistory = serverReturnedPage && clientFilteredData.length <= HISTORY_PER_PAGE
-        ? clientFilteredData
-        : clientSortedData.slice((page - 1) * HISTORY_PER_PAGE, page * HISTORY_PER_PAGE);
-
-      if (page > nextTotalPages) {
-        setHistoryCurrentPage(nextTotalPages);
-        return;
-      }
-
-      setHistory(visibleHistory);
-      setHistoryTotal(total);
-      setHistoryTotalPages(nextTotalPages);
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
-
-      console.error("Error fetching appointment history:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to fetch appointment history");
-      setHistory([]);
-      setHistoryTotal(0);
-      setHistoryTotalPages(1);
-    } finally {
-      if (!signal?.aborted) setIsHistoryLoading(false);
-    }
-  }, [
-    doctorFilter,
-    historyDateFilter,
-    historySearchTerm,
-    historySortColumn,
-    historySortDirection,
-    historyStatusFilter,
-    historyDoctorFilter,
-  ]);
-
-  useEffect(() => {
-    setHistoryCurrentPage(1);
-  }, [
-    doctorFilter,
-    historyDateFilter,
-    historySearchTerm,
-    historySortColumn,
-    historySortDirection,
-    historyStatusFilter,
-    historyDoctorFilter,
-  ]);
-
-  useEffect(() => {
-    if (activeTab !== "history") return;
-    setHasLoadedHistory(true);
-
-    const controller = new AbortController();
-    fetchHistory(historyCurrentPage, controller.signal);
-
-    return () => controller.abort();
-  }, [activeTab, fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
-
-  const refreshHistory = useCallback(() => {
-    setHistoryRefreshKey((key) => key + 1);
-  }, []);
 
   const refreshAppointmentLists = useCallback(() => {
     refreshRequests();
-    if (hasLoadedHistory) refreshHistory();
-  }, [hasLoadedHistory, refreshHistory, refreshRequests]);
+  }, [refreshRequests]);
 
   const mergeAppointmentIntoLists = useCallback((updatedAppointment: Appointment) => {
     const normalizedAppointment = {
@@ -840,7 +682,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       );
 
     setRequests(mergeUpdatedAppointment);
-    setHistory(mergeUpdatedAppointment);
 
     return normalizedAppointment;
   }, []);
@@ -1033,30 +874,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   };
 
-  const handleHistoryStatusChange = async (appointmentId: string, newStatus: string) => {
-    if (isPatientCartStatus(newStatus)) {
-      toast.error("Add to Cart is reserved for patient carts.");
-      return;
-    }
-
-    try {
-      const appointment = [...history, ...requests, ...appointments].find(
-        (item) => String(item.id) === String(appointmentId)
-      );
-      const updatedAppointment = await updateAppointment(
-        appointmentId,
-        buildStatusLifecycleUpdate(appointment, newStatus)
-      );
-      publishAppointmentUpdate(updatedAppointment);
-      toast.success(`Status updated to ${updatedAppointment.status}`);
-      refreshAppointmentLists();
-      setTimeout(() => {
-        window.dispatchEvent(new Event('refreshNotifications'));
-      }, 500);
-    } catch {
-      toast.error("Failed to update status");
-    }
-  };
 
   const confirmStatusChange = async () => {
     if (!pendingStatusChange) return;
@@ -1113,42 +930,24 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   };
 
-  const handleHistorySort = (column: string) => {
-    setHistoryCurrentPage(1);
-    if (historySortColumn === column) {
-      setHistorySortDirection(historySortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setHistorySortColumn(column);
-      setHistorySortDirection("asc");
-    }
-  };
-
-  const getSortIcon = (column: string, isPending: boolean) => {
-    const currentColumn = isPending ? pendingSortColumn : historySortColumn;
-    const currentDirection = isPending ? pendingSortDirection : historySortDirection;
-    
-    if (currentColumn === column) {
-      return currentDirection === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+  const getSortIcon = (column: string) => {
+    if (pendingSortColumn === column) {
+      return pendingSortDirection === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
     }
     return <ArrowUpDown className="h-4 w-4 opacity-40" />;
   };
 
   const sortedRequests = requests;
-  const sortedHistory = history;
 
   const requestDoctorOptions = useMemo(() => {
-    return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
-  }, [appointments, requests, history]);
+    return Array.from(new Set([...appointments, ...requests].map((appointment) => appointment.doctor).filter(Boolean))).sort();
+  }, [appointments, requests]);
   const pendingRequestColumnCount = 9;
-  const historyColumnCount = pendingRequestColumnCount;
   const activeDropdownItemClass = (isActive: boolean) =>
     isActive ? "bg-violet-600 text-white focus:bg-violet-600 focus:text-white [&_svg]:text-white" : "";
   const actionRequiredCount = sortedRequests.filter((request) => isActionableStatus(request.status)).length;
   const completedRequestCount = sortedRequests.filter((request) => canonicalStatus(request.status) === "completed").length;
   const paidRequestCount = sortedRequests.filter((request) => canonicalPaymentStatus(request.paymentStatus) === "paid").length;
-  const completedHistoryCount = sortedHistory.filter((item) => canonicalStatus(item.status) === "completed").length;
-  const paidHistoryCount = sortedHistory.filter((item) => canonicalPaymentStatus(item.paymentStatus) === "paid").length;
-  const unpaidHistoryCount = sortedHistory.filter((item) => canonicalPaymentStatus(item.paymentStatus) !== "paid").length;
   const formatAuditDate = (value?: string) => {
     if (!value) return "N/A";
     const date = new Date(value);
@@ -1162,7 +961,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   };
   const formatPaymentCurrency = (value?: number | string | null) =>
-    `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `Γé▒${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const getAppointmentIdLabel = (appointment: Appointment) => `ID: ${appointment.id || "N/A"}`;
 
   return (
@@ -1186,25 +985,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         )}
       </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => {
-          setActiveTab(value);
-          if (value === "history" && !hasLoadedHistory) setIsHistoryLoading(true);
-        }}
-        className="space-y-6"
-      >
-        <TabsList className="h-auto w-full rounded-[1.35rem] border bg-white p-1 shadow-sm sm:w-fit">
-          <TabsTrigger value="requests" className="flex-1 rounded-2xl px-4 py-3 text-base font-black transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-violet-200 sm:flex-none sm:px-6">
-            Requests
-            <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requestTotal}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="history" className="flex-1 rounded-2xl px-4 py-3 text-base font-black transition-all duration-300 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-violet-200 sm:flex-none sm:px-6">
-            History
-          </TabsTrigger>
-        </TabsList>
+      <div className="space-y-6">
 
-        <TabsContent value="requests" className="space-y-4">
+        <div className="space-y-4">
           <Card className="overflow-hidden border-none bg-transparent shadow-none md:rounded-[1.35rem] md:border md:border-gray-100 md:bg-white/90 md:shadow-xl md:shadow-gray-200/50 md:backdrop-blur-xl">
             <CardHeader className="space-y-5 border-0 bg-transparent p-0 md:border-b md:border-gray-100 md:bg-white md:p-6">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -1412,28 +1195,32 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     return (
                       <div key={request.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
                         <div className="flex items-start gap-3">
-                          <div className="relative shrink-0">
-                            <PatientAvatar
-                              src={resolveImageSource(getPatientImage(request))}
-                              name={patientName}
-                              dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday}
-                              className="h-16 w-16 border-2 border-white shadow-sm"
-                              sizeClass="h-16 w-16"
-                            />
-                            <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
-                              <CalendarCheck2 className="h-4 w-4" />
-                            </span>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <h3 className="truncate text-lg font-black leading-tight text-gray-900">{patientName}</h3>
-                                <p className="mt-1 text-sm font-medium text-gray-500">{getAppointmentIdLabel(request)}</p>
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1">
-                                {renderRequestOverflowMenu(request, "h-9 w-9 rounded-full text-gray-500 hover:bg-slate-100")}
-                              </div>
+                          <button
+                            type="button"
+                            onClick={() => setPatientChoiceAppointment(request)}
+                            disabled={isSoftDeletedAppointment(request)}
+                            aria-label={`Patient options for ${patientName}`}
+                            className="flex min-w-0 flex-1 items-start gap-3 text-left transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <div className="relative shrink-0">
+                              <PatientAvatar
+                                src={resolveImageSource(getPatientImage(request))}
+                                name={patientName}
+                                dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday}
+                                className="h-16 w-16 border-2 border-white shadow-sm"
+                                sizeClass="h-16 w-16"
+                              />
+                              <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
+                                <CalendarCheck2 className="h-4 w-4" />
+                              </span>
                             </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-lg font-black leading-tight text-gray-900">{patientName}</h3>
+                              <p className="mt-1 text-sm font-medium text-gray-500">{getAppointmentIdLabel(request)}</p>
+                            </div>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {renderRequestOverflowMenu(request, "h-9 w-9 rounded-full text-gray-500 hover:bg-slate-100")}
                           </div>
                         </div>
 
@@ -1603,17 +1390,17 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
                       <TableHead className="w-[12%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Date &amp; Time {getSortIcon("date", true)}
+                          Date &amp; Time {getSortIcon("date")}
                         </div>
                       </TableHead>
                       <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("patient")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Patient {getSortIcon("patient", true)}
+                          Patient {getSortIcon("patient")}
                         </div>
                       </TableHead>
                       <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Treatment {getSortIcon("service", true)}
+                          Treatment {getSortIcon("service")}
                         </div>
                       </TableHead>
                       <TableHead className="w-[11%] font-bold text-gray-900">
@@ -1623,12 +1410,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       </TableHead>
                       <TableHead className="w-[11%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Doctor {getSortIcon("doctor", true)}
+                          Doctor {getSortIcon("doctor")}
                         </div>
                       </TableHead>
                       <TableHead className="w-[9%] font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Status {getSortIcon("status", true)}
+                          Status {getSortIcon("status")}
                         </div>
                       </TableHead>
                       <TableHead className="w-[7%] font-bold text-gray-900">Total</TableHead>
@@ -1671,7 +1458,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </button>
                           </TableCell>
                           <TableCell className="py-5 pr-3 whitespace-normal">
-                            <button type="button" onClick={() => setPatientCellAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Change patient for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
+                            <button type="button" onClick={() => setPatientChoiceAppointment(request)} disabled={isSoftDeletedAppointment(request)} aria-label={`Patient options for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
                               <PatientAvatar src={resolveImageSource(getPatientImage(request))} name={patientName} dob={request.patientDateOfBirth || request.patientDob || request.patientBirthDate || request.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
                               <div className="min-w-0">
                                 <div className="truncate font-bold text-gray-900">{patientName}</div>
@@ -1724,7 +1511,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70"
                               >
                                 <span className="truncate font-semibold text-gray-900">
-                                  {getBookingToothNumbersValue(request) || "—"}
+                                  {getBookingToothNumbersValue(request) || "ΓÇö"}
                                 </span>
                               </button>
                             )}
@@ -1862,647 +1649,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="history" className="space-y-4">
-          <Card className="overflow-hidden border-none bg-transparent shadow-none md:rounded-[1.35rem] md:border md:border-gray-100 md:bg-white/90 md:shadow-xl md:shadow-gray-200/50 md:backdrop-blur-xl">
-            <CardHeader className="space-y-5 border-0 bg-transparent p-0 md:border-b md:border-gray-100 md:bg-white md:p-6">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                <div className="flex items-center gap-4 rounded-3xl border border-violet-50 bg-white p-5 shadow-lg shadow-gray-200/50 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
-                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.7rem] bg-violet-50 text-violet-600 md:h-16 md:w-16">
-                    <History className="h-9 w-9 md:h-7 md:w-7" />
-                  </div>
-                  <div className="min-w-0">
-                    <CardTitle className="text-2xl font-black tracking-tight text-gray-900 md:text-xl">Recent Activity</CardTitle>
-                    <p className="mt-1 text-base font-medium text-gray-500 md:text-sm">History of processed appointments</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:min-w-[620px]">
-                  {[
-                    { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
-                    { label: "Completed", value: completedHistoryCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
-                    { label: "Paid", value: paidHistoryCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
-                    { label: "Unpaid", value: unpaidHistoryCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
-                  ].map((stat) => {
-                    const Icon = stat.icon;
-                    return (
-                      <div key={stat.label} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-md shadow-gray-200/40 md:rounded-2xl md:shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${stat.bg} ${stat.accent} md:h-11 md:w-11 md:rounded-xl`}>
-                            <Icon className="h-6 w-6 md:h-5 md:w-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-2xl font-black leading-none text-gray-900">{stat.value}</p>
-                            <p className={`mt-1 text-sm font-bold leading-tight ${stat.accent}`}>{stat.label}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex w-full items-center gap-2 lg:max-w-[32rem]">
-                  <div className="relative min-w-0 flex-1">
-                    <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      placeholder="Search patient or service..."
-                      className="h-14 w-full rounded-3xl border-gray-100 bg-white pl-12 text-base shadow-md shadow-gray-200/40 md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm"
-                      value={historySearchTerm}
-                      onChange={(e) => {
-                        setHistorySearchTerm(e.target.value);
-                        setHistoryCurrentPage(1);
-                      }}
-                    />
-                  </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="hidden rounded-xl border border-gray-100 sm:hidden" title="More filters">
-                          <MoreVertical className="h-4 w-4 text-gray-500" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuItem
-                          className={activeDropdownItemClass(historyStatusFilter === "all")}
-                          onSelect={() => {
-                            setHistoryStatusFilter("all");
-                            setHistoryCurrentPage(1);
-                          }}
-                        >
-                          All Status
-                        </DropdownMenuItem>
-                        {staffVisibleStatusOptions.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
-                          <DropdownMenuItem
-                            key={status.value}
-                            className={activeDropdownItemClass(canonicalStatus(historyStatusFilter) === canonicalStatus(status.value))}
-                            onSelect={() => {
-                              setHistoryStatusFilter(status.value);
-                              setHistoryCurrentPage(1);
-                            }}
-                          >
-                            Status: {status.label}
-                          </DropdownMenuItem>
-                        ))}
-                        {!doctorFilter && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className={activeDropdownItemClass(historyDoctorFilter === "all")}
-                              onSelect={() => {
-                                setHistoryDoctorFilter("all");
-                                setHistoryCurrentPage(1);
-                              }}
-                            >
-                              All Doctors
-                            </DropdownMenuItem>
-                            {requestDoctorOptions.map((doc: any) => (
-                              <DropdownMenuItem
-                                key={doc}
-                                className={activeDropdownItemClass(historyDoctorFilter === doc)}
-                                onSelect={() => {
-                                  setHistoryDoctorFilter(doc);
-                                  setHistoryCurrentPage(1);
-                                }}
-                              >
-                                Dr. {doc}
-                              </DropdownMenuItem>
-                            ))}
-                          </>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => {
-                          setHistorySearchTerm("");
-                          setHistoryStatusFilter("all");
-                          setHistoryDateFilter("");
-                          setHistoryDoctorFilter("all");
-                          setHistoryCurrentPage(1);
-                        }}>
-                          Reset filters
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  
-                <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
-                  <div className="min-w-0 flex-1 sm:flex-none">
-                    <Select
-                      value={historyStatusFilter}
-                      onValueChange={(value) => {
-                        setHistoryStatusFilter(value);
-                        setHistoryCurrentPage(1);
-                      }}
-                    >
-                      <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <Filter className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
-                          <SelectValue placeholder="All Status" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        {staffVisibleStatusOptions.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
-                          <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {!doctorFilter && (
-                    <div className="min-w-0 flex-1 sm:flex-none">
-                      <Select
-                        value={historyDoctorFilter}
-                        onValueChange={(value) => {
-                          setHistoryDoctorFilter(value);
-                          setHistoryCurrentPage(1);
-                        }}
-                      >
-                        <SelectTrigger className="h-14 w-full rounded-3xl border-gray-100 bg-white text-base shadow-md shadow-gray-200/40 sm:w-[180px] md:h-12 md:rounded-2xl md:bg-gray-50 md:text-sm md:shadow-sm">
-                          <div className="flex items-center gap-2">
-                            <User className="h-5 w-5 text-gray-400 md:h-4 md:w-4" />
-                            <SelectValue placeholder="All Doctors" />
-                          </div>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Doctors</SelectItem>
-                          {requestDoctorOptions.map((doc: any) => (
-                            <SelectItem key={doc} value={doc}>{doc}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  <Button variant="ghost" size="icon" className="inline-flex h-14 w-14 shrink-0 rounded-3xl border border-gray-100 bg-white shadow-md shadow-gray-200/40 md:h-12 md:w-12 md:rounded-2xl md:bg-transparent md:shadow-none" onClick={() => {
-                    setHistorySearchTerm("");
-                    setHistoryStatusFilter("all");
-                    setHistoryDateFilter("");
-                    setHistoryDoctorFilter("all");
-                    setHistoryCurrentPage(1);
-                  }}>
-                    <RotateCcw className="h-5 w-5 text-gray-500" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="space-y-4 p-4 md:hidden">
-                {isHistoryLoading ? (
-                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center text-sm font-semibold text-gray-500 shadow-sm">
-                    Loading history...
-                  </div>
-                ) : sortedHistory.length === 0 ? (
-                  <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center shadow-sm">
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
-                      <History className="h-7 w-7 text-gray-300" />
-                    </div>
-                    <h3 className="text-lg font-black text-gray-900">No History Found</h3>
-                    <p className="mx-auto mt-2 max-w-xs text-sm text-gray-500">No appointment history matches your filters.</p>
-                  </div>
-                ) : (
-                  sortedHistory.map((item) => {
-                    const patientName = getCurrentPatientName(item);
-                    return (
-                      <div key={item.id} className="rounded-[1.75rem] border border-gray-100 bg-white p-4 shadow-xl shadow-gray-200/50">
-                        <div className="flex items-start gap-3">
-                          <div className="relative shrink-0">
-                            <PatientAvatar
-                              src={resolveImageSource(getPatientImage(item))}
-                              name={patientName}
-                              dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday}
-                              className="h-16 w-16 border-2 border-white shadow-sm"
-                              sizeClass="h-16 w-16"
-                            />
-                            <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-violet-500 text-white shadow-sm">
-                              <History className="h-4 w-4" />
-                            </span>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <h3 className="truncate text-lg font-black leading-tight text-gray-900">{patientName}</h3>
-                                <p className="mt-1 text-sm font-medium text-gray-500">{getAppointmentIdLabel(item)}</p>
-                              </div>
-                              {renderRequestOverflowMenu(item, "h-9 w-9 rounded-full text-gray-500 hover:bg-slate-100")}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-2 border-y border-gray-100 py-4">
-                          <div className="flex gap-3 border-r border-gray-100 pr-3">
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
-                              <CalendarIcon className="h-5 w-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-black text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</p>
-                              <p className="mt-1 text-sm font-medium text-gray-500">{formatTimeTo12h(item.time)}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-3 pl-4">
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
-                              <ClipboardList className="h-5 w-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <TreatmentCellContent appointment={item} compact />
-                              <p className="mt-1 truncate text-sm font-medium text-gray-500">{item.doctor || "Unassigned"}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-3">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <span className="h-3 w-3 shrink-0 rounded-full bg-violet-500" />
-                            <span className="truncate text-base font-semibold text-gray-900">{item.doctor || "Unassigned"}</span>
-                          </div>
-                          <Select
-                            value={item.status}
-                            onValueChange={(newStatus) => handleHistoryStatusChange(item.id, newStatus)}
-                          >
-                            <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
-                              {getStatusBadge(item.status)}
-                            </SelectTrigger>
-                            <SelectContent>
-                              {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
-                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex items-center gap-3 border-b border-gray-100 py-3">
-                          {canManagePaymentStatuses ? (
-                            <Select
-                              value={item.paymentStatus || "unpaid"}
-                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
-                            >
-                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
-                                {getPaymentStatusBadge(item.paymentStatus)}
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PAYMENT_STATUSES.map((status: any) => (
-                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            getPaymentStatusBadge(item.paymentStatus)
-                          )}
-                          <span className="text-sm font-medium text-gray-500">Payment Status</span>
-                        </div>
-
-                        <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100 py-3 text-center">
-                          <div
-                            className="px-2 cursor-pointer hover:bg-violet-50/60 rounded-lg transition-colors group/cell"
-                            onClick={() => setSetPriceAppointment(item)}
-                            title="Click to set new price total"
-                          >
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total</p>
-                            {Number(item.discount) > 0 && (
-                              <span className="block text-[10px] font-normal text-gray-400 line-through decoration-rose-400">
-                                {formatPaymentCurrency(item.price || 0)}
-                              </span>
-                            )}
-                            <p className="mt-0.5 text-sm font-bold text-gray-900">
-                              {formatPaymentCurrency(Math.max(0, Number(item.price || 0) - Number(item.discount || 0)))}
-                            </p>
-                          </div>
-                          <div
-                            className="px-2 cursor-pointer hover:bg-emerald-50/60 rounded-lg transition-colors group/cell"
-                            onClick={() => handleOpenPayment(item)}
-                            title="Click to record payment"
-                          >
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Paid</p>
-                            <p className="mt-1 text-sm font-bold text-emerald-700">{formatPaymentCurrency(item.totalPaid || 0)}</p>
-                          </div>
-                          <div
-                            className="px-2 cursor-pointer hover:bg-amber-50/60 rounded-lg transition-colors group/cell"
-                            onClick={() => handleOpenPayment(item)}
-                            title="Click to record payment"
-                          >
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Balance</p>
-                            <p className={`mt-1 text-sm font-bold ${Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-                              {formatPaymentCurrency(Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))))}
-                            </p>
-                          </div>
-                        </div>
-
-                        {!hideAuditColumns ? (
-                          <div className="grid grid-cols-2 border-b border-gray-100 py-4">
-                            <div className="flex gap-3 border-r border-gray-100 pr-3">
-                              <CalendarCheck2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
-                              <div>
-                                <p className="text-sm font-semibold text-gray-500">Booked</p>
-                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.createdAt)} {formatAuditTime(item.createdAt)}</p>
-                              </div>
-                            </div>
-                            <div className="flex gap-3 pl-4">
-                              <Clock className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
-                              <div>
-                                <p className="text-sm font-semibold text-gray-500">Last Updated</p>
-                                <p className="mt-1 text-sm font-medium text-gray-600">{formatAuditDate(item.updatedAt || item.createdAt)} {formatAuditTime(item.updatedAt || item.createdAt)}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-
-                        <div className={`mt-4 grid ${canPromptPayment(item) ? "grid-cols-2" : "grid-cols-1"} divide-x divide-gray-100 rounded-3xl border border-gray-100 bg-white py-3 text-center shadow-sm`}>
-                          {canPromptPayment(item) ? (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPayment(item)}
-                              className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900"
-                            >
-                              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600">
-                                <DollarSign className="h-6 w-6" />
-                              </span>
-                              Pay
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => handleViewAppointment(item)}
-                            className="flex flex-col items-center gap-1.5 rounded-2xl py-1 text-sm font-black text-gray-900"
-                          >
-                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-violet-100 bg-violet-50 text-violet-600">
-                              <Eye className="h-6 w-6" />
-                            </span>
-                            View
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div className="hidden overflow-x-auto md:block">
-                <Table className="min-w-[1180px] table-fixed">
-                  <TableHeader>
-                    <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
-                      <TableHead className="w-[12%] py-5 font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Date &amp; Time {getSortIcon("date", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[14%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("patient")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Patient {getSortIcon("patient", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[13%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Treatment {getSortIcon("service", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[11%] font-bold text-gray-900">
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Tooth No.
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[11%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Doctor {getSortIcon("doctor", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[9%] font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
-                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                          Status {getSortIcon("status", false)}
-                        </div>
-                      </TableHead>
-                      <TableHead className="w-[7%] font-bold text-gray-900">Total</TableHead>
-                      <TableHead className="w-[7%] font-bold text-gray-900">Paid</TableHead>
-                      <TableHead className="w-[7%] font-bold text-gray-900">Balance</TableHead>
-                      <TableHead className="w-[9%] text-center uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isHistoryLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={10} className="h-32 text-center text-gray-500 font-medium">
-                          Loading history...
-                        </TableCell>
-                      </TableRow>
-                    ) : sortedHistory.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={10} className="h-64 text-center">
-                          <div className="flex flex-col items-center justify-center py-12">
-                            <div className="p-4 bg-gray-50 rounded-full mb-4">
-                              <History className="h-10 w-10 text-gray-300" />
-                            </div>
-                            <h3 className="text-lg font-bold text-gray-900 uppercase">No History Found</h3>
-                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No appointment history matches your filters.</p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      sortedHistory.map((item) => {
-                        const patientName = getCurrentPatientName(item);
-                        return (
-                        <TableRow key={item.id} className="border-b border-gray-100 hover:bg-violet-50/30 transition-colors">
-                          <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openScheduleCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit schedule for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
-                              <CalendarIcon className="h-5 w-5 shrink-0 text-violet-600" />
-                              <div className="min-w-0">
-                                <span className="font-bold text-gray-900">{formatWordyDate(item.date, { fallback: item.date || 'N/A' })}</span>
-                                <span className="block text-xs font-medium text-gray-500">{formatTimeTo12h(item.time)}</span>
-                              </div>
-                            </button>
-                          </TableCell>
-                          <TableCell className="py-5 pr-3 whitespace-normal">
-                            <button type="button" onClick={() => setPatientCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change patient for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
-                              <PatientAvatar src={resolveImageSource(getPatientImage(item))} name={patientName} dob={item.patientDateOfBirth || item.patientDob || item.patientBirthDate || item.patientBirthday} className="h-12 w-12 border-2 border-white shadow-sm" sizeClass="h-12 w-12" />
-                              <div className="min-w-0">
-                                <div className="truncate font-bold text-gray-900">{patientName}</div>
-                                <div className="mt-1 truncate text-xs font-medium text-gray-500">{getAppointmentIdLabel(item)}</div>
-                              </div>
-                            </button>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => openTreatmentCell(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Edit treatment for ${patientName}`} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
-                                <ClipboardList className="h-5 w-5" />
-                              </div>
-                              <TreatmentCellContent appointment={item} />
-                            </button>
-                          </TableCell>
-                          <TableCell className="max-w-[160px] whitespace-normal">
-                            {editingToothNumberAptId === String(item.id) && !isSoftDeletedAppointment(item) ? (
-                              <div className="space-y-2 p-1.5 bg-violet-50/80 rounded-lg border border-violet-200" onClick={(e) => e.stopPropagation()}>
-                                <ToothNumbersEditor
-                                  value={editingToothNumberValue}
-                                  onChange={(val) => {
-                                    setEditingToothNumberValue(val);
-                                  }}
-                                  size="sm"
-                                  autoFocusFirst
-                                />
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSaveToothNumbers(item, editingToothNumberValue);
-                                    setEditingToothNumberAptId(null);
-                                  }}
-                                  className="text-xs font-bold text-violet-700 hover:underline block"
-                                >
-                                  Done
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!isSoftDeletedAppointment(item)) {
-                                    setEditingToothNumberAptId(String(item.id));
-                                    setEditingToothNumberValue(getBookingToothNumbersValue(item) || "");
-                                  }
-                                }}
-                                disabled={isSoftDeletedAppointment(item)}
-                                aria-label={`Edit tooth numbers for ${patientName}`}
-                                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-violet-200 hover:bg-violet-50/70"
-                              >
-                                <span className="truncate font-semibold text-gray-900">
-                                  {getBookingToothNumbersValue(item) || "—"}
-                                </span>
-                              </button>
-                            )}
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <button type="button" onClick={() => !isSoftDeletedAppointment(item) && setDoctorCellAppointment(item)} disabled={isSoftDeletedAppointment(item)} aria-label={`Change doctor for ${patientName}`} className={editableCellClass}>
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />
-                              <span className="font-semibold leading-snug text-gray-900">{item.doctor || "Unassigned"}</span>
-                            </button>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <Select
-                              value={item.status}
-                              onValueChange={(newStatus) => handleHistoryStatusChange(item.id, newStatus)}
-                            >
-                              <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
-                                {getStatusBadge(item.status)}
-                              </SelectTrigger>
-                              <SelectContent>
-                                {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value) || isHistoryStatus(s.value)).map((status: any) => (
-                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <div className="mt-1.5">
-                              {canManagePaymentStatuses ? (
-                                <Select
-                                  value={item.paymentStatus || "unpaid"}
-                                  onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
-                                >
-                                  <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 shadow-none hover:opacity-80 [&>svg]:ml-2 [&>svg]:text-gray-400">
-                                    {getPaymentStatusBadge(item.paymentStatus)}
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {PAYMENT_STATUSES.map((status: any) => (
-                                      <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : getPaymentStatusBadge(item.paymentStatus)}
-                            </div>
-                          </TableCell>
-                          <TableCell
-                            className="font-semibold text-gray-900 cursor-pointer hover:bg-violet-50/80 transition-colors group/cell rounded-lg"
-                            onClick={() => setSetPriceAppointment(item)}
-                            title="Click to set new price total"
-                          >
-                            <div className="flex flex-col justify-center leading-tight">
-                              {Number(item.discount) > 0 && (
-                                <span className="text-[11px] font-normal text-gray-400 line-through decoration-rose-400">
-                                  {formatPaymentCurrency(item.price || 0)}
-                                </span>
-                              )}
-                              <span className="font-semibold text-gray-900">
-                                {formatPaymentCurrency(Math.max(0, Number(item.price || 0) - Number(item.discount || 0)))}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell
-                            className="font-semibold text-emerald-700 cursor-pointer hover:bg-emerald-50/80 transition-colors group/cell rounded-lg"
-                            onClick={() => handleOpenPayment(item)}
-                            title="Click to record payment"
-                          >
-                            <div className="flex items-center gap-1">
-                              <span>{formatPaymentCurrency(item.totalPaid || 0)}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell
-                            className={`font-semibold cursor-pointer hover:bg-amber-50/80 transition-colors group/cell rounded-lg ${Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))) > 0 ? "text-amber-600" : "text-emerald-600"}`}
-                            onClick={() => handleOpenPayment(item)}
-                            title="Click to record payment"
-                          >
-                            <div className="flex items-center gap-1">
-                              <span>{formatPaymentCurrency(Math.max(0, Number(item.balance ?? Number(item.price || 0) - Number(item.totalPaid || 0))))}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              {isActionableStatus(item.status) && (
-                                <>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleApprove(item)}
-                                    className="h-10 w-10 rounded-full border border-emerald-100 bg-white text-emerald-600 shadow-sm hover:bg-emerald-50"
-                                    title={item.status === "tbd" ? "Mark completed" : "Approve"}
-                                  >
-                                    <CheckCircle className="h-5 w-5" />
-                                  </Button>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleReject(item)}
-                                    className="h-10 w-10 rounded-full border border-rose-100 bg-white text-rose-600 shadow-sm hover:bg-rose-50"
-                                    title={item.status === "tbd" ? "Cancel" : "Reject"}
-                                  >
-                                    <XCircle className="h-5 w-5" />
-                                  </Button>
-                                </>
-                              )}
-                              {renderRequestOverflowMenu(item, "h-10 w-10 rounded-full border border-slate-100 bg-white text-slate-600 shadow-sm hover:bg-slate-50")}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100 bg-white">
-                <p className="text-sm text-gray-500 font-medium">
-                  Page {historyCurrentPage} of {historyTotalPages || 1} | Showing {history.length} of {historyTotal} history items
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-lg"
-                    onClick={() => setHistoryCurrentPage((page) => Math.max(1, page - 1))}
-                    disabled={isHistoryLoading || historyCurrentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-lg"
-                    onClick={() => setHistoryCurrentPage((page) => Math.min(historyTotalPages, page + 1))}
-                    disabled={isHistoryLoading || historyCurrentPage >= historyTotalPages || historyTotalPages === 0}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
         <AlertDialogContent 
@@ -2571,6 +1719,41 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         onConfirm={confirmReject}
         isProcessing={false}
       />
+      <AppointmentPatientChoiceDialog
+        open={Boolean(patientChoiceAppointment)}
+        onOpenChange={(open) => { if (!open) setPatientChoiceAppointment(null); }}
+        patientName={patientChoiceAppointment ? getCurrentPatientName(patientChoiceAppointment) : ""}
+        patientImage={patientChoiceAppointment ? resolveImageSource(getPatientImage(patientChoiceAppointment)) : undefined}
+        patientDob={patientChoiceAppointment?.patientDateOfBirth || patientChoiceAppointment?.patientDob || patientChoiceAppointment?.patientBirthDate || patientChoiceAppointment?.patientBirthday}
+        canSelectPatient={!isSoftDeletedAppointment(patientChoiceAppointment)}
+        canOpenProfile={Boolean(
+          patientChoiceAppointment &&
+          (
+            (patientChoiceAppointment as any).patientId ||
+            (patientChoiceAppointment as any).patient?.id ||
+            (getCurrentPatientName(patientChoiceAppointment) && getCurrentPatientName(patientChoiceAppointment) !== "No patient assigned")
+          )
+        )}
+        onSelectPatient={() => {
+          const appt = patientChoiceAppointment;
+          setPatientChoiceAppointment(null);
+          setPatientCellAppointment(appt);
+        }}
+        onOpenProfile={() => {
+          if (!patientChoiceAppointment) return;
+          const basePath = pathname.startsWith("/receptionist") ? "/receptionist" : "/admin";
+          const displayName = getCurrentPatientName(patientChoiceAppointment);
+          const patientId = String((patientChoiceAppointment as any)?.patientId || (patientChoiceAppointment as any)?.patient?.id || "").trim();
+          const target = (displayName && displayName !== "No patient assigned" ? displayName : "") || patientId;
+          setPatientChoiceAppointment(null);
+          if (target) {
+            router.push(`${basePath}/patients/${encodeURIComponent(target)}`);
+          } else {
+            toast.error("No patient profile found for this appointment.");
+          }
+        }}
+      />
+
       <SelectPatientModal
         open={Boolean(patientCellAppointment)}
         onOpenChange={(open) => !open && setPatientCellAppointment(null)}
