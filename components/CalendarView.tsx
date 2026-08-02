@@ -50,13 +50,13 @@ import { AllAppointmentsView } from "./AllAppointmentsView";
 import PatientAvatar from "./PatientAvatar";
 import CalendarPopover from "./CalendarPopover";
 import AppointmentHistoryView from "./AppointmentHistoryView";
-
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from "sonner";
-import { isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { isOverdueAppointmentDisplay, isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import {
+  DEFAULT_APPOINTMENT_STATUS_OPTIONS,
   getAppointmentCalendarStatusColors,
   getPaymentStatusBadgeClassName,
   getStatusBorderColorClass,
@@ -85,10 +85,14 @@ const isSoftDeletedAppointment = (appointment: Partial<Appointment>) =>
   Boolean(appointment.deleted) ||
   normalizeAppointmentStatus(String(appointment.status || "")) === "deleted";
 
-const getCalendarAppointmentStatus = (appointment: Partial<Appointment>) =>
-  isSoftDeletedAppointment(appointment)
-    ? "deleted"
-    : normalizeAppointmentStatus(String(appointment.status || ""));
+const getCalendarAppointmentStatus = (appointment: Partial<Appointment>) => {
+  if (isSoftDeletedAppointment(appointment)) return "deleted";
+  const rawStatus = normalizeAppointmentStatus(String(appointment.status || ""));
+  if (isOverdueAppointmentDisplay(rawStatus, appointment.paymentStatus)) {
+    return "overdue";
+  }
+  return rawStatus;
+};
 
 const pickImageSource = (...sources: unknown[]) => {
   for (const source of sources) {
@@ -114,7 +118,6 @@ const timeToMinutes = (time: string): number => {
   return hours * 60 + minutes;
 };
 
-
 type CalendarPortal = 'admin' | 'doctor' | 'patient' | 'public';
 
 interface CalendarViewProps {
@@ -129,7 +132,7 @@ interface CalendarViewProps {
 }
 
 export function CalendarView({
-  portal = 'admin',
+  portal,
   defaultStatusFilter,
   defaultDoctorFilter,
   appointmentsOverride,
@@ -157,12 +160,17 @@ export function CalendarView({
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { effectiveRole } = useAdminViewMode();
   const canSeeDeletedAppointments = effectiveRole === "admin";
-  const visibleAppointmentStatuses = useMemo(
-    () => APPOINTMENT_STATUSES.filter((status) =>
-      canSeeDeletedAppointments || normalizeAppointmentStatus(status.value) !== "deleted"
-    ),
-    [APPOINTMENT_STATUSES, canSeeDeletedAppointments]
-  );
+  const visibleAppointmentStatuses = useMemo(() => {
+    const statusByValue = new Map<string, any>();
+    const combinedStatusOptions = [...APPOINTMENT_STATUSES, ...DEFAULT_APPOINTMENT_STATUS_OPTIONS];
+    for (const status of combinedStatusOptions) {
+      const normalized = normalizeAppointmentStatus(status.value);
+      if (statusByValue.has(normalized)) continue;
+      if (!canSeeDeletedAppointments && normalized === "deleted") continue;
+      statusByValue.set(normalized, { ...status, value: normalized, label: status.label });
+    }
+    return Array.from(statusByValue.values());
+  }, [APPOINTMENT_STATUSES, canSeeDeletedAppointments]);
 
   useEffect(() => {
     if (!canSeeDeletedAppointments && normalizeAppointmentStatus(selectedStatus) === "deleted") {
@@ -387,9 +395,9 @@ export function CalendarView({
   const filteredAppointments = useMemo(() => {
     let statusesToFilter = statusFilterList.length > 0 ? statusFilterList : [selectedStatus];
     
-    // Handle "My Calendar" filter - shows scheduled, reserved, completed, and TBD appointments
+    // Handle "My Calendar" filter - shows scheduled, reserved, completed, TBD, and overdue appointments
     if (statusesToFilter.includes("my-calendar")) {
-      statusesToFilter = ["scheduled", "reserved", "completed", "tbd"];
+      statusesToFilter = ["scheduled", "reserved", "completed", "tbd", "overdue"];
     }
     
     let filtered = displayedAppointments
@@ -487,12 +495,13 @@ export function CalendarView({
     filters.type = selectedType;
     // Don't send status to backend - we'll filter on the client side
     // Only send a single status for admin/doctor portals
-    if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
+const backendStatusFilter = selectedStatus === 'overdue' ? 'tbd,completed' : selectedStatus;
+      if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
       // For patient/public or when no specific status filter, fetch all and filter client-side
       filters.status = 'all';
     } else {
       // For admin/doctor with single status filter
-      filters.status = selectedStatus;
+      filters.status = backendStatusFilter;
     }
 
     setIsLoadingView(true);

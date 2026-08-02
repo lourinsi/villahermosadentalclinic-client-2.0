@@ -201,17 +201,25 @@ export function createAppointmentHistoryActions(handlers: {
 export function createVisitHistoryActions(handlers: {
   onViewDetails?: () => void;
   onViewHistory?: () => void;
+  onApprove?: () => void;
+  onReject?: () => void;
   onRecordPayment?: () => void;
   onRestoreAppointment?: () => void;
   onReschedule?: () => void;
   onUpdateTreatment?: () => void;
   onAssignDoctor?: () => void;
+  onGoToPatient?: () => void;
 }, state: {
+  canApprove?: boolean;
+  canReject?: boolean;
   canRestoreAppointment?: boolean;
   canReschedule?: boolean;
   canUpdateTreatment?: boolean;
   canAssignDoctor?: boolean;
   isDoctorUnassigned?: boolean;
+  canGoToPatient?: boolean;
+  isTBD?: boolean;
+  isReserved?: boolean;
 } = {}): AppointmentActionConfig[] {
   return [
     {
@@ -227,6 +235,23 @@ export function createVisitHistoryActions(handlers: {
       icon: <History className="h-4 w-4" />,
       onSelect: handlers.onViewHistory || (() => {}),
       hidden: !handlers.onViewHistory,
+    },
+    {
+      id: "approve",
+      label: state.isTBD ? "Mark as Completed" : "Approve",
+      icon: <Check className="h-4 w-4 text-emerald-600" />,
+      disabled: state.canApprove === false,
+      onSelect: handlers.onApprove || (() => {}),
+      hidden: !handlers.onApprove,
+    },
+    {
+      id: "reject",
+      label: "Reject",
+      icon: <X className="h-4 w-4 text-rose-600" />,
+      isDangerous: true,
+      disabled: state.canReject === false,
+      onSelect: handlers.onReject || (() => {}),
+      hidden: !handlers.onReject,
     },
     {
       id: "record-payment",
@@ -266,6 +291,22 @@ export function createVisitHistoryActions(handlers: {
       disabled: !state.canAssignDoctor,
       onSelect: handlers.onAssignDoctor || (() => {}),
       hidden: !handlers.onAssignDoctor,
+    },
+    {
+      id: "separator-navigation",
+      label: "",
+      icon: null,
+      separator: true,
+      onSelect: () => {},
+      hidden: !handlers.onGoToPatient,
+    },
+    {
+      id: "go-to-patient",
+      label: "Go to patient",
+      icon: <User className="h-4 w-4" />,
+      disabled: state.canGoToPatient === false,
+      onSelect: handlers.onGoToPatient || (() => {}),
+      hidden: !handlers.onGoToPatient,
     },
   ];
 }

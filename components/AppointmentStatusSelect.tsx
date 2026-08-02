@@ -24,7 +24,9 @@ export function AppointmentStatusSelect({
   const statusOption = getAppointmentStatusOptionWithColors(normalizedValue, statuses);
   const options = statuses.filter((status) => {
     const normalized = normalizeAppointmentStatus(status.value);
-    return !isCartAppointmentStatus(normalized) && (includeDeleted || normalized !== "deleted");
+    if (isCartAppointmentStatus(normalized)) return false;
+    if (!includeDeleted && normalized === "deleted") return false;
+    return true;
   });
 
   return (

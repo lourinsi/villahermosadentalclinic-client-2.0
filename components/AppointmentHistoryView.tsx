@@ -55,7 +55,7 @@ import {
 import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors, normalizePaymentStatus } from "@/lib/status-colors";
-import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { isCartAppointmentStatus, isOverdueAppointmentDisplay, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { SelectDoctorModal } from "./SelectDoctorModal";
@@ -1087,11 +1087,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const nextStatusNorm = normalizeBookingHistoryStatus(nextStatus || displayedSnapshot?.status);
   const prevPaymentStatusNorm = normalizeBookingHistoryStatus(prevPaymentStatus);
   const nextPaymentStatusNorm = normalizeBookingHistoryStatus(nextPaymentStatus || displayedSnapshot?.paymentStatus);
-  const displayedStatusColors = getDefaultAppointmentStatusColors(nextStatus || displayedSnapshot?.status);
+  const rawNextStatus = normalizeAppointmentStatus(nextStatus || displayedSnapshot?.status);
+  const displayedStatus = isOverdueAppointmentDisplay(rawNextStatus, nextPaymentStatus || displayedSnapshot?.paymentStatus)
+    ? "overdue"
+    : rawNextStatus;
+  const displayedStatusColors = getDefaultAppointmentStatusColors(displayedStatus);
   const displayedPaymentStatusColors = getDefaultPaymentStatusColors(nextPaymentStatus || displayedSnapshot?.paymentStatus);
-  const isOverdueAppointment =
-    normalizeAppointmentStatus(nextStatus || displayedSnapshot?.status) === "tbd" &&
-    !["paid", "over-paid"].includes(normalizePaymentStatus(nextPaymentStatus || displayedSnapshot?.paymentStatus));
+  const isOverdueAppointment = isOverdueAppointmentDisplay(
+    rawNextStatus,
+    nextPaymentStatus || displayedSnapshot?.paymentStatus
+  );
 
   const prevScheduleLabel = prevState ? `${formatWordyDate(prevState.date, { fallback: String(prevState.date || "No date") })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
   const nextScheduleLabel = nextState ? `${formatWordyDate(nextState.date, { fallback: String(nextState.date || "No date") })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
@@ -2025,11 +2030,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     !hasLaterChanges &&
     !actionsDisabled &&
     !isAppointmentOpen &&
-    (nextStatusNorm === "reserved" || nextStatusNorm === "tbd")
+    (nextStatusNorm === "reserved" || nextStatusNorm === "tbd" || nextStatusNorm === "overdue")
   );
   const actionNoteText = nextStatusNorm === "tbd"
     ? "Accept to mark this appointment as completed or cancel it if needed."
-    : "Accept to confirm this schedule or cancel the appointment request.";
+    : nextStatusNorm === "overdue"
+      ? "Pay now to settle this overdue appointment or decline if needed."
+      : "Accept to confirm this schedule or cancel the appointment request.";
 
   const getAppointmentForPayment = (): Appointment => ({
     ...displayedSnapshot,
@@ -2085,8 +2092,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
 
     const normalizedStatus = normalizeAppointmentStatus(nextStatus);
+    const rawStatus = normalizeAppointmentStatus(String(displayedSnapshot?.status || ""));
+
+    if (normalizedStatus === "overdue" && isOverdueAppointmentDisplay(rawStatus, displayedSnapshot?.paymentStatus)) {
+      return;
+    }
     if (!normalizedStatus || isCartAppointmentStatus(normalizedStatus)) return;
-    if (normalizedStatus === normalizeAppointmentStatus(String(displayedSnapshot?.status || ""))) return;
+    if (normalizedStatus === rawStatus) return;
 
     try {
       const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
@@ -3204,8 +3216,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         onChangeTreatment: openChangeTreatmentModal,
                         onChangeSchedule: openChangeScheduleModal,
                         onRepeatSchedule: openRepeatScheduleModal,
-                        onEditPayment: handleEditPayment,
-                        onAddPayment: handleAddPayment,
+                        onEditPayment: !isOverdueAppointment ? handleEditPayment : undefined,
+                        onAddPayment: !isOverdueAppointment ? handleAddPayment : undefined,
                         onGoToPatient: goToPatient,
                         onGoToDoctor: goToDoctor,
                       },
@@ -3246,7 +3258,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         <div className="flex min-w-0 items-center gap-1.5">
                           {canChangeStatus ? (
                             <AppointmentStatusSelect
-                              value={nextStatus || displayedSnapshot.status}
+                              value={displayedStatus}
                               statuses={APPOINTMENT_STATUSES}
                               includeDeleted={effectiveRole === "admin"}
                               onChange={handleStatusChange}
@@ -3254,7 +3266,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                             />
                           ) : (
                             <p className={`truncate text-sm font-black sm:text-base ${displayedStatusColors.textColor}`}>
-                              {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status)}
+                              {formatBookingHistoryStatusLabel(displayedStatus)}
                             </p>
                           )}
                           <CurrentChangeIndicator change={statusCurrentChange} />
@@ -3815,7 +3827,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             ) : null}
             {canShowSnapshotActions ? (
               <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-                <Button className="h-11 w-full rounded-xl bg-emerald-600 text-sm font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95 sm:h-12 sm:text-base" onClick={() => openApproveConfirm(displayedSnapshot)}><CheckCircle2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Accept</Button>
+                <Button
+                  className="h-11 w-full rounded-xl bg-emerald-600 text-sm font-black text-white shadow-lg shadow-emerald-100 transition-all hover:bg-emerald-700 active:scale-95 sm:h-12 sm:text-base"
+                  onClick={() => {
+                    if (nextStatusNorm === "overdue") {
+                      handleRecordPayment();
+                    } else {
+                      openApproveConfirm(displayedSnapshot);
+                    }
+                  }}
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
+                  {nextStatusNorm === "overdue" ? "Pay now" : "Accept"}
+                </Button>
                 <Button className="h-11 w-full rounded-xl border-red-200 bg-white text-sm font-black text-red-500 shadow-sm transition-all hover:bg-red-50 active:scale-95 sm:h-12 sm:text-base" onClick={() => openRejectConfirm(displayedSnapshot)} variant="outline"><AlertTriangle className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />Decline</Button>
               </div>
             ) : null}

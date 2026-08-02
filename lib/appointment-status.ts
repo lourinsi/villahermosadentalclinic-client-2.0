@@ -30,6 +30,19 @@ export function isReservedAppointmentStatus(status?: string | null): boolean {
   return normalizeAppointmentStatus(status) === "reserved";
 }
 
+export function isFullyPaidAppointmentStatus(paymentStatus?: string | null): boolean {
+  const normalizedPayment = String(paymentStatus || "").toLowerCase().trim();
+  return normalizedPayment === "paid" || normalizedPayment === "over-paid" || normalizedPayment === "fully-paid";
+}
+
+export function isOverdueAppointmentDisplay(status?: string | null, paymentStatus?: string | null): boolean {
+  const normalizedStatus = normalizeAppointmentStatus(status);
+  if (normalizedStatus === "overdue") return true;
+
+  const isFullyPaid = isFullyPaidAppointmentStatus(paymentStatus);
+  return (normalizedStatus === "tbd" || normalizedStatus === "completed") && !isFullyPaid;
+}
+
 export function formatAppointmentStatusLabel(status?: string | null): string {
   const normalized = normalizeAppointmentStatus(status);
   if (!normalized) return "";
@@ -41,3 +54,4 @@ export function formatAppointmentStatusLabel(status?: string | null): string {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
+

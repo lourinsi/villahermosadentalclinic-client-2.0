@@ -24,7 +24,7 @@ interface UsePaymentStatusesReturn {
   getPaymentStatusColors: (status: string) => { bgColor: string; textColor: string };
 }
 
-const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
+const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic", "overdue"]);
 
 const normalizePaymentStatusOptions = (options: PaymentStatusOption[]): PaymentStatusOption[] => {
   const byValue = new Map<string, PaymentStatusOption>();
