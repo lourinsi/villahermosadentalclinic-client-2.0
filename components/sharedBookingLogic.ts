@@ -68,7 +68,7 @@ export function getBookingTreatmentSearchResults<T>(
   return matches.some(isFallback) ? matches : [...matches, ...fallbackOptions];
 }
 
-export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
+export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'overdue', 'completed'] as const;
 type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];
 
 export function parseLocalDateOnly(dateInput?: Date | string | null): Date | null {
@@ -188,9 +188,12 @@ export function isPastAppointmentStatusValue(status?: string | null): status is 
   );
 }
 
-export function normalizePastAppointmentStatus(status?: string | null): PastAppointmentStatus {
+export function normalizePastAppointmentStatus(status?: string | null): string {
   const normalized = String(status || '').toLowerCase().trim();
-  return isPastAppointmentStatusValue(normalized) ? normalized : 'tbd';
+  if (normalized === 'deleted' || isPastAppointmentStatusValue(normalized)) {
+    return normalized;
+  }
+  return 'tbd';
 }
 
 export function getPastAppointmentStatusOptions<T extends { value: string }>(options: T[]): T[] {
@@ -211,25 +214,18 @@ export function getDefaultPastAppointmentTime() {
   return '09:00';
 }
 
-export type BookingConflictWarning = {
-  type: 'duration' | 'patient';
-  label: string;
-  message: string;
+export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
+  "Routine Cleaning": 30,
+  "Checkup": 30,
+  "Filling": 60,
+  "Root Canal": 90,
+  "Extraction": 60,
+  "Whitening": 60,
+  "Other": 30,
+  "Dentures": 60,
+  "Crowns": 90,
+  "Braces": 90,
 };
-
-export type BookingStatusOption = {
-  key: number;
-  value: string;
-  label: string;
-  description?: string;
-  bgColor?: string;
-  textColor?: string;
-};
-
-export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS;
-
-export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS;
-const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
 
 export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
@@ -253,20 +249,26 @@ export function normalizeBookingDuration(
   return isAllowedBookingDuration(duration) ? (duration as BookingDuration) : fallback;
 }
 
-type AppointmentTypeDurations = Record<string, number>;
-
-export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
-  "Routine Cleaning": 30,
-  "Checkup": 30,
-  "Filling": 60,
-  "Root Canal": 90,
-  "Extraction": 60,
-  "Whitening": 60,
-  "Other": 30,
-  "Dentures": 60,
-  "Crowns": 90,
-  "Braces": 90,
+export type BookingConflictWarning = {
+  type: 'duration' | 'patient';
+  label: string;
+  message: string;
 };
+
+export type BookingStatusOption = {
+  key: number;
+  value: string;
+  label: string;
+  description?: string;
+  bgColor?: string;
+  textColor?: string;
+};
+
+export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS;
+export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS;
+const HIDDEN_PAYMENT_STATUS_VALUES = new Set(["pay-at-clinic"]);
+
+type AppointmentTypeDurations = Record<string, number>;
 
 type DefaultScheduleAction =
   | { type: 'none' }
@@ -603,6 +605,7 @@ export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>
   canManageStatuses,
   statusOptions,
   fallbackStatusOptions = DEFAULT_APPOINTMENT_STATUS_OPTIONS as T[],
+  isAdmin = false,
 }: {
   appointmentStatus?: string | null;
   existingStatus?: string | null;
@@ -610,6 +613,7 @@ export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>
   canManageStatuses: boolean;
   statusOptions: T[];
   fallbackStatusOptions?: T[];
+  isAdmin?: boolean;
 }) {
   const defaultAppointmentStatusValue = isPastStatusRestricted ? "tbd" : "scheduled";
   const rawCurrentAppointmentStatusValue = appointmentStatus || existingStatus || defaultAppointmentStatusValue;
@@ -617,11 +621,26 @@ export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>
     ? normalizePastAppointmentStatus(rawCurrentAppointmentStatusValue)
     : normalizeAppointmentStatus(rawCurrentAppointmentStatusValue);
   const baseAppointmentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
-  const selectableAppointmentStatusOptions = isPastStatusRestricted
-    ? getPastAppointmentStatusOptions(baseAppointmentStatusOptions)
-    : canManageStatuses
-      ? baseAppointmentStatusOptions.filter((status) => !isCartAppointmentStatus(status.value))
-      : baseAppointmentStatusOptions;
+  const PAST_ONLY_STATUS_KEYS = new Set(['tbd', 'overdue', 'completed']);
+  let selectableAppointmentStatusOptions: T[];
+  if (isPastStatusRestricted) {
+    const pastOptions = getPastAppointmentStatusOptions(baseAppointmentStatusOptions);
+    if (isAdmin) {
+      // Admins can also set deleted on past appointments
+      const deletedOption = baseAppointmentStatusOptions.find(
+        (s) => normalizeAppointmentStatus(s.value) === 'deleted'
+      );
+      selectableAppointmentStatusOptions = deletedOption
+        ? [...pastOptions, deletedOption]
+        : pastOptions;
+    } else {
+      selectableAppointmentStatusOptions = pastOptions;
+    }
+  } else {
+    selectableAppointmentStatusOptions = canManageStatuses
+      ? baseAppointmentStatusOptions.filter((status) => !isCartAppointmentStatus(status.value) && !PAST_ONLY_STATUS_KEYS.has(status.value))
+      : baseAppointmentStatusOptions.filter((status) => !PAST_ONLY_STATUS_KEYS.has(status.value));
+  }
   const appointmentStatusOptions =
     currentAppointmentStatusValue &&
     !(canManageStatuses && isCartAppointmentStatus(currentAppointmentStatusValue)) &&

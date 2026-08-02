@@ -55,7 +55,7 @@ import {
 import type { TreatmentSelectionDraft } from "./universalSelectModalDrafts";
 
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors, normalizePaymentStatus } from "@/lib/status-colors";
-import { isCartAppointmentStatus, isOverdueAppointmentDisplay, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { isCartAppointmentStatus, isOverdueAppointmentDisplay, isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { SelectDoctorModal } from "./SelectDoctorModal";
@@ -2099,6 +2099,10 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
     if (!normalizedStatus || isCartAppointmentStatus(normalizedStatus)) return;
     if (normalizedStatus === rawStatus) return;
+    if (!isStatusAllowedForAppointment(normalizedStatus, displayedSnapshot?.date, displayedSnapshot?.paymentStatus, effectiveRole === "admin")) {
+      toast.error("This status option is not allowed for the appointment's scheduled date.");
+      return;
+    }
 
     try {
       const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
@@ -3261,6 +3265,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                               value={displayedStatus}
                               statuses={APPOINTMENT_STATUSES}
                               includeDeleted={effectiveRole === "admin"}
+                              appointmentDate={displayedSnapshot?.date}
+                              paymentStatus={displayedSnapshot?.paymentStatus}
                               onChange={handleStatusChange}
                               badgeClassName="max-w-[5.8rem] truncate text-sm font-black capitalize sm:max-w-none sm:text-base"
                             />

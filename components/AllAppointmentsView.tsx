@@ -185,6 +185,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
         value={status}
         statuses={APPOINTMENT_STATUSES}
         includeDeleted={includeDeletedStatus}
+        appointmentDate={appointment.date}
+        paymentStatus={appointment.paymentStatus}
         onChange={(nextStatus) => onUpdateStatus(appointment, nextStatus)}
         badgeClassName={className}
       />

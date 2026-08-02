@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
-import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { formatAppointmentStatusLabel, isCartAppointmentStatus, isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { Input } from "./ui/input";
@@ -572,6 +572,10 @@ export function TreatmentHistoryView({
       toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
+    if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, effectiveRole === "admin")) {
+      toast.error("This status option is not allowed for the appointment's scheduled date.");
+      return;
+    }
 
     try {
       const updatedAppointment = await updateAppointment(
@@ -947,6 +951,8 @@ export function TreatmentHistoryView({
                                 value={isDeletedAppointment ? "deleted" : String(appointment.status || "")}
                                 statuses={APPOINTMENT_STATUSES}
                                 includeDeleted={effectiveRole === "admin"}
+                                appointmentDate={appointment.date}
+                                paymentStatus={appointment.paymentStatus}
                                 onChange={(nextStatus) => handleStatusChange(appointment, nextStatus)}
                               />
                               {isOverdueAppointmentDisplay(normalizeAppointmentStatus(String(appointment.status || "")), appointment.paymentStatus) ? (
@@ -1204,6 +1210,8 @@ export function TreatmentHistoryView({
                             value={isDeleted ? "deleted" : String(item.status || "")}
                             statuses={APPOINTMENT_STATUSES}
                             includeDeleted={effectiveRole === "admin"}
+                            appointmentDate={item.date}
+                            paymentStatus={item.paymentStatus}
                             onChange={(nextStatus) => handleStatusChange(item, nextStatus)}
                           />
                         </TableCell>
