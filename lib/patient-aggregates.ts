@@ -94,6 +94,14 @@ export const isOverdueAppointment = (appointment: PatientAggregateAppointment, t
   if (!isBillableAppointment(appointment)) return false;
   if (String(appointment.paymentStatus || "").toLowerCase() === "overdue") return true;
 
+  const status = normalizeAppointmentStatus(appointment.status);
+  const paymentStatus = normalizeAppointmentStatus(appointment.paymentStatus);
+  const isFullyPaid = paymentStatus === "paid" || paymentStatus === "over-paid";
+
+  if ((status === "completed" || status === "tbd") && !isFullyPaid) {
+    return true;
+  }
+
   return isPastAppointment(appointment, today) && getAppointmentOutstandingBalance(appointment) > 0;
 };
 

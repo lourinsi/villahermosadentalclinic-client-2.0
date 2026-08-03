@@ -24,6 +24,7 @@ import { DatePickerModal } from "./DatePickerModal";
 import { formatBookingPaymentDateLabel, getBookingDoctorValue, normalizeBookingToothNumbers, parseLocalDateOnly } from "./sharedBookingLogic";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import { ToothNumbersEditor } from "./ToothNumbersEditor";
+import { isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 const REPEAT_NONE_OPTION = "do-not-repeat";
 const REPEAT_OPTIONS = [
@@ -489,6 +490,7 @@ export function ConfirmAppointmentModal({
                   </DetailCell>
                 </div>
 
+                {/* Duration cell */}
                 <DetailCell
                   label="Duration"
                   className="border-b border-slate-200"
@@ -526,6 +528,7 @@ export function ConfirmAppointmentModal({
                   </div>
                 </DetailCell>
 
+                {/* Status cell */}
                 <DetailCell
                   label="Status"
                   className="border-b border-slate-200 sm:border-r"
@@ -543,11 +546,16 @@ export function ConfirmAppointmentModal({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        {appointmentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value} className="mx-2 my-1 rounded-xl">
-                            {status.label}
-                          </SelectItem>
-                        ))}
+                        {appointmentStatusOptions
+                          .filter((status) => userRole === "admin" || normalizeAppointmentStatus(status.value) !== "deleted")
+                          .map((status) => {
+                            const isAllowed = isStatusAllowedForAppointment(status.value, selectedDate, paymentStatus, userRole === "admin");
+                            return (
+                              <SelectItem key={status.value} value={status.value} disabled={!isAllowed} className="mx-2 my-1 rounded-xl">
+                                {status.label}
+                              </SelectItem>
+                            );
+                          })}
                       </SelectContent>
                     </Select>
                   ) : (
@@ -559,6 +567,7 @@ export function ConfirmAppointmentModal({
                   )}
                 </DetailCell>
 
+                {/* Repeat cell */}
                 <DetailCell
                   label="Repeat this appointment"
                   className="border-b border-slate-200"
@@ -593,9 +602,7 @@ export function ConfirmAppointmentModal({
                           onClick={() => setCustomRepeatDatePickerOpen(true)}
                         >
                           <CalendarIcon className="mr-2 h-4 w-4" />
-                          {customRepeatDate
-                            ? formatWordyDate(parseLocalDateOnly(customRepeatDate), { fallback: "Pick date" })
-                            : "Pick date"}
+                          {customRepeatDate ? formatWordyDate(parseLocalDateOnly(customRepeatDate)!) : "Pick date"}
                         </Button>
                       )}
                     </div>
@@ -612,6 +619,7 @@ export function ConfirmAppointmentModal({
                   </div>
                 </DetailCell>
 
+                {/* Treatment Notes - full width */}
                 <div className="flex min-w-0 gap-4 border-b border-slate-200 p-5 sm:col-span-2 sm:p-6">
                   <DetailIcon>
                     <ClipboardList className="h-7 w-7" />
@@ -628,6 +636,7 @@ export function ConfirmAppointmentModal({
                   />
                 </div>
 
+                {/* Additional Notes - full width */}
                 <div className="flex min-w-0 gap-4 p-5 sm:col-span-2 sm:p-6">
                   <DetailIcon>
                     <Pencil className="h-7 w-7" />
@@ -700,7 +709,7 @@ export function ConfirmAppointmentModal({
                             onKeyDown={(event) => {
                               if (event.key === "Enter") commitFinalPrice();
                               if (event.key === "Escape") {
-                            setLocalFinalPrice(String(discountedPrice));
+                                setLocalFinalPrice(String(discountedPrice));
                                 setIsFinalPriceEditing(false);
                               }
                             }}
@@ -730,7 +739,6 @@ export function ConfirmAppointmentModal({
                 </div>
 
                 <div className="min-w-0 sm:justify-self-end sm:text-right">
-                  {/* <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Payment Status</p> */}
                   {onAddPayment ? (
                     <button
                       type="button"

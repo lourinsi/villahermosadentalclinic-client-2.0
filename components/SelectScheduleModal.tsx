@@ -15,6 +15,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatWordyDate } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import { isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { useAdminViewMode } from "@/hooks/useAdminViewMode";
 import type { ScheduleSelectionDraft } from "./universalSelectModalDrafts";
 
 type StatusOption = {
@@ -49,6 +51,7 @@ type SelectScheduleModalProps = {
   isSaving?: boolean;
   canSave?: boolean;
   saveLabel?: string;
+  userRole?: string;
 };
 
 const hasUsableDate = (date?: Date | string | null) => {
@@ -108,6 +111,7 @@ export function SelectScheduleModal({
   isSaving = false,
   canSave = true,
   saveLabel = "Save Schedule",
+  userRole,
 }: SelectScheduleModalProps) {
   const isDraftMode = Boolean(draft && onSaveDraft);
   const [localDraft, setLocalDraft] = useState<ScheduleSelectionDraft>(() => draft || {
@@ -164,8 +168,24 @@ export function SelectScheduleModal({
   const timeRangeLabel = hasTime && endTimeLabel
     ? `${formatTimeTo12h(rawTimeStr)} – ${endTimeLabel}`
     : "Choose a time and duration";
+  let adminViewRole = "";
+  try {
+    const adminView = useAdminViewMode();
+    adminViewRole = adminView?.effectiveRole || "";
+  } catch {
+    adminViewRole = "";
+  }
+  const effectiveRole = userRole || adminViewRole;
+  const isAdmin = effectiveRole === "admin";
+
+  const visibleStatusOptions = (statusOptions || []).filter((option) => {
+    const norm = normalizeAppointmentStatus(option.value);
+    if (!isAdmin && norm === "deleted") return false;
+    return true;
+  });
+
   const showDurationInput = isDraftMode || typeof onDurationChange === "function" || selectedDuration != null;
-  const showStatusSelect = Array.isArray(statusOptions) && statusOptions.length > 0 && (isDraftMode || typeof onStatusChange === "function");
+  const showStatusSelect = visibleStatusOptions.length > 0 && (isDraftMode || typeof onStatusChange === "function");
   const showExtraFields = showDurationInput || showStatusSelect;
   const resolvedCanSave = canSave && hasDate && hasTime && !isSaving;
 
@@ -315,11 +335,14 @@ export function SelectScheduleModal({
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                       <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        {(statusOptions || []).map((option) => (
-                          <SelectItem key={option.value} value={option.value} className="mx-2 my-1 rounded-xl">
-                            {option.label || option.value}
-                          </SelectItem>
-                        ))}
+                        {visibleStatusOptions.map((option) => {
+                          const isAllowed = isStatusAllowedForAppointment(option.value, resolvedDate, null, isAdmin);
+                          return (
+                            <SelectItem key={option.value} value={option.value} disabled={!isAllowed} className="mx-2 my-1 rounded-xl">
+                              {option.label || option.value}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>

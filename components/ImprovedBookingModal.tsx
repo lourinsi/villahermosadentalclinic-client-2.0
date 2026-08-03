@@ -75,6 +75,7 @@ import useSharedBookingLogic, {
   normalizeBookingToothNumbers,
   normalizePastAppointmentStatus,
   toBookingPatientOption as toPatientOption,
+  normalizeAppointmentStatus,
   UNASSIGNED_DOCTOR_LABEL,
   UNASSIGNED_DOCTOR_VALUE,
 } from './sharedBookingLogic';
@@ -911,6 +912,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     isPastStatusRestricted,
     canManageStatuses,
     statusOptions: visibleAppointmentStatuses,
+    isAdmin: effectiveRole === "admin",
   });
   const getAppointmentStatusOption = (statusValue: string) =>
     appointmentStatusOptions.find((status) => status.value === statusValue);
@@ -2307,8 +2309,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
-    if (isPastStatusRestricted && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
+    const isDeleting = normalizeAppointmentStatus(newStatus) === 'deleted';
+    if (isPastStatusRestricted && !isDeleting && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
       toast.error("Past appointments can only be Cancelled, Completed, or TBD.");
+      return;
+    }
+    if (isDeleting && effectiveRole !== 'admin') {
+      toast.error("Only admins can delete appointments.");
       return;
     }
 

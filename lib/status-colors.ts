@@ -33,6 +33,7 @@ export const DEFAULT_APPOINTMENT_STATUS_COLORS: Record<string, StatusColorClasse
   completed: { bgColor: "bg-blue-100", textColor: "text-blue-700" },
   tbd: { bgColor: "bg-violet-100", textColor: "text-violet-700" },
   "to-pay": { bgColor: "bg-cyan-100", textColor: "text-cyan-700" },
+  overdue: { bgColor: "bg-red-100", textColor: "text-red-700" },
 };
 
 export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
@@ -80,6 +81,13 @@ export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: StatusOptionWithColors[] = [
   },
   {
     key: 7,
+    value: "overdue",
+    label: "Overdue",
+    description: "Completed or TBD appointment with outstanding balance",
+    ...DEFAULT_APPOINTMENT_STATUS_COLORS.overdue,
+  },
+  {
+    key: 8,
     value: "deleted",
     label: "Deleted",
     description: "Hidden from receptionist views",
