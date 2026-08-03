@@ -53,7 +53,7 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from "sonner";
-import { isOverdueAppointmentDisplay, isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { getOverdueStatusQuery, isOverdueAppointmentDisplay, isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import {
   DEFAULT_APPOINTMENT_STATUS_OPTIONS,
@@ -511,8 +511,8 @@ export function CalendarView({
     filters.type = selectedType;
     // Don't send status to backend - we'll filter on the client side
     // Only send a single status for admin/doctor portals
-const backendStatusFilter = selectedStatus === 'overdue' ? 'tbd,completed' : selectedStatus;
-      if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
+    const backendStatusFilter = selectedStatus === 'overdue' ? getOverdueStatusQuery() : selectedStatus;
+    if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
       // For patient/public or when no specific status filter, fetch all and filter client-side
       filters.status = 'all';
     } else {

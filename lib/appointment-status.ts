@@ -131,4 +131,8 @@ export function getAutoConvertedStatusOnPayment(
   return normStatus;
 }
 
+export function getOverdueStatusQuery(): string {
+  return "tbd,completed,overdue";
+}
+
 

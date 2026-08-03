@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
-import { formatAppointmentStatusLabel, isCartAppointmentStatus, isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { formatAppointmentStatusLabel, getOverdueStatusQuery, isCartAppointmentStatus, isStatusAllowedForAppointment, normalizeAppointmentStatus, isOverdueAppointmentDisplay } from "@/lib/appointment-status";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { Input } from "./ui/input";
@@ -72,7 +72,6 @@ import {
 } from "@/lib/status-colors";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
-import { isOverdueAppointmentDisplay } from "@/lib/appointment-status";
 import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
@@ -260,7 +259,9 @@ export function TreatmentHistoryView({
   const getAppointmentStatusForDisplay = (appointment: any) => {
     if (!appointment) return "";
     if (Boolean(appointment.deleted)) return "deleted";
-    return normalizeAppointmentStatus(String(appointment.status || ""));
+    const raw = normalizeAppointmentStatus(String(appointment.status || ""));
+    if (isOverdueAppointmentDisplay(raw, appointment.paymentStatus)) return "overdue";
+    return raw;
   };
 
   const getCurrentPatientName = (appointment: any) => getAppointmentPatientDisplayName(appointment);
@@ -328,7 +329,7 @@ export function TreatmentHistoryView({
       const selectedDoc = doctorFilter || (localDoctorFilter !== "all" ? localDoctorFilter : "");
       if (search) params.set("search", search);
       if (statusFilter !== "all") {
-        params.set("status", statusFilter === "overdue" ? "tbd,completed,overdue" : canonicalStatus(statusFilter));
+        params.set("status", statusFilter === "overdue" ? getOverdueStatusQuery() : canonicalStatus(statusFilter));
       }
       if (paymentStatusFilter !== "all") params.set("paymentStatus", canonicalPaymentStatus(paymentStatusFilter));
       if (selectedDoc) params.set("doctor", selectedDoc);
