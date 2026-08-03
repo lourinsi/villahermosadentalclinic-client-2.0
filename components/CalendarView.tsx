@@ -113,6 +113,22 @@ const resolveImageSource = (source?: string) => {
 
 const normalizeAppointmentId = (value?: string | null) => String(value || "").trim();
 
+const getAppointmentListKey = (appointment: Partial<Appointment>, index: number) => {
+  const idPart = normalizeAppointmentId(appointment.id as string | undefined);
+  const composite = [
+    idPart || "no-id",
+    appointment.date || "",
+    appointment.time || "",
+    appointment.doctor || "",
+    appointment.patientName || "",
+    appointment.status || "",
+    String(appointment.duration || ""),
+    String(index),
+  ].join("-");
+
+  return composite;
+};
+
 const timeToMinutes = (time: string): number => {
   const [hours, minutes] = time.split(':').map(Number);
   return hours * 60 + minutes;
@@ -797,7 +813,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
               <div className="flex-1 relative min-h-[64px]">
                 {/* Appointments starting at this slot */}
-                {appointmentsStartingAtSlot.map((appointment: Appointment) => {
+                {appointmentsStartingAtSlot.map((appointment: Appointment, index: number) => {
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                   const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
@@ -817,7 +833,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   
                   return (
                     <div
-                      key={appointment.id}
+                      key={getAppointmentListKey(appointment, index)}
                       className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden ${
                         isReservedAppointmentStatus(appointment.status) ? "border-dashed opacity-90" : 
                         normalizeAppointmentStatus(appointment.status) === "to-pay" ? "border-double border-orange-400" : ""
@@ -904,7 +920,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           <div className="flex border-b-2 border-gray-200 sticky top-0 bg-white z-10">
             <div className="w-20 flex-shrink-0"></div>
             {weekDays.map((day, idx) => (
-              <div key={idx} className="flex-1 text-center py-3 border-l border-gray-100">
+              <div key={`week-header-${day.toISOString()}-${idx}`} className="flex-1 text-center py-3 border-l border-gray-100">
                 <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
                   {day.toLocaleDateString('en-US', { weekday: 'short' })}
                 </div>
@@ -943,7 +959,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   const dayBlocked = portal === 'patient' && doesPatientAlreadyHaveAppointmentOnDate(day);
                   return (
                   <div 
-                    key={idx} 
+                    key={`week-column-${day.toISOString()}-${idx}`} 
                     className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                   >
                     {/* Plus button for occupied slots - upper right */}
@@ -974,7 +990,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
                       <div className="relative w-full h-full">
 
-                        {appointmentsForSlot.map((appointment: Appointment) => {
+                        {appointmentsForSlot.map((appointment: Appointment, index: number) => {
                           const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
@@ -996,7 +1012,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
                           return (
                             <div 
-                              key={appointment.id}
+                              key={getAppointmentListKey(appointment, index)}
                               className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs ${
                                 isReservedAppointmentStatus(appointment.status) ? "border-dashed opacity-90" : 
                                 normalizeAppointmentStatus(appointment.status) === "to-pay" ? "border-double border-orange-400" : ""
@@ -1079,7 +1095,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
       <div className="overflow-hidden sm:overflow-x-auto">
         <div className="grid min-w-0 grid-cols-7 border-l border-t border-gray-200">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-          <div key={day} className="border-b border-r border-gray-200 bg-gray-50 px-1 py-2 text-center text-[10px] font-bold uppercase text-gray-500 sm:p-3 sm:text-xs">
+          <div key={`month-header-${day}`} className="border-b border-r border-gray-200 bg-gray-50 px-1 py-2 text-center text-[10px] font-bold uppercase text-gray-500 sm:p-3 sm:text-xs">
             <span className="sm:hidden">{day.charAt(0)}</span>
             <span className="hidden sm:inline">{day}</span>
           </div>
@@ -1092,7 +1108,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
           return (
             <div
-              key={idx}
+              key={`month-day-${item.date.toISOString()}-${idx}`}
               className={`min-h-[72px] border-b border-r border-gray-200 p-1.5 transition-colors sm:min-h-[120px] sm:p-2 ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               } ${portal === 'public' && isPastDay ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
@@ -1115,11 +1131,11 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 )}
               </div>
               <div className="flex flex-wrap gap-1 sm:hidden">
-                {sortedDayAppointments.slice(0, 4).map((apt: Appointment) => {
+                {sortedDayAppointments.slice(0, 4).map((apt: Appointment, index: number) => {
                   const colors = getColorForType(apt.status);
                   return (
                     <span
-                      key={apt.id}
+                      key={getAppointmentListKey(apt, index)}
                       className={`h-1.5 w-1.5 rounded-full ${colors.bg}`}
                       title={`${formatTime(apt.time)} - ${getAppointmentTypeName(apt.type, apt.customType)}`}
                     />
@@ -1127,7 +1143,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 })}
               </div>
               <div className="hidden space-y-1 sm:block">
-                {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
+                {sortedDayAppointments.slice(0, 3).map((apt: Appointment, index: number) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(apt.status);
                   const patientImageSrc = resolveImageSource(
@@ -1144,7 +1160,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
                   return (
                     <div
-                      key={apt.id}
+                      key={getAppointmentListKey(apt, index)}
                       className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${isReservedAppointmentStatus(apt.status) ? "border-dashed opacity-80" : normalizeAppointmentStatus(apt.status) === "to-pay" ? "border-orange-400" : ""} flex items-center gap-2 cursor-pointer hover:shadow-sm transition-all`}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1203,11 +1219,11 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedAppointments.map((apt: Appointment) => {
+            {sortedAppointments.map((apt: Appointment, index: number) => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(apt.status);
               return (
-                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
+                <Card key={getAppointmentListKey(apt, index)} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
                   handleOpenAppointment(apt);
                 }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
@@ -1323,7 +1339,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         <SelectContent>
                           <SelectItem value="all">All Types</SelectItem>
                           {APPOINTMENT_TYPES.map((type, index) => (
-                            <SelectItem key={index} value={String(index)}>{type}</SelectItem>
+                            <SelectItem key={`type-option-${index}-${type}`} value={String(index)}>{type}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1339,7 +1355,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         <SelectContent>
                           <SelectItem value="my-calendar">My Calendar</SelectItem>
                           {visibleAppointmentStatuses.map((status) => (
-                            <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
+                            <SelectItem key={`status-${status.value}`} value={status.value} className="capitalize">{status.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1445,7 +1461,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           </DropdownMenuItem>
                           {visibleAppointmentStatuses.map((status) => (
                             <DropdownMenuItem
-                              key={status.key}
+                              key={`status-${status.value}`}
                               className={activeMenuItemClass(selectedStatus === status.value)}
                               onSelect={() => setSelectedStatus(status.value)}
                             >

@@ -621,25 +621,21 @@ export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>
     ? normalizePastAppointmentStatus(rawCurrentAppointmentStatusValue)
     : normalizeAppointmentStatus(rawCurrentAppointmentStatusValue);
   const baseAppointmentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
+  const filteredBaseAppointmentStatusOptions = baseAppointmentStatusOptions.filter((status) => {
+    const normalizedValue = normalizeAppointmentStatus(status.value);
+    if (isCartAppointmentStatus(normalizedValue)) return false;
+    if (!isAdmin && normalizedValue === 'deleted') return false;
+    return true;
+  });
   const PAST_ONLY_STATUS_KEYS = new Set(['tbd', 'overdue', 'completed']);
   let selectableAppointmentStatusOptions: T[];
   if (isPastStatusRestricted) {
-    const pastOptions = getPastAppointmentStatusOptions(baseAppointmentStatusOptions);
-    if (isAdmin) {
-      // Admins can also set deleted on past appointments
-      const deletedOption = baseAppointmentStatusOptions.find(
-        (s) => normalizeAppointmentStatus(s.value) === 'deleted'
-      );
-      selectableAppointmentStatusOptions = deletedOption
-        ? [...pastOptions, deletedOption]
-        : pastOptions;
-    } else {
-      selectableAppointmentStatusOptions = pastOptions;
-    }
+    const pastOptions = getPastAppointmentStatusOptions(filteredBaseAppointmentStatusOptions);
+    selectableAppointmentStatusOptions = pastOptions;
   } else {
     selectableAppointmentStatusOptions = canManageStatuses
-      ? baseAppointmentStatusOptions.filter((status) => !isCartAppointmentStatus(status.value) && !PAST_ONLY_STATUS_KEYS.has(status.value))
-      : baseAppointmentStatusOptions.filter((status) => !PAST_ONLY_STATUS_KEYS.has(status.value));
+      ? filteredBaseAppointmentStatusOptions.filter((status) => !PAST_ONLY_STATUS_KEYS.has(normalizeAppointmentStatus(status.value)))
+      : filteredBaseAppointmentStatusOptions.filter((status) => !PAST_ONLY_STATUS_KEYS.has(normalizeAppointmentStatus(status.value)));
   }
   const appointmentStatusOptions =
     currentAppointmentStatusValue &&

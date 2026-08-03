@@ -196,6 +196,7 @@ export function TreatmentHistoryView({
   const router = useRouter();
   const pathname = usePathname();
   const { effectiveRole } = useAdminViewMode();
+  const isAdmin = effectiveRole === "admin";
   const {
     appointments: contextAppointments,
     updateAppointment,
@@ -345,15 +346,19 @@ export function TreatmentHistoryView({
         return { ...apt, rawStatus: backendStatus, status: getAppointmentStatusForDisplay(apt) };
       });
 
-      setUnfilteredHistory(rawData);
-      let data = rawData;
+      const visibleHistoryData = isAdmin
+        ? rawData
+        : rawData.filter((item: any) => !isSoftDeletedAppointment(item));
+
+      setUnfilteredHistory(visibleHistoryData);
+      let data = visibleHistoryData;
 
       if (statusFilter !== "all") {
         if (statusFilter === "overdue") {
-          data = rawData.filter((item: any) => isOverdueAppointmentDisplay(item.rawStatus || item.status, item.paymentStatus));
+          data = visibleHistoryData.filter((item: any) => isOverdueAppointmentDisplay(item.rawStatus || item.status, item.paymentStatus));
         } else {
           const expected = canonicalStatus(statusFilter);
-          data = rawData.filter((item: any) => normalizeAppointmentStatus(item.status) === expected);
+          data = visibleHistoryData.filter((item: any) => normalizeAppointmentStatus(item.status) === expected);
         }
       }
 
@@ -572,7 +577,7 @@ export function TreatmentHistoryView({
       toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
-    if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, effectiveRole === "admin")) {
+    if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdmin)) {
       toast.error("This status option is not allowed for the appointment's scheduled date.");
       return;
     }
@@ -950,7 +955,7 @@ export function TreatmentHistoryView({
                               <AppointmentStatusSelect
                                 value={isDeletedAppointment ? "deleted" : String(appointment.status || "")}
                                 statuses={APPOINTMENT_STATUSES}
-                                includeDeleted={effectiveRole === "admin"}
+                                includeDeleted={isAdmin}
                                 appointmentDate={appointment.date}
                                 paymentStatus={appointment.paymentStatus}
                                 onChange={(nextStatus) => handleStatusChange(appointment, nextStatus)}
@@ -1209,7 +1214,7 @@ export function TreatmentHistoryView({
                           <AppointmentStatusSelect
                             value={isDeleted ? "deleted" : String(item.status || "")}
                             statuses={APPOINTMENT_STATUSES}
-                            includeDeleted={effectiveRole === "admin"}
+                            includeDeleted={isAdmin}
                             appointmentDate={item.date}
                             paymentStatus={item.paymentStatus}
                             onChange={(nextStatus) => handleStatusChange(item, nextStatus)}

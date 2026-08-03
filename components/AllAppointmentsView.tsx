@@ -105,6 +105,11 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
 
     let filtered = [...appointments];
 
+    filtered = filtered.filter((appointment) => {
+      if (!includeDeletedStatus && isSoftDeletedAppointment(appointment)) return false;
+      return true;
+    });
+
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       filtered = filtered.filter(a => 
@@ -153,7 +158,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
       }
       return 0;
     });
-  }, [appointments, sortOrder, sortKey, searchTerm]);
+  }, [appointments, sortOrder, sortKey, searchTerm, includeDeletedStatus]);
 
   const toggleSortOrder = (key: SortKey) => {
     if (sortKey === key) {
