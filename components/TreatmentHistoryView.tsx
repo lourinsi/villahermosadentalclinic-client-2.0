@@ -570,6 +570,13 @@ export function TreatmentHistoryView({
   const handleStatusChange = async (appointment: Appointment, newStatus: string) => {
     const normalizedNewStatus = normalizeAppointmentStatus(newStatus);
     const rawStatus = normalizeAppointmentStatus(String((appointment as any).rawStatus || appointment.status || ""));
+    console.log('[TreatmentHistoryView] handleStatusChange', {
+      appointmentId: appointment.id,
+      rawStatus,
+      paymentStatus: appointment.paymentStatus,
+      normalizedNewStatus,
+      isAdmin,
+    });
 
     if (normalizedNewStatus === "overdue" && isOverdueAppointmentDisplay(rawStatus, appointment.paymentStatus)) {
       return;
@@ -578,12 +585,16 @@ export function TreatmentHistoryView({
       toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
-    if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdmin)) {
-      toast.error("This status option is not allowed for the appointment's scheduled date.");
-      return;
+    // Allow manual completion or cancellation regardless of payment state
+    if (normalizedNewStatus !== "completed" && normalizedNewStatus !== "cancelled") {
+      if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdmin)) {
+        toast.error("This status option is not allowed for the appointment's scheduled date.");
+        return;
+      }
     }
 
     try {
+      console.log('[TreatmentHistoryView] updating status', { appointmentId: appointment.id, patch: buildStatusLifecycleUpdate(appointment, normalizedNewStatus) });
       const updatedAppointment = await updateAppointment(
         appointment.id,
         buildStatusLifecycleUpdate(appointment, normalizedNewStatus)

@@ -2094,18 +2094,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const normalizedStatus = normalizeAppointmentStatus(nextStatus);
     const rawStatus = normalizeAppointmentStatus(String(displayedSnapshot?.status || ""));
 
+    console.log('[AppointmentHistoryView] handleStatusChange', {
+      appointmentId,
+      rawStatus,
+      paymentStatus: displayedSnapshot?.paymentStatus,
+      normalizedStatus,
+      effectiveRole,
+    });
+
     if (normalizedStatus === "overdue" && isOverdueAppointmentDisplay(rawStatus, displayedSnapshot?.paymentStatus)) {
       return;
     }
     if (!normalizedStatus || isCartAppointmentStatus(normalizedStatus)) return;
     if (normalizedStatus === rawStatus) return;
-    if (!isStatusAllowedForAppointment(normalizedStatus, displayedSnapshot?.date, displayedSnapshot?.paymentStatus, effectiveRole === "admin")) {
-      toast.error("This status option is not allowed for the appointment's scheduled date.");
-      return;
+    // Allow manual completion or cancellation regardless of payment state
+    if (normalizedStatus !== "completed" && normalizedStatus !== "cancelled") {
+      if (!isStatusAllowedForAppointment(normalizedStatus, displayedSnapshot?.date, displayedSnapshot?.paymentStatus, effectiveRole === "admin")) {
+        toast.error("This status option is not allowed for the appointment's scheduled date.");
+        return;
+      }
     }
 
     try {
       const statusPatch: Partial<Appointment> = { status: normalizedStatus as Appointment["status"] };
+      console.log('[AppointmentHistoryView] updating status', { appointmentId, statusPatch });
       if (isDeletedAppointmentState(displayedSnapshot) || normalizedStatus === "deleted") {
         (statusPatch as any).deleted = false;
         if (normalizedStatus === "deleted") (statusPatch as any).deletedAt = displayedSnapshot?.deletedAt || new Date().toISOString();
