@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import AddStaffModal from "./AddStaffModal";
 import { dentalStaffRoleOptions, type StaffRecordForModal } from "./sharedAddStaffLogic";
+import { getBookingDoctorSelectValue, UNASSIGNED_DOCTOR_LABEL, UNASSIGNED_DOCTOR_NAME, UNASSIGNED_DOCTOR_VALUE } from "./sharedBookingLogic";
 import type { DoctorSelectionDraft } from "./universalSelectModalDrafts";
 
 const addDoctorInitialStaff: StaffRecordForModal = {
@@ -106,6 +107,7 @@ export function SelectDoctorModal({
   const isDialogMode = typeof open === "boolean" && typeof onOpenChange === "function";
   const addDoctorIsDisabled = isSaving || addDoctorDisabled;
   const resolvedSelectedValue = draft?.doctor ? (draft.doctor.value || draft.doctor.name) : selectedValue;
+  const finalSelectedValue = getBookingDoctorSelectValue(resolvedSelectedValue);
 
   const handleSelect = async (doctor: DoctorSelectItem) => {
     if (onSaveDraft) {
@@ -223,11 +225,39 @@ export function SelectDoctorModal({
                 </div>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    key="assign-later"
+                    type="button"
+                    onClick={() => void handleSelect({ id: UNASSIGNED_DOCTOR_VALUE, name: UNASSIGNED_DOCTOR_NAME, label: UNASSIGNED_DOCTOR_LABEL, value: UNASSIGNED_DOCTOR_VALUE })}
+                    disabled={isSaving}
+                    className={`group flex min-h-[6.5rem] items-center gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-70 ${
+                      finalSelectedValue === UNASSIGNED_DOCTOR_VALUE
+                        ? "border-blue-400 ring-2 ring-blue-200"
+                        : "border-gray-100 hover:border-blue-200 hover:shadow-md"
+                    }`}
+                  >
+                    <Avatar className="h-14 w-14 shrink-0 rounded-2xl border border-blue-50 shadow-sm bg-slate-100 text-sm font-black text-slate-700">
+                      N/A
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-black leading-tight text-gray-900">{UNASSIGNED_DOCTOR_LABEL}</p>
+                      <p className="mt-1 line-clamp-2 text-xs font-semibold leading-snug text-gray-400">
+                        Assign after booking
+                      </p>
+                    </div>
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                      {finalSelectedValue === UNASSIGNED_DOCTOR_VALUE ? (
+                        <CheckCircle className="h-4 w-4 text-blue-600" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4" />
+                      )}
+                    </span>
+                  </button>
                   {doctors.map((doctor) => {
                     const key = String(doctor.id ?? doctor.name);
                     const label = doctor.label || doctor.name;
                     const value = doctor.value || doctor.name;
-                    const isSelected = resolvedSelectedValue !== undefined && resolvedSelectedValue === value;
+                    const isSelected = finalSelectedValue !== undefined && finalSelectedValue === value;
                     const avatarSrc = doctor.avatar || resolveImageSource(doctor.profilePicture || doctor.profilePictureUrl);
 
                     return (
