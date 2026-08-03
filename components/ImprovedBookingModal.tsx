@@ -75,6 +75,7 @@ import useSharedBookingLogic, {
   normalizeBookingToothNumbers,
   normalizePastAppointmentStatus,
   toBookingPatientOption as toPatientOption,
+  normalizeAppointmentStatus,
   UNASSIGNED_DOCTOR_LABEL,
   UNASSIGNED_DOCTOR_VALUE,
 } from './sharedBookingLogic';
