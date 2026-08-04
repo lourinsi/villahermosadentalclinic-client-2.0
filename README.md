@@ -36,7 +36,7 @@ The public landing page remains active for clinic information. Public Booking, P
 | Staff authentication and workspace | Active | Admin, doctor, receptionist | Custom backend JWT session; protected layouts enforce allowed roles |
 | Dashboard and reports | Active | Authenticated staff | Role-aware management views and clinic summaries |
 | Appointment requests and calendar | Active | Authenticated staff | Appointment review, scheduling, status changes, and history |
-| Patient records and dental charts | Active | Authorized staff | Includes patient profiles, dependents, questionnaires, and treatment information |
+| Patient records and dental charts | Active | Authorized staff | Includes patient profiles, dependents, questionnaires, editable patient start date tracking (`patientSince`) separate from createdAt, and treatment information |
 | Payments and payment methods | Active | Authorized staff | Payment recording and history; subject to backend permission checks |
 | Finance and expenses | Active | Authorized staff | Revenue, expense, inventory, and audit-history views; payroll is excluded |
 | Inventory | Active | Authorized staff | Inventory records and related finance history |
