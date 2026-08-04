@@ -27,7 +27,6 @@ import {
   Calendar,
   History,
   Plus,
-  Filter,
   RotateCcw,
   Users,
   User,
@@ -37,6 +36,8 @@ import {
   MoreVertical,
   Check,
   X,
+  Tag,
+  CreditCard,
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -322,14 +323,28 @@ export function TreatmentHistoryView({
     return { status: normalized };
   };
 
-  const appointmentStatusOptionsWithDeleted = (() => {
+  const appointmentStatusOptionsWithDeleted = useMemo(() => {
     const statuses = APPOINTMENT_STATUSES || [];
     const hasDeleted = statuses.some((s: any) => normalizeAppointmentStatus(s.value) === "deleted");
     if (hasDeleted) return statuses;
     return [...statuses, { value: "deleted", label: "Deleted" }];
-  })();
+  }, [APPOINTMENT_STATUSES]);
 
-  const staffVisibleStatusOptions = appointmentStatusOptionsWithDeleted;
+  const staffVisibleStatusOptions = useMemo(() => {
+    return appointmentStatusOptionsWithDeleted.filter((statusOption: any) => {
+      const normalized = normalizeAppointmentStatus(statusOption.value);
+      if (normalized === "add-to-cart") return false;
+      if (!isAdmin && normalized === "deleted") return false;
+      return true;
+    });
+  }, [appointmentStatusOptionsWithDeleted, isAdmin]);
+
+  useEffect(() => {
+    const normalizedFilter = normalizeAppointmentStatus(statusFilter);
+    if (normalizedFilter === "add-to-cart" || (!isAdmin && normalizedFilter === "deleted")) {
+      setStatusFilter("all");
+    }
+  }, [statusFilter, isAdmin]);
 
   useEffect(() => {
     if (userOverrodeViewMode) return; // user manually selected — don't override
@@ -787,168 +802,187 @@ export function TreatmentHistoryView({
 
       {/* Main Filter & Content Card */}
       <Card className="overflow-hidden border-slate-200 bg-white shadow-sm rounded-2xl">
-        <CardHeader className="border-b border-slate-100 p-4 sm:p-6">
-          <div className="flex flex-col gap-4">
-            {/* Filter Bar Grid */}
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Search */}
-              <div className="relative min-w-[200px] flex-1">
-                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  placeholder="Search treatments..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-sm font-medium shadow-sm"
-                />
-              </div>
+        <CardHeader className="border-b border-slate-100 p-4 sm:p-5">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              {/* Unified Filter Bar Container */}
+              <div className="flex flex-1 flex-wrap items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-100/80 p-1.5 shadow-inner">
+                {/* Search */}
+                <div className="relative min-w-[180px] flex-1">
+                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    placeholder="Search treatments..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-9 rounded-xl border-slate-200 bg-white pl-9 text-xs font-medium text-slate-700 shadow-sm transition-all focus:bg-white focus:ring-1 focus:ring-violet-500"
+                  />
+                </div>
 
-              <div className="flex min-w-[220px] flex-col gap-2 sm:min-w-[320px]">
-                <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>Date Range</span>
+                {/* Date Selector */}
+                <div className="min-w-[170px]">
+                  <Select
+                    value={dateFilterMode}
+                    onValueChange={(val) => setDateFilterMode(val as TreatmentHistoryDateFilterMode)}
+                  >
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Date: {dateFilterMode === "all" ? "All Time (preset)" : dateFilterMode.charAt(0).toUpperCase() + dateFilterMode.slice(1)}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time (preset)</SelectItem>
+                      <SelectItem value="day">Day</SelectItem>
+                      <SelectItem value="week">Week</SelectItem>
+                      <SelectItem value="month">Month</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {(["all", "day", "week", "month", "custom"] as TreatmentHistoryDateFilterMode[]).map((option) => {
-                    const label = option === "all" ? "All" : option.charAt(0).toUpperCase() + option.slice(1);
-                    return (
-                      <Button
-                        key={option}
-                        type="button"
-                        size="sm"
-                        variant={dateFilterMode === option ? "default" : "outline"}
-                        className={dateFilterMode === option ? "h-9 rounded-xl bg-violet-600 text-white hover:bg-violet-700" : "h-9 rounded-xl border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}
-                        onClick={() => setDateFilterMode(option)}
-                      >
-                        {label}
-                      </Button>
-                    );
-                  })}
-                </div>
-                {dateFilterMode === "custom" && (
-                  <div className="flex flex-wrap gap-2">
-                    <Input
-                      type="date"
-                      value={customDateStart}
-                      onChange={(event) => setCustomDateStart(event.target.value)}
-                      className="h-10 min-w-[140px] rounded-xl border-slate-200 bg-white text-sm font-medium shadow-sm"
-                    />
-                    <Input
-                      type="date"
-                      value={customDateEnd}
-                      onChange={(event) => setCustomDateEnd(event.target.value)}
-                      className="h-10 min-w-[140px] rounded-xl border-slate-200 bg-white text-sm font-medium shadow-sm"
-                    />
+
+                {/* Vertical Divider */}
+                <div className="hidden h-5 w-px bg-slate-300 xl:block" />
+
+                {/* Patient Filter */}
+                {showPatientColumn && !patientId && (
+                  <div className="min-w-[130px]">
+                    <Select value={patientFilter} onValueChange={setPatientFilter}>
+                      <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Users className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">
+                            Patient: {patientFilter === "all" ? "All" : patientFilter}
+                          </span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Patients</SelectItem>
+                        {uniquePatients.map((name) => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
-              </div>
 
-              {/* Patient Filter Dropdown (if showPatientColumn is true) */}
-              {showPatientColumn && !patientId && (
-                <div className="min-w-[160px]">
-                  <Select value={patientFilter} onValueChange={setPatientFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-slate-400" />
-                        <SelectValue placeholder="All Patients" />
+                {/* Procedure / Service Filter */}
+                <div className="min-w-[130px]">
+                  <Select value={procedureFilter} onValueChange={setProcedureFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Stethoscope className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Service: {procedureFilter === "all" ? "All" : procedureFilter}
+                        </span>
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Patients</SelectItem>
-                      {uniquePatients.map((name) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      <SelectItem value="all">All Services</SelectItem>
+                      {uniqueProcedures.map((proc) => (
+                        <SelectItem key={proc} value={proc}>{proc}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              {/* Procedure / Service Filter */}
-              <div className="min-w-[160px]">
-                <Select value={procedureFilter} onValueChange={setProcedureFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <ClipboardList className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Services" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Services</SelectItem>
-                    {uniqueProcedures.map((proc) => (
-                      <SelectItem key={proc} value={proc}>{proc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Doctor / Provider Filter */}
+                {!doctorFilter && (
+                  <div className="min-w-[130px]">
+                    <Select value={localDoctorFilter} onValueChange={setLocalDoctorFilter}>
+                      <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">
+                            Doctor: {localDoctorFilter === "all" ? "All" : localDoctorFilter}
+                          </span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Doctors</SelectItem>
+                        {(doctors || []).map((doc: any) => (
+                          <SelectItem key={doc.id || doc.name} value={doc.name}>Dr. {doc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-              {/* Doctor / Provider Filter */}
-              {!doctorFilter && (
-                <div className="min-w-[160px]">
-                  <Select value={localDoctorFilter} onValueChange={setLocalDoctorFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-slate-400" />
-                        <SelectValue placeholder="All Doctors" />
+                {/* Appointment Status Filter */}
+                <div className="min-w-[125px]">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Tag className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Status: {statusFilter === "all" ? "All" : statusFilter}
+                        </span>
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Doctors</SelectItem>
-                      {(doctors || []).map((doc: any) => (
-                        <SelectItem key={doc.id || doc.name} value={doc.name}>Dr. {doc.name}</SelectItem>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      {staffVisibleStatusOptions.map((s: any) => (
+                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              {/* Appointment Status Filter */}
-              <div className="min-w-[160px]">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Statuses" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    {staffVisibleStatusOptions.map((s: any) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Payment Status Filter */}
+                <div className="min-w-[130px]">
+                  <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <CreditCard className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Payment: {paymentStatusFilter === "all" ? "All" : paymentStatusFilter}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Payments</SelectItem>
+                      {(PAYMENT_STATUSES || [])
+                        .filter((status: any) => normalizePaymentStatus(status.value) !== "overdue")
+                        .map((status: any) => (
+                          <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              {/* Payment Status Filter */}
-              <div className="min-w-[160px]">
-                <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <DollarSign className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Payments" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Payments</SelectItem>
-                    {(PAYMENT_STATUSES || [])
-                      .filter((status: any) => normalizePaymentStatus(status.value) !== "overdue")
-                      .map((status: any) => (
-                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Reset Filters */}
+              {/* Reset Filters Icon Button */}
               <Button
                 variant="outline"
                 size="icon"
-                className="h-11 w-11 shrink-0 rounded-xl border-slate-200 bg-white shadow-sm hover:bg-slate-50"
+                className="h-10 w-10 shrink-0 rounded-xl border-slate-200 bg-white shadow-sm hover:bg-slate-50"
                 onClick={resetFilters}
                 title="Reset filters"
               >
                 <RotateCcw className="h-4 w-4 text-slate-500" />
               </Button>
             </div>
+
+            {/* Sub-row for Custom Date Range Inputs when Custom Mode is Selected */}
+            {dateFilterMode === "custom" && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                <span className="text-xs font-semibold text-slate-500">Custom Range:</span>
+                <Input
+                  type="date"
+                  value={customDateStart}
+                  onChange={(event) => setCustomDateStart(event.target.value)}
+                  className="h-8 w-auto rounded-lg border-slate-200 bg-white text-xs font-medium shadow-sm"
+                />
+                <span className="text-xs font-medium text-slate-400">to</span>
+                <Input
+                  type="date"
+                  value={customDateEnd}
+                  onChange={(event) => setCustomDateEnd(event.target.value)}
+                  className="h-8 w-auto rounded-lg border-slate-200 bg-white text-xs font-medium shadow-sm"
+                />
+              </div>
+            )}
           </div>
         </CardHeader>
 
