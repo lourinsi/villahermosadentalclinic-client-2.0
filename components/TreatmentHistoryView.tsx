@@ -113,6 +113,52 @@ export interface TreatmentHistoryViewProps {
 }
 
 const HISTORY_PER_PAGE = 15;
+type TreatmentHistoryDateFilterMode = "all" | "day" | "week" | "month" | "custom";
+
+const buildTreatmentHistoryDateRange = (
+  mode: TreatmentHistoryDateFilterMode,
+  customStartDate?: string,
+  customEndDate?: string
+) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (mode === "day") {
+    const value = formatDateToYYYYMMDD(today);
+    return { startDate: value, endDate: value };
+  }
+
+  if (mode === "week") {
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    return {
+      startDate: formatDateToYYYYMMDD(weekStart),
+      endDate: formatDateToYYYYMMDD(weekEnd),
+    };
+  }
+
+  if (mode === "month") {
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return {
+      startDate: formatDateToYYYYMMDD(monthStart),
+      endDate: formatDateToYYYYMMDD(monthEnd),
+    };
+  }
+
+  if (mode === "custom") {
+    const normalizedStart = customStartDate?.trim() || "";
+    const normalizedEnd = customEndDate?.trim() || "";
+    return {
+      startDate: normalizedStart,
+      endDate: normalizedEnd,
+    };
+  }
+
+  return { startDate: "", endDate: "" };
+};
 
 const getTreatmentDisplay = (appointment: any) =>
   getBookingTreatmentDisplay(appointment, getAppointmentTypeName);
@@ -229,6 +275,9 @@ export function TreatmentHistoryView({
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
   const [procedureFilter, setProcedureFilter] = useState<string>("all");
   const [localDoctorFilter, setLocalDoctorFilter] = useState<string>("all");
+  const [dateFilterMode, setDateFilterMode] = useState<TreatmentHistoryDateFilterMode>("all");
+  const [customDateStart, setCustomDateStart] = useState<string>("");
+  const [customDateEnd, setCustomDateEnd] = useState<string>("");
   const [sortColumn, setSortColumn] = useState<string>("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
@@ -327,12 +376,15 @@ export function TreatmentHistoryView({
 
       const search = (searchTerm || "").trim();
       const selectedDoc = doctorFilter || (localDoctorFilter !== "all" ? localDoctorFilter : "");
+      const { startDate, endDate } = buildTreatmentHistoryDateRange(dateFilterMode, customDateStart, customDateEnd);
       if (search) params.set("search", search);
       if (statusFilter !== "all") {
         params.set("status", statusFilter === "overdue" ? getOverdueStatusQuery() : canonicalStatus(statusFilter));
       }
       if (paymentStatusFilter !== "all") params.set("paymentStatus", canonicalPaymentStatus(paymentStatusFilter));
       if (selectedDoc) params.set("doctor", selectedDoc);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
       if (sortColumn) {
         params.set("sortBy", sortColumn);
         params.set("sortDirection", sortDirection);
@@ -420,6 +472,9 @@ export function TreatmentHistoryView({
     localDoctorFilter,
     patientFilter,
     showPatientColumn,
+    dateFilterMode,
+    customDateStart,
+    customDateEnd,
     sortColumn,
     sortDirection,
   ]);
@@ -434,6 +489,9 @@ export function TreatmentHistoryView({
     procedureFilter,
     localDoctorFilter,
     doctorFilter,
+    dateFilterMode,
+    customDateStart,
+    customDateEnd,
     sortColumn,
     sortDirection,
   ]);
@@ -646,6 +704,9 @@ export function TreatmentHistoryView({
     setPaymentStatusFilter("all");
     setProcedureFilter("all");
     setLocalDoctorFilter("all");
+    setDateFilterMode("all");
+    setCustomDateStart("");
+    setCustomDateEnd("");
     setHistoryCurrentPage(1);
   };
 
@@ -739,6 +800,46 @@ export function TreatmentHistoryView({
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-sm font-medium shadow-sm"
                 />
+              </div>
+
+              <div className="flex min-w-[220px] flex-col gap-2 sm:min-w-[320px]">
+                <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>Date Range</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["all", "day", "week", "month", "custom"] as TreatmentHistoryDateFilterMode[]).map((option) => {
+                    const label = option === "all" ? "All" : option.charAt(0).toUpperCase() + option.slice(1);
+                    return (
+                      <Button
+                        key={option}
+                        type="button"
+                        size="sm"
+                        variant={dateFilterMode === option ? "default" : "outline"}
+                        className={dateFilterMode === option ? "h-9 rounded-xl bg-violet-600 text-white hover:bg-violet-700" : "h-9 rounded-xl border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}
+                        onClick={() => setDateFilterMode(option)}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+                {dateFilterMode === "custom" && (
+                  <div className="flex flex-wrap gap-2">
+                    <Input
+                      type="date"
+                      value={customDateStart}
+                      onChange={(event) => setCustomDateStart(event.target.value)}
+                      className="h-10 min-w-[140px] rounded-xl border-slate-200 bg-white text-sm font-medium shadow-sm"
+                    />
+                    <Input
+                      type="date"
+                      value={customDateEnd}
+                      onChange={(event) => setCustomDateEnd(event.target.value)}
+                      className="h-10 min-w-[140px] rounded-xl border-slate-200 bg-white text-sm font-medium shadow-sm"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Patient Filter Dropdown (if showPatientColumn is true) */}
