@@ -10,6 +10,7 @@ import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { useAuth } from "@/hooks/useAuth";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { Badge } from "./ui/badge";
@@ -101,6 +102,7 @@ export interface TreatmentHistoryViewProps {
   patientName?: string;
   showPatientColumn?: boolean;
   showStatsCards?: boolean;
+  statsCardMode?: "default" | "requests";
   initialViewMode?: "history" | "list";
   doctorFilter?: string;
   title?: string;
@@ -230,6 +232,7 @@ export function TreatmentHistoryView({
   patientName: propPatientName,
   showPatientColumn = true,
   showStatsCards = true,
+  statsCardMode = "default",
   initialViewMode = "history",
   doctorFilter,
   title = "Treatment History",
@@ -242,7 +245,9 @@ export function TreatmentHistoryView({
   const router = useRouter();
   const pathname = usePathname();
   const { effectiveRole } = useAdminViewMode();
-  const isAdmin = effectiveRole === "admin";
+  const { user } = useAuth();
+  const isAdmin = effectiveRole === "admin"; // effective view mode (may be receptionist when admin switches views)
+  const isAdminReal = String(user?.role || "").toLowerCase() === "admin"; // actual user role
   const {
     appointments: contextAppointments,
     updateAppointment,
@@ -395,6 +400,20 @@ export function TreatmentHistoryView({
       if (search) params.set("search", search);
       if (statusFilter !== "all") {
         params.set("status", statusFilter === "overdue" ? getOverdueStatusQuery() : canonicalStatus(statusFilter));
+      } else if (allowedStatuses && allowedStatuses.length > 0) {
+        const requestableStatuses = Array.from(
+          new Set(
+            allowedStatuses
+              .map((value) => canonicalStatus(value))
+              .filter(Boolean)
+          )
+        );
+        if (requestableStatuses.length > 0) {
+          params.set("status", requestableStatuses.join(","));
+        }
+      }
+      if (statsCardMode === "requests") {
+        params.set("view", "requests");
       }
       if (paymentStatusFilter !== "all") params.set("paymentStatus", canonicalPaymentStatus(paymentStatusFilter));
       if (selectedDoc) params.set("doctor", selectedDoc);
@@ -461,7 +480,9 @@ export function TreatmentHistoryView({
         data = data.filter((item: any) => getCurrentPatientName(item) === patientFilter);
       }
 
-      const total = Number(json.meta?.total ?? data.length);
+      const serverTotal = Number(json.meta?.total ?? data.length);
+      const hasLocalClientFilters = procedureFilter !== "all" || (showPatientColumn && patientFilter !== "all");
+      const total = hasLocalClientFilters ? data.length : serverTotal;
       const pages = Math.max(1, Math.ceil(total / HISTORY_PER_PAGE));
       setHistory(data);
       setHistoryTotal(total);
@@ -492,6 +513,8 @@ export function TreatmentHistoryView({
     customDateEnd,
     sortColumn,
     sortDirection,
+    isAdmin,
+    allowedStatuses,
   ]);
   
   useEffect(() => {
@@ -643,12 +666,13 @@ export function TreatmentHistoryView({
   const handleStatusChange = async (appointment: Appointment, newStatus: string) => {
     const normalizedNewStatus = normalizeAppointmentStatus(newStatus);
     const rawStatus = normalizeAppointmentStatus(String((appointment as any).rawStatus || appointment.status || ""));
-    console.log('[TreatmentHistoryView] handleStatusChange', {
+      console.log('[TreatmentHistoryView] handleStatusChange', {
       appointmentId: appointment.id,
       rawStatus,
       paymentStatus: appointment.paymentStatus,
       normalizedNewStatus,
       isAdmin,
+      isAdminReal,
     });
 
     if (normalizedNewStatus === "overdue" && isOverdueAppointmentDisplay(rawStatus, appointment.paymentStatus)) {
@@ -659,8 +683,8 @@ export function TreatmentHistoryView({
       return;
     }
     // Allow manual completion or cancellation regardless of payment state
-    if (normalizedNewStatus !== "completed" && normalizedNewStatus !== "cancelled") {
-      if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdmin)) {
+      if (normalizedNewStatus !== "completed" && normalizedNewStatus !== "cancelled") {
+      if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdminReal)) {
         toast.error("This status option is not allowed for the appointment's scheduled date.");
         return;
       }
@@ -711,6 +735,14 @@ export function TreatmentHistoryView({
   const completedCount = useMemo(() => history.filter((item) => canonicalStatus(item.status) === "completed").length, [history]);
   const paidCount = useMemo(() => history.filter((item) => canonicalPaymentStatus(item.paymentStatus) === "paid").length, [history]);
   const unpaidCount = useMemo(() => history.filter((item) => canonicalPaymentStatus(item.paymentStatus) !== "paid").length, [history]);
+  const overdueCount = useMemo(
+    () => history.filter((item) => isOverdueAppointmentDisplay(normalizeAppointmentStatus(String(item.status || "")), item.paymentStatus)).length,
+    [history]
+  );
+  const reservedCount = useMemo(
+    () => history.filter((item) => normalizeAppointmentStatus(String(item.status || "")) === "reserved").length,
+    [history]
+  );
 
   const resetFilters = () => {
     setSearchTerm("");
@@ -776,12 +808,21 @@ export function TreatmentHistoryView({
       {/* Summary Stat Cards (Optional) */}
       {showStatsCards && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
-            { label: "Completed", value: completedCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
-            { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
-            { label: "Unpaid", value: unpaidCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
-          ].map((stat) => {
+          {(
+            statsCardMode === "requests"
+              ? [
+                  { label: "Total Requests", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
+                  { label: "Overdue", value: overdueCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                  { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Reserved", value: reservedCount, icon: ClipboardList, accent: "text-slate-600", bg: "bg-slate-100" },
+                ]
+              : [
+                  { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
+                  { label: "Completed", value: completedCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
+                  { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Unpaid", value: unpaidCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                ]
+          ).map((stat) => {
             const Icon = stat.icon;
             return (
               <div key={stat.label} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-md shadow-gray-200/40 md:rounded-2xl md:shadow-sm">

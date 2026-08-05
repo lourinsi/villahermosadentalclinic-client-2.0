@@ -12,6 +12,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     <TreatmentHistoryView
       showPatientColumn={true}
       showStatsCards={true}
+      statsCardMode="requests"
       doctorFilter={doctorFilter}
       allowedStatuses={["tbd", "reserved"]}
       showApproveReject={true}

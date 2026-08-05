@@ -31,6 +31,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { useAuth } from "@/hooks/useAuth";
 import type { Appointment } from "@/hooks/useAppointments";
 import { formatDateToYYYYMMDD, formatWordyDate } from "@/lib/utils";
 import {
@@ -510,6 +511,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const [selectedFocusedPaymentSnapshot, setSelectedFocusedPaymentSnapshot] = useState<any | null>(null);
   const [snapshotHistory, setSnapshotHistory] = useState<Array<{ snapshot: any; snapshotState: SnapshotState }>>([]);
+  const { user } = useAuth();
   const [isChangeScheduleOpen, setIsChangeScheduleOpen] = useState(false);
   const [isSavingScheduleChange, setIsSavingScheduleChange] = useState(false);
   const [isScheduleDatePickerOpen, setIsScheduleDatePickerOpen] = useState(false);
