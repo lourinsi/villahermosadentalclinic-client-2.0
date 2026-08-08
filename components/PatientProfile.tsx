@@ -195,6 +195,7 @@ export interface Patient {
   isPrimary?: boolean;
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
+  patientSince?: string;
   deleted?: boolean;
 }
 
@@ -529,6 +530,7 @@ export type PatientDetailsRef = {
   save: () => Promise<boolean>;
   discardDraft: () => void;
   changedFields: Record<string, { old: any; new: any }>;
+  setPatientSince: (date: string) => void;
 };
 
 type OpenBookingModalOptions = {
@@ -588,12 +590,19 @@ export function PatientProfile({
   const displayedProfileCompletionMissing =
     serverPatient?.profileCompletionMissing ?? patient?.profileCompletionMissing ?? ["consent form"];
   const [modalOverdueAppointmentCount, setModalOverdueAppointmentCount] = useState<number | null>(patient?.overdueAppointmentCount ?? null);
+  const [patientSinceDraft, setPatientSinceDraft] = useState<string | null>(patient?.patientSince || patient?.createdAt || null);
+  const [isPatientSincePickerOpen, setIsPatientSincePickerOpen] = useState(false);
   const displayedOverdueAppointmentCount =
     modalAppointmentSummary && modalPatientAppointmentsAreFresh
       ? modalAppointmentSummary.overdueAppointmentCount
       : modalOverdueAppointmentCount ??
       serverPatient?.overdueAppointmentCount ??
       patient?.overdueAppointmentCount;
+
+  useEffect(() => {
+    const initialDate = serverPatient?.patientSince || serverPatient?.createdAt || patient?.patientSince || patient?.createdAt || null;
+    setPatientSinceDraft(initialDate ? String(initialDate).split("T")[0] : null);
+  }, [patient?.id, serverPatient?.patientSince, serverPatient?.createdAt, patient?.patientSince, patient?.createdAt]);
 
   const handleSave = async () => {
     const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
@@ -1015,17 +1024,24 @@ export function PatientProfile({
                     </span>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
+                <button
+                  type="button"
+                  onClick={() => setIsPatientSincePickerOpen(true)}
+                  className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5 text-left transition hover:border-violet-300 hover:bg-violet-50"
+                  title="Click to change patient start date"
+                >
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 md:h-12 md:w-12">
                     <Calendar className="h-5 w-5 md:h-6 md:w-6" />
                   </div>
                   <div className="min-w-0 space-y-1">
                     <span className="block text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
                     <span className="block truncate text-base font-extrabold leading-tight text-slate-700">
-                      {formatPatientLogDate((serverPatient?.createdAt || patient.createdAt) as string | undefined)}
+                      {formatPatientLogDate(
+                        (patientSinceDraft || serverPatient?.patientSince || serverPatient?.createdAt || patient.patientSince || patient.createdAt) as string | undefined
+                      )}
                     </span>
                   </div>
-                </div>
+                </button>
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm md:gap-4 md:p-5">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 md:h-12 md:w-12">
                     <FileText className="h-5 w-5 md:h-6 md:w-6" />
@@ -1041,6 +1057,22 @@ export function PatientProfile({
             </div>
           </div>
 
+          <DatePickerModal
+            open={isPatientSincePickerOpen}
+            onOpenChange={setIsPatientSincePickerOpen}
+            selectedDate={patientSinceDraft}
+            onDateSelect={(date) => {
+              const formattedDate = formatDateToYYYYMMDD(date);
+              setPatientSinceDraft(formattedDate);
+              const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
+              if (refObject?.current?.setPatientSince) {
+                refObject.current.setPatientSince(formattedDate);
+              }
+              setIsModified(true);
+            }}
+            title="Select Patient Since Date"
+            subtitle="Set the patient start date"
+          />
           <PatientDetails
             ref={detailsRef}
             patient={serverPatient || patient}
@@ -1571,6 +1603,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     insurance: patient.insurance || '',
     balance: patient.balance ?? 0,
     status: patient.status || 'active',
+    patientSince: patient.patientSince || patient.createdAt || new Date().toISOString().split('T')[0],
     createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
     allergies: patient.allergies || '',
     medicalHistory: patient.medicalHistory || '',
@@ -1587,6 +1620,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   });
 
   const [loadedPatient, setLoadedPatient] = useState<Patient>(patient);
+  const [pendingPatientSince, setPendingPatientSince] = useState<string | null>(patient.patientSince || patient.createdAt || null);
+  const [isPatientSincePickerOpen, setIsPatientSincePickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isPreparingPatientPhoto, setIsPreparingPatientPhoto] = useState(false);
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
@@ -3449,6 +3484,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     save: handleUpdatePatient,
     discardDraft: discardStoredDraft,
     changedFields: visibleChangedFields,
+    setPatientSince: (date: string) => {
+      setFormData((prev) => ({ ...prev, patientSince: date }));
+      setIsModified(true);
+    },
   }));
 
   useEffect(() => {
@@ -3470,6 +3509,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       insurance: patient.insurance || '',
       balance: patient.balance ?? 0,
       status: patient.status || 'active',
+      patientSince: patient.patientSince ? new Date(patient.patientSince).toISOString().split('T')[0] : patient.createdAt ? new Date(patient.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       createdAt: patient.createdAt ? new Date(patient.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       allergies: patient.allergies || '',
       medicalHistory: patient.medicalHistory || '',
@@ -3487,6 +3527,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     setLoadedPatient(patient);
     setFormData(loadedData);
     setOriginalLoadedData(loadedData);
+    setPendingPatientSince(loadedData.patientSince);
     setQuestionnaireLoadedPatientId(null);
     setPhysicianInformation({ ...EMPTY_PHYSICIAN_INFORMATION });
     setSavedPhysicianInformation({ ...EMPTY_PHYSICIAN_INFORMATION });
@@ -4290,6 +4331,18 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             type="date"
                             value={formData.dateOfBirth}
                             onChange={(e) => { setFormData(prev => ({ ...prev, dateOfBirth: e.target.value })); setIsModified(true); }}
+                            className="h-12 pl-11 bg-slate-50/30 border-slate-200 font-bold text-slate-800 rounded-xl focus:ring-violet-200"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Patient Since</Label>
+                        <div className="relative">
+                          <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-slate-400" />
+                          <Input
+                            type="date"
+                            value={formData.patientSince}
+                            onChange={(e) => { setFormData(prev => ({ ...prev, patientSince: e.target.value })); setIsModified(true); }}
                             className="h-12 pl-11 bg-slate-50/30 border-slate-200 font-bold text-slate-800 rounded-xl focus:ring-violet-200"
                           />
                         </div>

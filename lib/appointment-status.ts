@@ -40,7 +40,8 @@ export function isOverdueAppointmentDisplay(status?: string | null, paymentStatu
   if (normalizedStatus === "overdue") return true;
 
   const isFullyPaid = isFullyPaidAppointmentStatus(paymentStatus);
-  return (normalizedStatus === "tbd" || normalizedStatus === "completed") && !isFullyPaid;
+  // Only TBD (when not fully paid) should display as overdue; completed should always display as completed.
+  return normalizedStatus === "tbd" && !isFullyPaid;
 }
 
 export function formatAppointmentStatusLabel(status?: string | null): string {
@@ -106,6 +107,12 @@ export function isStatusAllowedForAppointment(
 
   if (isPast) {
     // For past appointments, only past statuses (tbd, cancelled, overdue, completed) are valid
+    // Prevent selecting `tbd` for past appointments that are not fully paid because
+    // such a state will be auto-converted to `overdue` by backend lifecycle logic.
+    if (normTarget === "tbd") {
+      const isFullyPaid = isFullyPaidAppointmentStatus(paymentStatus);
+      if (!isFullyPaid) return false;
+    }
     return PAST_APPOINTMENT_STATUSES.has(normTarget);
   } else {
     // For current/future appointments, only current/future statuses (scheduled, reserved, etc.) are valid
@@ -129,6 +136,10 @@ export function getAutoConvertedStatusOnPayment(
     return "tbd";
   }
   return normStatus;
+}
+
+export function getOverdueStatusQuery(): string {
+  return "tbd,completed,overdue";
 }
 
 

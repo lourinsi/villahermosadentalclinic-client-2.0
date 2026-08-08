@@ -33,6 +33,10 @@ export function Header(_props: HeaderProps) {
     router.push(getManagementDashboardPath(user?.role) || "/admin/dashboard");
   };
 
+  const handleLogin = () => {
+    router.push("/workspace-portal-auth");
+  };
+
   const navLinks = [
     { href: "/#home", label: "Home" },
     { href: "/#services", label: "Services" },
@@ -97,7 +101,11 @@ export function Header(_props: HeaderProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            ) : null}
+            ) : (
+              <Button onClick={handleLogin} className="hidden rounded-full sm:inline-flex" size="sm">
+                Login
+              </Button>
+            )}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -111,7 +119,14 @@ export function Header(_props: HeaderProps) {
                     <Link href={link.href} prefetch={false}>{link.label}</Link>
                   </DropdownMenuItem>
                 ))}
-                {isAuthenticated ? (
+                {!isAuthenticated ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogin}>
+                      Login
+                    </DropdownMenuItem>
+                  </>
+                ) : (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={handleDashboard}>
@@ -123,7 +138,7 @@ export function Header(_props: HeaderProps) {
                       Logout
                     </DropdownMenuItem>
                   </>
-                ) : null}
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

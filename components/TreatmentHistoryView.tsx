@@ -10,6 +10,7 @@ import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { useAuth } from "@/hooks/useAuth";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { Badge } from "./ui/badge";
@@ -27,7 +28,6 @@ import {
   Calendar,
   History,
   Plus,
-  Filter,
   RotateCcw,
   Users,
   User,
@@ -37,10 +37,12 @@ import {
   MoreVertical,
   Check,
   X,
+  Tag,
+  CreditCard,
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
-import { formatAppointmentStatusLabel, isCartAppointmentStatus, isStatusAllowedForAppointment, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { formatAppointmentStatusLabel, getOverdueStatusQuery, isCartAppointmentStatus, isStatusAllowedForAppointment, normalizeAppointmentStatus, isOverdueAppointmentDisplay } from "@/lib/appointment-status";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, formatWordyDate, parseBackendDateToLocal } from "../lib/utils";
 import { Input } from "./ui/input";
@@ -72,7 +74,6 @@ import {
 } from "@/lib/status-colors";
 import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 import { OTHER_APPOINTMENT_TYPE_INDEX } from "@/lib/appointment-types";
-import { isOverdueAppointmentDisplay } from "@/lib/appointment-status";
 import { SelectPatientModal, type PatientSelectOption } from "./SelectPatientModal";
 import { SelectScheduleModal } from "./SelectScheduleModal";
 import { SelectTreatmentModal, type SelectTreatmentModalSection } from "./SelectTreatmentModal";
@@ -101,6 +102,7 @@ export interface TreatmentHistoryViewProps {
   patientName?: string;
   showPatientColumn?: boolean;
   showStatsCards?: boolean;
+  statsCardMode?: "default" | "requests";
   initialViewMode?: "history" | "list";
   doctorFilter?: string;
   title?: string;
@@ -114,6 +116,52 @@ export interface TreatmentHistoryViewProps {
 }
 
 const HISTORY_PER_PAGE = 15;
+type TreatmentHistoryDateFilterMode = "all" | "day" | "week" | "month" | "custom";
+
+const buildTreatmentHistoryDateRange = (
+  mode: TreatmentHistoryDateFilterMode,
+  customStartDate?: string,
+  customEndDate?: string
+) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (mode === "day") {
+    const value = formatDateToYYYYMMDD(today);
+    return { startDate: value, endDate: value };
+  }
+
+  if (mode === "week") {
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    return {
+      startDate: formatDateToYYYYMMDD(weekStart),
+      endDate: formatDateToYYYYMMDD(weekEnd),
+    };
+  }
+
+  if (mode === "month") {
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return {
+      startDate: formatDateToYYYYMMDD(monthStart),
+      endDate: formatDateToYYYYMMDD(monthEnd),
+    };
+  }
+
+  if (mode === "custom") {
+    const normalizedStart = customStartDate?.trim() || "";
+    const normalizedEnd = customEndDate?.trim() || "";
+    return {
+      startDate: normalizedStart,
+      endDate: normalizedEnd,
+    };
+  }
+
+  return { startDate: "", endDate: "" };
+};
 
 const getTreatmentDisplay = (appointment: any) =>
   getBookingTreatmentDisplay(appointment, getAppointmentTypeName);
@@ -184,6 +232,7 @@ export function TreatmentHistoryView({
   patientName: propPatientName,
   showPatientColumn = true,
   showStatsCards = true,
+  statsCardMode = "default",
   initialViewMode = "history",
   doctorFilter,
   title = "Treatment History",
@@ -196,7 +245,9 @@ export function TreatmentHistoryView({
   const router = useRouter();
   const pathname = usePathname();
   const { effectiveRole } = useAdminViewMode();
-  const isAdmin = effectiveRole === "admin";
+  const { user } = useAuth();
+  const isAdmin = effectiveRole === "admin"; // effective view mode (may be receptionist when admin switches views)
+  const isAdminReal = String(user?.role || "").toLowerCase() === "admin"; // actual user role
   const {
     appointments: contextAppointments,
     updateAppointment,
@@ -230,6 +281,9 @@ export function TreatmentHistoryView({
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
   const [procedureFilter, setProcedureFilter] = useState<string>("all");
   const [localDoctorFilter, setLocalDoctorFilter] = useState<string>("all");
+  const [dateFilterMode, setDateFilterMode] = useState<TreatmentHistoryDateFilterMode>("all");
+  const [customDateStart, setCustomDateStart] = useState<string>("");
+  const [customDateEnd, setCustomDateEnd] = useState<string>("");
   const [sortColumn, setSortColumn] = useState<string>("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
@@ -260,7 +314,9 @@ export function TreatmentHistoryView({
   const getAppointmentStatusForDisplay = (appointment: any) => {
     if (!appointment) return "";
     if (Boolean(appointment.deleted)) return "deleted";
-    return normalizeAppointmentStatus(String(appointment.status || ""));
+    const raw = normalizeAppointmentStatus(String(appointment.status || ""));
+    if (isOverdueAppointmentDisplay(raw, appointment.paymentStatus)) return "overdue";
+    return raw;
   };
 
   const getCurrentPatientName = (appointment: any) => getAppointmentPatientDisplayName(appointment);
@@ -272,14 +328,28 @@ export function TreatmentHistoryView({
     return { status: normalized };
   };
 
-  const appointmentStatusOptionsWithDeleted = (() => {
+  const appointmentStatusOptionsWithDeleted = useMemo(() => {
     const statuses = APPOINTMENT_STATUSES || [];
     const hasDeleted = statuses.some((s: any) => normalizeAppointmentStatus(s.value) === "deleted");
     if (hasDeleted) return statuses;
     return [...statuses, { value: "deleted", label: "Deleted" }];
-  })();
+  }, [APPOINTMENT_STATUSES]);
 
-  const staffVisibleStatusOptions = appointmentStatusOptionsWithDeleted;
+  const staffVisibleStatusOptions = useMemo(() => {
+    return appointmentStatusOptionsWithDeleted.filter((statusOption: any) => {
+      const normalized = normalizeAppointmentStatus(statusOption.value);
+      if (normalized === "add-to-cart") return false;
+      if (!isAdmin && normalized === "deleted") return false;
+      return true;
+    });
+  }, [appointmentStatusOptionsWithDeleted, isAdmin]);
+
+  useEffect(() => {
+    const normalizedFilter = normalizeAppointmentStatus(statusFilter);
+    if (normalizedFilter === "add-to-cart" || (!isAdmin && normalizedFilter === "deleted")) {
+      setStatusFilter("all");
+    }
+  }, [statusFilter, isAdmin]);
 
   useEffect(() => {
     if (userOverrodeViewMode) return; // user manually selected — don't override
@@ -326,12 +396,29 @@ export function TreatmentHistoryView({
 
       const search = (searchTerm || "").trim();
       const selectedDoc = doctorFilter || (localDoctorFilter !== "all" ? localDoctorFilter : "");
+      const { startDate, endDate } = buildTreatmentHistoryDateRange(dateFilterMode, customDateStart, customDateEnd);
       if (search) params.set("search", search);
       if (statusFilter !== "all") {
-        params.set("status", statusFilter === "overdue" ? "tbd,completed,overdue" : canonicalStatus(statusFilter));
+        params.set("status", statusFilter === "overdue" ? getOverdueStatusQuery() : canonicalStatus(statusFilter));
+      } else if (allowedStatuses && allowedStatuses.length > 0) {
+        const requestableStatuses = Array.from(
+          new Set(
+            allowedStatuses
+              .map((value) => canonicalStatus(value))
+              .filter(Boolean)
+          )
+        );
+        if (requestableStatuses.length > 0) {
+          params.set("status", requestableStatuses.join(","));
+        }
+      }
+      if (statsCardMode === "requests") {
+        params.set("view", "requests");
       }
       if (paymentStatusFilter !== "all") params.set("paymentStatus", canonicalPaymentStatus(paymentStatusFilter));
       if (selectedDoc) params.set("doctor", selectedDoc);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
       if (sortColumn) {
         params.set("sortBy", sortColumn);
         params.set("sortDirection", sortDirection);
@@ -393,7 +480,9 @@ export function TreatmentHistoryView({
         data = data.filter((item: any) => getCurrentPatientName(item) === patientFilter);
       }
 
-      const total = Number(json.meta?.total ?? data.length);
+      const serverTotal = Number(json.meta?.total ?? data.length);
+      const hasLocalClientFilters = procedureFilter !== "all" || (showPatientColumn && patientFilter !== "all");
+      const total = hasLocalClientFilters ? data.length : serverTotal;
       const pages = Math.max(1, Math.ceil(total / HISTORY_PER_PAGE));
       setHistory(data);
       setHistoryTotal(total);
@@ -419,8 +508,13 @@ export function TreatmentHistoryView({
     localDoctorFilter,
     patientFilter,
     showPatientColumn,
+    dateFilterMode,
+    customDateStart,
+    customDateEnd,
     sortColumn,
     sortDirection,
+    isAdmin,
+    allowedStatuses,
   ]);
   
   useEffect(() => {
@@ -433,6 +527,9 @@ export function TreatmentHistoryView({
     procedureFilter,
     localDoctorFilter,
     doctorFilter,
+    dateFilterMode,
+    customDateStart,
+    customDateEnd,
     sortColumn,
     sortDirection,
   ]);
@@ -569,6 +666,14 @@ export function TreatmentHistoryView({
   const handleStatusChange = async (appointment: Appointment, newStatus: string) => {
     const normalizedNewStatus = normalizeAppointmentStatus(newStatus);
     const rawStatus = normalizeAppointmentStatus(String((appointment as any).rawStatus || appointment.status || ""));
+      console.log('[TreatmentHistoryView] handleStatusChange', {
+      appointmentId: appointment.id,
+      rawStatus,
+      paymentStatus: appointment.paymentStatus,
+      normalizedNewStatus,
+      isAdmin,
+      isAdminReal,
+    });
 
     if (normalizedNewStatus === "overdue" && isOverdueAppointmentDisplay(rawStatus, appointment.paymentStatus)) {
       return;
@@ -577,12 +682,16 @@ export function TreatmentHistoryView({
       toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
-    if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdmin)) {
-      toast.error("This status option is not allowed for the appointment's scheduled date.");
-      return;
+    // Allow manual completion or cancellation regardless of payment state
+      if (normalizedNewStatus !== "completed" && normalizedNewStatus !== "cancelled") {
+      if (!isStatusAllowedForAppointment(normalizedNewStatus, appointment.date, appointment.paymentStatus, isAdminReal)) {
+        toast.error("This status option is not allowed for the appointment's scheduled date.");
+        return;
+      }
     }
 
     try {
+      console.log('[TreatmentHistoryView] updating status', { appointmentId: appointment.id, patch: buildStatusLifecycleUpdate(appointment, normalizedNewStatus) });
       const updatedAppointment = await updateAppointment(
         appointment.id,
         buildStatusLifecycleUpdate(appointment, normalizedNewStatus)
@@ -626,6 +735,14 @@ export function TreatmentHistoryView({
   const completedCount = useMemo(() => history.filter((item) => canonicalStatus(item.status) === "completed").length, [history]);
   const paidCount = useMemo(() => history.filter((item) => canonicalPaymentStatus(item.paymentStatus) === "paid").length, [history]);
   const unpaidCount = useMemo(() => history.filter((item) => canonicalPaymentStatus(item.paymentStatus) !== "paid").length, [history]);
+  const overdueCount = useMemo(
+    () => history.filter((item) => isOverdueAppointmentDisplay(normalizeAppointmentStatus(String(item.status || "")), item.paymentStatus)).length,
+    [history]
+  );
+  const reservedCount = useMemo(
+    () => history.filter((item) => normalizeAppointmentStatus(String(item.status || "")) === "reserved").length,
+    [history]
+  );
 
   const resetFilters = () => {
     setSearchTerm("");
@@ -634,6 +751,9 @@ export function TreatmentHistoryView({
     setPaymentStatusFilter("all");
     setProcedureFilter("all");
     setLocalDoctorFilter("all");
+    setDateFilterMode("all");
+    setCustomDateStart("");
+    setCustomDateEnd("");
     setHistoryCurrentPage(1);
   };
 
@@ -688,12 +808,21 @@ export function TreatmentHistoryView({
       {/* Summary Stat Cards (Optional) */}
       {showStatsCards && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
-            { label: "Completed", value: completedCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
-            { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
-            { label: "Unpaid", value: unpaidCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
-          ].map((stat) => {
+          {(
+            statsCardMode === "requests"
+              ? [
+                  { label: "Total Requests", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
+                  { label: "Overdue", value: overdueCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                  { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Reserved", value: reservedCount, icon: ClipboardList, accent: "text-slate-600", bg: "bg-slate-100" },
+                ]
+              : [
+                  { label: "Total History", value: historyTotal, icon: History, accent: "text-violet-600", bg: "bg-violet-50" },
+                  { label: "Completed", value: completedCount, icon: CheckCircle, accent: "text-emerald-600", bg: "bg-emerald-50" },
+                  { label: "Paid", value: paidCount, icon: DollarSign, accent: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Unpaid", value: unpaidCount, icon: Clock, accent: "text-amber-600", bg: "bg-amber-50" },
+                ]
+          ).map((stat) => {
             const Icon = stat.icon;
             return (
               <div key={stat.label} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-md shadow-gray-200/40 md:rounded-2xl md:shadow-sm">
@@ -714,128 +843,187 @@ export function TreatmentHistoryView({
 
       {/* Main Filter & Content Card */}
       <Card className="overflow-hidden border-slate-200 bg-white shadow-sm rounded-2xl">
-        <CardHeader className="border-b border-slate-100 p-4 sm:p-6">
-          <div className="flex flex-col gap-4">
-            {/* Filter Bar Grid */}
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Search */}
-              <div className="relative min-w-[200px] flex-1">
-                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  placeholder="Search treatments..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-sm font-medium shadow-sm"
-                />
-              </div>
+        <CardHeader className="border-b border-slate-100 p-4 sm:p-5">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              {/* Unified Filter Bar Container */}
+              <div className="flex flex-1 flex-wrap items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-100/80 p-1.5 shadow-inner">
+                {/* Search */}
+                <div className="relative min-w-[180px] flex-1">
+                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    placeholder="Search treatments..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-9 rounded-xl border-slate-200 bg-white pl-9 text-xs font-medium text-slate-700 shadow-sm transition-all focus:bg-white focus:ring-1 focus:ring-violet-500"
+                  />
+                </div>
 
-              {/* Patient Filter Dropdown (if showPatientColumn is true) */}
-              {showPatientColumn && !patientId && (
-                <div className="min-w-[160px]">
-                  <Select value={patientFilter} onValueChange={setPatientFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-slate-400" />
-                        <SelectValue placeholder="All Patients" />
+                {/* Date Selector */}
+                <div className="min-w-[170px]">
+                  <Select
+                    value={dateFilterMode}
+                    onValueChange={(val) => setDateFilterMode(val as TreatmentHistoryDateFilterMode)}
+                  >
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Date: {dateFilterMode === "all" ? "All Time (preset)" : dateFilterMode.charAt(0).toUpperCase() + dateFilterMode.slice(1)}
+                        </span>
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Patients</SelectItem>
-                      {uniquePatients.map((name) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      <SelectItem value="all">All Time (preset)</SelectItem>
+                      <SelectItem value="day">Day</SelectItem>
+                      <SelectItem value="week">Week</SelectItem>
+                      <SelectItem value="month">Month</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Vertical Divider */}
+                <div className="hidden h-5 w-px bg-slate-300 xl:block" />
+
+                {/* Patient Filter */}
+                {showPatientColumn && !patientId && (
+                  <div className="min-w-[130px]">
+                    <Select value={patientFilter} onValueChange={setPatientFilter}>
+                      <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Users className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">
+                            Patient: {patientFilter === "all" ? "All" : patientFilter}
+                          </span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Patients</SelectItem>
+                        {uniquePatients.map((name) => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Procedure / Service Filter */}
+                <div className="min-w-[130px]">
+                  <Select value={procedureFilter} onValueChange={setProcedureFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Stethoscope className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Service: {procedureFilter === "all" ? "All" : procedureFilter}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Services</SelectItem>
+                      {uniqueProcedures.map((proc) => (
+                        <SelectItem key={proc} value={proc}>{proc}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              {/* Procedure / Service Filter */}
-              <div className="min-w-[160px]">
-                <Select value={procedureFilter} onValueChange={setProcedureFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <ClipboardList className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Services" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Services</SelectItem>
-                    {uniqueProcedures.map((proc) => (
-                      <SelectItem key={proc} value={proc}>{proc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Doctor / Provider Filter */}
+                {!doctorFilter && (
+                  <div className="min-w-[130px]">
+                    <Select value={localDoctorFilter} onValueChange={setLocalDoctorFilter}>
+                      <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">
+                            Doctor: {localDoctorFilter === "all" ? "All" : localDoctorFilter}
+                          </span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Doctors</SelectItem>
+                        {(doctors || []).map((doc: any) => (
+                          <SelectItem key={doc.id || doc.name} value={doc.name}>Dr. {doc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-              {/* Doctor / Provider Filter */}
-              {!doctorFilter && (
-                <div className="min-w-[160px]">
-                  <Select value={localDoctorFilter} onValueChange={setLocalDoctorFilter}>
-                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-slate-400" />
-                        <SelectValue placeholder="All Doctors" />
+                {/* Appointment Status Filter */}
+                <div className="min-w-[125px]">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Tag className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Status: {statusFilter === "all" ? "All" : statusFilter}
+                        </span>
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Doctors</SelectItem>
-                      {(doctors || []).map((doc: any) => (
-                        <SelectItem key={doc.id || doc.name} value={doc.name}>Dr. {doc.name}</SelectItem>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      {staffVisibleStatusOptions.map((s: any) => (
+                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              {/* Appointment Status Filter */}
-              <div className="min-w-[160px]">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Statuses" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    {staffVisibleStatusOptions.map((s: any) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Payment Status Filter */}
+                <div className="min-w-[130px]">
+                  <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+                    <SelectTrigger className="h-9 rounded-xl border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <CreditCard className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          Payment: {paymentStatusFilter === "all" ? "All" : paymentStatusFilter}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Payments</SelectItem>
+                      {(PAYMENT_STATUSES || [])
+                        .filter((status: any) => normalizePaymentStatus(status.value) !== "overdue")
+                        .map((status: any) => (
+                          <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              {/* Payment Status Filter */}
-              <div className="min-w-[160px]">
-                <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
-                  <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white font-semibold shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <DollarSign className="h-4 w-4 text-slate-400" />
-                      <SelectValue placeholder="All Payments" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Payments</SelectItem>
-                    {(PAYMENT_STATUSES || [])
-                      .filter((status: any) => normalizePaymentStatus(status.value) !== "overdue")
-                      .map((status: any) => (
-                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Reset Filters */}
+              {/* Reset Filters Icon Button */}
               <Button
                 variant="outline"
                 size="icon"
-                className="h-11 w-11 shrink-0 rounded-xl border-slate-200 bg-white shadow-sm hover:bg-slate-50"
+                className="h-10 w-10 shrink-0 rounded-xl border-slate-200 bg-white shadow-sm hover:bg-slate-50"
                 onClick={resetFilters}
                 title="Reset filters"
               >
                 <RotateCcw className="h-4 w-4 text-slate-500" />
               </Button>
             </div>
+
+            {/* Sub-row for Custom Date Range Inputs when Custom Mode is Selected */}
+            {dateFilterMode === "custom" && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                <span className="text-xs font-semibold text-slate-500">Custom Range:</span>
+                <Input
+                  type="date"
+                  value={customDateStart}
+                  onChange={(event) => setCustomDateStart(event.target.value)}
+                  className="h-8 w-auto rounded-lg border-slate-200 bg-white text-xs font-medium shadow-sm"
+                />
+                <span className="text-xs font-medium text-slate-400">to</span>
+                <Input
+                  type="date"
+                  value={customDateEnd}
+                  onChange={(event) => setCustomDateEnd(event.target.value)}
+                  className="h-8 w-auto rounded-lg border-slate-200 bg-white text-xs font-medium shadow-sm"
+                />
+              </div>
+            )}
           </div>
         </CardHeader>
 
