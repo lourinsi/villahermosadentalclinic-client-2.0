@@ -1,6 +1,13 @@
 "use client";
 
 import { apiUrl } from "@/lib/api";
+import {
+  FetchTimeoutError,
+  HttpServerError,
+  NetworkError,
+  fetchWithTimeout,
+} from "@/lib/api-fetch";
+import { triggerSessionRestore } from "@/lib/session-restore";
 
 import React, { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -155,11 +162,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [nextAvailableDoctor, setNextAvailableDoctor] = useState<string>("");
 
   const fetchPatients = React.useCallback(async (page = 1) => {
-    // Add a timeout so the fetch can't hang indefinitely in the client
-    const controller = new AbortController();
-    const timeoutMs = 5000; // 5 seconds
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
       setIsLoading(true);
 
@@ -170,7 +172,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
       const headers = getAuthHeaders();
       const patientUrl = apiUrl(`/api/patients?page=${requestPage}&limit=${requestLimit}&search=${q}&status=${statusParam}${doctorParam}`);
-      const res = await fetch(patientUrl, { signal: controller.signal, headers, credentials: "include" });
+      const res = await fetchWithTimeout(patientUrl, { headers, credentials: "include", timeoutMs: 5000 });
       const result = await res.json();
 
       if (result && result.success) {
@@ -201,23 +203,28 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       }
     } catch (err) {
       console.error("Error fetching patients:", err);
-      // If the request was aborted due to timeout, fall back to local mock data so the UI remains usable
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.warn(`Patient fetch aborted after ${timeoutMs}ms; returning empty list.`);
-        toast.error('Patient fetch timed out.');
-        setPaginatedPatients([]);
-        setTotalPages(1);
-        setTotalFiltered(0);
+      setPaginatedPatients([]);
+      setTotalPages(1);
+      setTotalFiltered(0);
+
+      if (err instanceof FetchTimeoutError || (err instanceof Error && err.name === "AbortError")) {
+        console.warn("Patient fetch timed out; triggering session restoration flow.");
+        void triggerSessionRestore("patient_fetch_timeout");
+      } else if (err instanceof NetworkError) {
+        console.warn("Patient fetch network error; triggering session restoration flow.");
+        void triggerSessionRestore("patient_fetch_network_error");
+      } else if (err instanceof HttpServerError) {
+        if ([502, 503, 504].includes(err.status)) {
+          console.warn(`Patient fetch backend service unavailable (${err.status}); triggering session restoration flow.`);
+          void triggerSessionRestore("patient_fetch_backend_unavailable");
+        } else {
+          console.error(`Patient fetch server error (${err.status}). Session restore suppressed to prevent retry loop.`);
+          toast.error(`Failed to load patients (Server Error ${err.status}). Please try again later.`);
+        }
       } else {
-        // Other network or parsing errors - return empty list so UI doesn't hang
-        console.warn('Failed to fetch patients; returning empty list.');
-        toast.error('Failed to fetch patients from backend.');
-        setPaginatedPatients([]);
-        setTotalPages(1);
-        setTotalFiltered(0);
+        toast.error("Failed to load patients. Please try again later.");
       }
     } finally {
-      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   }, [searchTerm, statusFilter, doctorFilter, itemsPerPage]);

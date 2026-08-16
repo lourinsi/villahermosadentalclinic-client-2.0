@@ -20,6 +20,11 @@ import {
   getManagementDashboardPath,
   isManagementRole,
 } from "@/lib/management-routes";
+import {
+  clearRefreshFallbackGuard,
+  registerSessionRestoreListener,
+  triggerFallbackRefresh,
+} from "@/lib/session-restore";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -150,6 +155,14 @@ export default function ProtectedRoute({
     router,
   };
 
+  // Register session restore listener so child components timing out can trigger session recheck
+  useEffect(() => {
+    const unregister = registerSessionRestoreListener(() => {
+      setAttempt((current) => current + 1);
+    });
+    return unregister;
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     const requestedPath = getIntendedPath(intendedPath.current);
@@ -184,6 +197,7 @@ export default function ProtectedRoute({
 
         if (validation.kind === "authenticated") {
           clearPendingAuthRedirect();
+          clearRefreshFallbackGuard();
           setState("ready");
           return;
         }
@@ -214,6 +228,7 @@ export default function ProtectedRoute({
       // A 403 is an authorization outcome, and 5xx/network failures are
       // availability outcomes. Neither is proof that the session expired.
       setState("unavailable");
+      triggerFallbackRefresh("backend_unavailable_timeout");
     };
 
     void restoreProtectedSession();
