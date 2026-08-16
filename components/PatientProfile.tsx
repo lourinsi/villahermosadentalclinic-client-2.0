@@ -1,6 +1,13 @@
 "use client";
 
 import { apiUrl } from "@/lib/api";
+import {
+  FetchTimeoutError,
+  HttpServerError,
+  NetworkError,
+  fetchWithTimeout,
+} from "@/lib/api-fetch";
+import { triggerSessionRestore } from "@/lib/session-restore";
 
 import React, { useState, useEffect, useImperativeHandle } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -629,17 +636,28 @@ export function PatientProfile({
       }
 
       try {
-        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(String(patient.id))}`), {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
+        const res = await fetchWithTimeout(
+          apiUrl(`/api/patients/${encodeURIComponent(String(patient.id))}`),
+          {
+            headers: getAuthHeaders(),
+            credentials: "include",
+            timeoutMs: 5000,
+          }
+        );
         const json = await res.json();
         if (mounted && json && json.success && json.data) {
           setServerPatient(json.data as Patient);
         }
       } catch (err) {
-        console.warn('Failed to fetch authoritative patient record:', err);
+        console.warn("Failed to fetch authoritative patient record:", err);
         setServerPatient(null);
+        if (
+          err instanceof FetchTimeoutError ||
+          err instanceof NetworkError ||
+          (err instanceof HttpServerError && [502, 503, 504].includes(err.status))
+        ) {
+          void triggerSessionRestore("patient_profile_fetch_error");
+        }
       }
     };
 
