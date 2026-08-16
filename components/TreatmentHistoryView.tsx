@@ -172,7 +172,7 @@ const TreatmentCellContent = ({ appointment, compact = false, hideToothDetail = 
   return (
     <div className="min-w-0 space-y-0.5 text-left">
       {labels.map((label, index) => (
-        <span key={`${label}-${index}`} className={index === 0 ? "block font-semibold leading-snug text-gray-900" : "block text-xs font-medium leading-snug text-slate-600"}>
+        <span key={`${label}-${index}`} className="block font-semibold leading-snug text-gray-900">
           {label}
         </span>
       ))}
@@ -307,6 +307,10 @@ export function TreatmentHistoryView({
 
   const [editingToothNumberAptId, setEditingToothNumberAptId] = useState<string | null>(null);
   const [editingToothNumberValue, setEditingToothNumberValue] = useState<string>("");
+  const editingToothContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const editingToothAptRef = React.useRef<Appointment | null>(null);
+  const editingToothValueRef = React.useRef<string>("");
+  const lastSavedToothValueRef = React.useRef<string>("");
 
   const isSoftDeletedAppointment = (appointment?: Partial<Appointment> | null) =>
     Boolean(appointment?.deleted) || normalizeAppointmentStatus(String(appointment?.status || "")) === "deleted";
@@ -656,12 +660,65 @@ export function TreatmentHistoryView({
       });
       refreshHistory();
       refreshAppointments();
-      toast.success("Tooth numbers updated");
+      toast.success("Tooth numbers updated", { id: `tooth-save-${appointmentId}` });
     } catch (err) {
       console.error("Failed to update tooth numbers:", err);
       toast.error("Failed to update tooth numbers");
     }
   };
+
+  const flushSaveToothNumbers = useCallback((apt: Appointment | null, val: string) => {
+    if (apt && val !== lastSavedToothValueRef.current) {
+      lastSavedToothValueRef.current = val;
+      handleSaveToothNumbers(apt, val);
+    }
+  }, []);
+
+  // Only update local state — no save triggered on each keystroke
+  const handleToothNumbersChange = (apt: Appointment, val: string) => {
+    setEditingToothNumberValue(val);
+    editingToothValueRef.current = val;
+  };
+
+  useEffect(() => {
+    if (!editingToothNumberAptId) return;
+
+    // Save on click-outside
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      if (
+        editingToothContainerRef.current &&
+        !editingToothContainerRef.current.contains(event.target as Node)
+      ) {
+        flushSaveToothNumbers(editingToothAptRef.current, editingToothValueRef.current);
+        setEditingToothNumberAptId(null);
+      }
+    };
+
+    // Save on Escape or Enter
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" || event.key === "Enter") {
+        flushSaveToothNumbers(editingToothAptRef.current, editingToothValueRef.current);
+        setEditingToothNumberAptId(null);
+      }
+    };
+
+    // Save on page refresh / close / navigation away
+    const handleBeforeUnload = () => {
+      flushSaveToothNumbers(editingToothAptRef.current, editingToothValueRef.current);
+    };
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Also flush on unmount (route change, etc.)
+      flushSaveToothNumbers(editingToothAptRef.current, editingToothValueRef.current);
+    };
+  }, [editingToothNumberAptId, flushSaveToothNumbers]);
 
   const handleStatusChange = async (appointment: Appointment, newStatus: string) => {
     const normalizedNewStatus = normalizeAppointmentStatus(newStatus);
@@ -1333,32 +1390,29 @@ export function TreatmentHistoryView({
                         {/* Tooth No. Cell */}
                         <TableCell className="max-w-[200px] whitespace-normal">
                           {editingToothNumberAptId === String(item.id) && !isDeleted ? (
-                            <div className="space-y-1.5 p-1.5 bg-violet-50 rounded-lg border border-violet-200" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              ref={editingToothContainerRef}
+                              className="inline-flex items-center p-1 bg-violet-50/90 rounded-lg border border-violet-200"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <ToothNumbersEditor
                                 value={editingToothNumberValue}
-                                onChange={(val) => setEditingToothNumberValue(val)}
-                                size="sm"
+                                onChange={(val) => handleToothNumbersChange(item, val)}
+                                size="xs"
                                 autoFocusFirst
                               />
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSaveToothNumbers(item, editingToothNumberValue);
-                                  setEditingToothNumberAptId(null);
-                                }}
-                                className="text-xs font-bold text-violet-700 hover:underline block"
-                              >
-                                Done
-                              </button>
                             </div>
                           ) : (
                             <button
                               type="button"
                               onClick={() => {
                                 if (!isDeleted) {
+                                  const initialVal = getBookingToothNumbersValue(item) || "";
+                                  editingToothAptRef.current = item;
+                                  editingToothValueRef.current = initialVal;
+                                  lastSavedToothValueRef.current = initialVal;
                                   setEditingToothNumberAptId(String(item.id));
-                                  setEditingToothNumberValue(getBookingToothNumbersValue(item) || "");
+                                  setEditingToothNumberValue(initialVal);
                                 }
                               }}
                               disabled={isDeleted}

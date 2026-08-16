@@ -429,26 +429,16 @@ export function ConfirmAppointmentModal({
                   <div className="min-w-0 p-5 sm:p-6">
                     <p className="mb-3 text-[12px] font-black uppercase tracking-[0.16em] text-slate-500/80">Tooth No./s</p>
                     {isToothEditorOpen ? (
-                      <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+                      <div onClick={(e) => e.stopPropagation()}>
                         <ToothNumbersEditor
                           value={localToothNumbers}
                           onChange={(val) => {
                             setLocalToothNumbers(val);
+                            onToothNumbersChange?.(val);
                           }}
-                          size="sm"
+                          size="xs"
                           autoFocusFirst
                         />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToothNumbersChange?.(localToothNumbers);
-                            setIsToothEditorOpen(false);
-                          }}
-                          className="mt-1 text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline block"
-                        >
-                          Done
-                        </button>
                       </div>
                     ) : (
                       <div className="flex min-w-0 items-center justify-between gap-2 pr-2">

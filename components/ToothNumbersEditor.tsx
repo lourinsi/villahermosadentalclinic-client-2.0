@@ -21,7 +21,7 @@ export interface ToothNumbersEditorProps {
   onChange?: (value: string) => void;
   disabled?: boolean;
   className?: string;
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
   autoFocusFirst?: boolean;
 }
 
@@ -79,22 +79,29 @@ export function ToothNumbersEditor({
     updateEntries(next);
   };
 
+  const isXs = size === "xs";
   const isSmall = size === "sm";
-  const boxHeight = isSmall ? "h-9" : "h-11";
-  const inputWidth = isSmall ? "w-[3.75rem]" : "w-[4.75rem]";
-  const inputFont = isSmall ? "text-xs font-bold" : "text-sm font-black";
-  const addBoxSize = isSmall ? "h-9 w-9" : "h-11 w-11";
-  const iconSize = isSmall ? "h-4 w-4" : "h-5 w-5";
+
+  const boxHeight = isXs ? "h-7" : isSmall ? "h-8" : "h-9.5";
+  const inputWidth = isXs ? "w-8" : isSmall ? "w-10" : "w-14";
+  const inputFont = isXs ? "text-xs font-semibold" : isSmall ? "text-xs font-bold" : "text-sm font-bold";
+  const addBoxSize = isXs ? "h-7 w-7" : isSmall ? "h-8 w-8" : "h-9.5 w-9.5";
+  const iconSize = isXs ? "h-3.5 w-3.5" : isSmall ? "h-4 w-4" : "h-4.5 w-4.5";
+  const deleteBtnSize = isXs ? "h-4 w-4" : isSmall ? "h-4.5 w-4.5" : "h-5 w-5";
+  const deleteIconSize = isXs ? "h-2.5 w-2.5" : isSmall ? "h-2.5 w-2.5" : "h-3 w-3";
+  const boxPadding = isXs ? "px-1.5" : isSmall ? "px-2" : "px-2.5";
+  const containerGap = isXs ? "gap-1" : isSmall ? "gap-1.5" : "gap-2";
+  const innerGap = isXs ? "gap-1" : "gap-1.5";
 
   return (
     <div
-      className={`flex flex-wrap items-center gap-2 ${className}`}
+      className={`flex flex-wrap items-center ${containerGap} ${className}`}
       onClick={(e) => e.stopPropagation()}
     >
       {entries.map((entry, index) => (
         <div
           key={index}
-          className={`inline-flex ${boxHeight} items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/80 px-2 shadow-sm transition-colors focus-within:border-blue-300 focus-within:bg-blue-50`}
+          className={`inline-flex ${boxHeight} items-center ${innerGap} rounded-lg border border-blue-200/80 bg-blue-50/80 ${boxPadding} shadow-xs transition-colors focus-within:border-blue-400 focus-within:bg-blue-50 focus-within:ring-1 focus-within:ring-blue-400/30`}
         >
           <Input
             id={index === 0 ? "tooth-number-editor-input-0" : undefined}
@@ -104,18 +111,18 @@ export function ToothNumbersEditor({
             autoFocus={autoFocusFirst && index === 0}
             onBeforeInput={preventNonWholeNumberInput}
             onChange={(e) => handleEntryChange(index, e.target.value)}
-            placeholder="e.g. 18"
+            placeholder="#"
             disabled={disabled}
-            className={`h-7 ${inputWidth} border-0 bg-transparent px-0 text-center ${inputFont} text-blue-700 shadow-none placeholder:font-medium placeholder:text-blue-300 focus-visible:ring-0 focus-visible:ring-offset-0`}
+            className={`h-full ${inputWidth} border-0 bg-transparent px-0 text-center ${inputFont} text-blue-700 shadow-none placeholder:font-medium placeholder:text-blue-300 focus-visible:ring-0 focus-visible:ring-offset-0`}
           />
           <button
             type="button"
             onClick={(e) => handleRemoveBox(index, e)}
             disabled={disabled}
             aria-label={`Clear tooth number ${index + 1}`}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`flex ${deleteBtnSize} shrink-0 items-center justify-center rounded-full bg-blue-200/60 text-blue-600 transition-colors hover:bg-rose-100 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            <X className="h-3 w-3" />
+            <X className={deleteIconSize} />
           </button>
         </div>
       ))}
@@ -124,7 +131,7 @@ export function ToothNumbersEditor({
         onClick={handleAddBox}
         disabled={disabled}
         aria-label="Add tooth number"
-        className={`flex ${addBoxSize} items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50`}
+        className={`flex ${addBoxSize} shrink-0 items-center justify-center rounded-lg border border-dashed border-blue-300 bg-white text-blue-600 transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <Plus className={iconSize} />
       </button>
