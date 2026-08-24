@@ -3781,57 +3781,59 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </section>
               ) : null}
 
-              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
-                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
-                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
-                  <Label className="text-sm font-black uppercase tracking-wide">Treatment Notes</Label>
+              <section className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-[0_8px_25px_rgba(15,23,42,0.04)] sm:p-4">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-2.5">
+                  <FileText className="h-4 w-4 text-violet-600" />
+                  <Label className="text-xs font-black uppercase tracking-wide sm:text-xs">Treatment Notes</Label>
                   <CurrentChangeIndicator change={treatmentNotesCurrentChange} />
                 </div>
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 transition-colors">
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 transition-colors focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 sm:mt-2.5">
                   {showsLogSnapshotState ? (
-                    <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
+                    <p className={`max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-xs font-semibold leading-5 sleek-scrollbar sm:text-sm ${displayedTreatmentNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedTreatmentNotesText}</p>
                   ) : (
                     <textarea
                       value={localTreatmentNotes}
                       onChange={(e) => setLocalTreatmentNotes(e.target.value)}
                       placeholder="Enter treatment notes..."
-                      className="w-full min-h-[5rem] max-h-32 bg-transparent resize-none border-0 p-0 text-sm font-semibold leading-6 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sm:text-base sm:leading-7 sleek-scrollbar"
+                      rows={2}
+                      className="w-full min-h-[2.5rem] max-h-24 resize-none border-0 bg-transparent p-0 text-xs font-semibold leading-5 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sleek-scrollbar sm:text-sm"
                     />
                   )}
                 </div>
               </section>
 
               {displayedSnapshot.status === "cancelled" && displayedSnapshot.cancellationReason ? (
-                <section className="rounded-[1.35rem] border border-red-100 bg-red-50/60 p-4 shadow-[0_12px_35px_rgba(248,113,113,0.08)] sm:p-5">
+                <section className="rounded-2xl border border-red-100 bg-red-50/60 p-3.5 shadow-[0_8px_25px_rgba(248,113,113,0.06)] sm:p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 text-red-600">
-                        <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
-                        <Label className="text-sm font-black uppercase tracking-wide">Cancellation Reason</Label>
+                        <AlertTriangle className="h-4 w-4" />
+                        <Label className="text-xs font-black uppercase tracking-wide sm:text-xs">Cancellation Reason</Label>
                         <CurrentChangeIndicator change={cancellationReasonCurrentChange} />
                       </div>
-                      <p className="mt-2 line-clamp-2 text-sm font-bold leading-6 text-red-700/80 sm:text-base">{displayedSnapshot.cancellationReason}</p>
+                      <p className="mt-1.5 line-clamp-2 text-xs font-bold leading-5 text-red-700/80 sm:text-sm">{displayedSnapshot.cancellationReason}</p>
                     </div>
-                    <ChevronRight className="h-5 w-5 shrink-0 text-red-300" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-red-300" />
                   </div>
                 </section>
               ) : null}
 
-              <section className="rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] sm:p-5">
-                <div className="flex items-center gap-2 text-violet-700 sm:gap-3">
-                  <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
-                  <Label className="text-sm font-black uppercase tracking-wide">Remarks</Label>
+              <section className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-[0_8px_25px_rgba(15,23,42,0.04)] sm:p-4">
+                <div className="flex items-center gap-2 text-violet-700 sm:gap-2.5">
+                  <FileText className="h-4 w-4 text-violet-600" />
+                  <Label className="text-xs font-black uppercase tracking-wide sm:text-xs">Remarks</Label>
                   <CurrentChangeIndicator change={notesCurrentChange} />
                 </div>
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 transition-colors">
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 transition-colors focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500 sm:mt-2.5">
                   {showsLogSnapshotState ? (
-                    <p className={`max-h-32 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 sleek-scrollbar sm:text-base sm:leading-7 ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
+                    <p className={`max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-xs font-semibold leading-5 sleek-scrollbar sm:text-sm ${displayedNotesComparisonText ? "text-slate-600" : "italic text-slate-500"}`}>{displayedNotesText}</p>
                   ) : (
                     <textarea
                       value={localRemarks}
                       onChange={(e) => setLocalRemarks(e.target.value)}
                       placeholder="Enter remarks..."
-                      className="w-full min-h-[5rem] max-h-32 bg-transparent resize-none border-0 p-0 text-sm font-semibold leading-6 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sm:text-base sm:leading-7 sleek-scrollbar"
+                      rows={2}
+                      className="w-full min-h-[2.5rem] max-h-24 resize-none border-0 bg-transparent p-0 text-xs font-semibold leading-5 text-slate-600 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-0 sleek-scrollbar sm:text-sm"
                     />
                   )}
                 </div>
