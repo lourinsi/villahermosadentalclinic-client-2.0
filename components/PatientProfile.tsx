@@ -102,6 +102,9 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
+import { PatientProfileVersionHistory } from "./PatientProfileVersionHistory";
+import type { PatientVersionRecord } from "@/lib/patient-types";
+import ConfirmDialog from "./ConfirmDialog";
 import { getAppointmentTypeName, OTHER_APPOINTMENT_TYPE_INDEX } from "../lib/appointment-types";
 import type { ServiceCatalogItem } from "@/lib/appointment-service-catalog";
 import { formatTimeTo12h } from "@/lib/time-slots";
@@ -202,6 +205,7 @@ export interface Patient {
   isPrimary?: boolean;
   relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
+  versionHistory?: PatientVersionRecord[];
   patientSince?: string;
   deleted?: boolean;
 }
@@ -533,11 +537,33 @@ const formatMissingProfileSections = (missing?: string[] | null) => {
   return `Missing ${sections.join(", ")}.`;
 };
 
+const readLocalVersionHistory = (patientId?: string): PatientVersionRecord[] => {
+  if (!patientId || typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(`patient_version_history_${patientId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalVersionHistory = (patientId: string, history: PatientVersionRecord[]) => {
+  if (!patientId || typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`patient_version_history_${patientId}`, JSON.stringify(history));
+  } catch (e) {
+    console.warn("Failed to write version history to localStorage:", e);
+  }
+};
+
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
   discardDraft: () => void;
   changedFields: Record<string, { old: any; new: any }>;
   setPatientSince: (date: string) => void;
+  openVersionHistory?: () => void;
 };
 
 type OpenBookingModalOptions = {
@@ -622,6 +648,14 @@ export function PatientProfile({
       setIsHeaderSaving(false);
     }
   };
+
+  const handleOpenVersionHistory = () => {
+    const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
+    refObject?.current?.openVersionHistory?.();
+  };
+
+  const localHistory = patient?.id ? readLocalVersionHistory(String(patient.id)) : [];
+  const versionCount = (serverPatient || patient)?.versionHistory?.length || localHistory.length || 1;
 
   // Fetch the authoritative patient record so the
   // displayed status reflects server-side computation (which considers
@@ -838,6 +872,11 @@ export function PatientProfile({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleOpenVersionHistory}>
+                <History className="mr-2 h-4 w-4 text-violet-600" />
+                Version History ({versionCount})
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleSave}
                 disabled={!patient || !isModified || isHeaderSaving}
@@ -909,6 +948,20 @@ export function PatientProfile({
                 Back to Patients
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleOpenVersionHistory}
+              disabled={!patient || isHeaderSaving}
+              className="h-10 border-slate-200 px-4 font-bold text-slate-700 shadow-sm transition-all hover:bg-violet-50 hover:text-violet-700 hover:border-violet-300 active:scale-95 gap-2"
+            >
+              <History className="h-4 w-4 text-violet-600" />
+              <span>Version History</span>
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1.5 text-[10px] font-black text-violet-700">
+                {versionCount}
+              </span>
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -1683,6 +1736,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [draftCheckPatientId, setDraftCheckPatientId] = useState<string | null>(null);
   const [hasRestoredQuestionnaireDraft, setHasRestoredQuestionnaireDraft] = useState(false);
+  const [versionHistory, setVersionHistory] = useState<PatientVersionRecord[]>(() => (patient as any)?.versionHistory || []);
+  const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
+  const [selectedSnapshotVersion, setSelectedSnapshotVersion] = useState<PatientVersionRecord | null>(null);
+  const [versionToRestore, setVersionToRestore] = useState<PatientVersionRecord | null>(null);
 
   // Custom questionnaire question creation state
   const [isAddQuestionModalOpen, setIsAddQuestionModalOpen] = useState(false);
@@ -3506,6 +3563,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       setFormData((prev) => ({ ...prev, patientSince: date }));
       setIsModified(true);
     },
+    openVersionHistory: () => setIsVersionHistoryOpen(true),
   }));
 
   useEffect(() => {
@@ -3552,6 +3610,36 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const blankConsentForm = createConsentFormState();
     setConsentForm(blankConsentForm);
     setSavedConsentForm(blankConsentForm);
+
+    if ((patient as any).versionHistory && Array.isArray((patient as any).versionHistory) && (patient as any).versionHistory.length > 0) {
+      // Server has version history — use it as the source of truth
+      setVersionHistory((patient as any).versionHistory);
+    } else if (patient.id) {
+      // Fall back to locally-cached version history (saved before backend field existed)
+      const localHistory = readLocalVersionHistory(String(patient.id));
+      if (localHistory.length > 0) {
+        setVersionHistory(localHistory);
+      } else {
+        // No history anywhere — create the initial baseline version
+        const initialVersion: PatientVersionRecord = {
+          id: `pv-init-${patient.id}`,
+          timestamp: (patient.createdAt ? new Date(patient.createdAt).toISOString() : null) || (patient.patientSince ? new Date(patient.patientSince).toISOString() : null) || new Date().toISOString(),
+          editorName: "Initial Record",
+          versionName: "Initial Patient Record",
+          summary: "Initial patient profile initialized",
+          changedSections: ["info", "medical", "chart"],
+          snapshot: {
+            formData: { ...loadedData },
+            questionnaireAnswers: {},
+            patientQuestionnaireData: {},
+            physicianInformation: {},
+            consentForm: {},
+            dentalCharts: loadedData.dentalCharts || [],
+          },
+        };
+        setVersionHistory([initialVersion]);
+      }
+    }
   }, [loadedPatient.id, patient]);
 
   useEffect(() => {
@@ -3867,7 +3955,56 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
     setIsSaving(true);
     try {
-      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), { method: "PUT", headers: getAuthHeaders({ "Content-Type": "application/json" }), credentials: 'include', body: JSON.stringify({ ...formData }) });
+      const changedSections: ("info" | "medical" | "chart" | "questionnaire" | "consent")[] = [];
+      const changedKeys = Object.keys(visibleChangedFields);
+      const summaryItems: string[] = [];
+
+      changedKeys.forEach((key) => {
+        if (key === "Dental Chart") {
+          if (!changedSections.includes("chart")) changedSections.push("chart");
+          summaryItems.push("Dental Chart updated");
+        } else if (key.startsWith("Questionnaire")) {
+          if (!changedSections.includes("questionnaire")) changedSections.push("questionnaire");
+          summaryItems.push(key.replace(/^Questionnaire - /, ""));
+        } else if (key.startsWith("Consent Form")) {
+          if (!changedSections.includes("consent")) changedSections.push("consent");
+          summaryItems.push("Consent Form updated");
+        } else if (["Allergies", "Medical History", "Treatment Plan", "Clinical Notes"].includes(key)) {
+          if (!changedSections.includes("medical")) changedSections.push("medical");
+          summaryItems.push(`${key} updated`);
+        } else {
+          if (!changedSections.includes("info")) changedSections.push("info");
+          summaryItems.push(`${key} updated`);
+        }
+      });
+
+      const editorName = doctorFilter || (effectiveRole === "admin" ? "Administrator" : "Staff");
+      const summary = summaryItems.slice(0, 4).join(" • ") || "Patient record updated";
+
+      const newVersion: PatientVersionRecord = {
+        id: `pv-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        editorName,
+        summary,
+        changedSections: changedSections.length > 0 ? changedSections : ["info"],
+        snapshot: {
+          formData: { ...formData },
+          questionnaireAnswers: { ...questionnaireAnswers },
+          patientQuestionnaireData: { ...patientQuestionnaireData },
+          physicianInformation: { ...physicianInformation },
+          consentForm: { ...consentForm },
+          dentalCharts: formData.dentalCharts || [],
+        },
+      };
+
+      const updatedVersionHistory = [newVersion, ...versionHistory];
+
+      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), {
+        method: "PUT",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+        body: JSON.stringify({ ...formData, versionHistory: updatedVersionHistory }),
+      });
 
       const result = await response.json().catch(() => null);
       console.log("Update response:", result);
@@ -3883,6 +4020,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       if (result?.success) {
         setOriginalLoadedData(formData);
+        setVersionHistory(updatedVersionHistory);
+        // Also persist to localStorage as backup fallback
+        writeLocalVersionHistory(String(patient.id), updatedVersionHistory);
 
         const questionnaireSaved = await saveQuestionnaireAnswers();
         if (!questionnaireSaved) {
@@ -3911,6 +4051,55 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return false; // Indicate failure
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const confirmRestoreVersion = () => {
+    if (!versionToRestore) return;
+
+    const snap = versionToRestore.snapshot;
+    if (snap.formData) {
+      setFormData((prev) => ({
+        ...prev,
+        ...snap.formData,
+      }));
+    }
+    if (snap.questionnaireAnswers) {
+      setQuestionnaireAnswers(snap.questionnaireAnswers);
+    }
+    if (snap.patientQuestionnaireData) {
+      setPatientQuestionnaireData(snap.patientQuestionnaireData);
+    }
+    if (snap.physicianInformation) {
+      setPhysicianInformation(createPhysicianInformationState(snap.physicianInformation));
+    }
+    if (snap.consentForm) {
+      setConsentForm(createConsentFormState(snap.consentForm));
+    }
+
+    setSelectedSnapshotVersion(null);
+    setVersionToRestore(null);
+    setIsModified(true);
+    toast.success("Patient record reverted to version snapshot. Click 'Update Patient' to save.");
+  };
+
+  const handleRenameVersion = async (versionId: string, newName: string) => {
+    const updatedHistory = versionHistory.map((v) =>
+      v.id === versionId ? { ...v, versionName: newName || undefined } : v
+    );
+    setVersionHistory(updatedHistory);
+
+    if (patient.id) {
+      try {
+        await fetch(apiUrl(`/api/patients/${patient.id}`), {
+          method: "PUT",
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
+          credentials: "include",
+          body: JSON.stringify({ versionHistory: updatedHistory }),
+        });
+      } catch (err) {
+        console.error("Failed to persist renamed version:", err);
+      }
     }
   };
 
@@ -4200,7 +4389,62 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </div>
           </div>
 
-          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-8 sm:px-6 lg:px-8">
+          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-8 sm:px-6 lg:px-8 space-y-4">
+            {selectedSnapshotVersion && (
+              <div className="mx-auto w-full max-w-[1680px] pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-md shadow-violet-100">
+                      <Eye className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-violet-700">
+                          Viewing Historical Snapshot
+                        </span>
+                        {selectedSnapshotVersion.versionName && (
+                          <span className="inline-flex items-center rounded-md bg-violet-200/80 px-2 py-0.5 text-xs font-bold text-violet-900">
+                            {selectedSnapshotVersion.versionName}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs font-semibold text-slate-600">
+                        {new Date(selectedSnapshotVersion.timestamp).toLocaleString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}{" "}
+                        • Edited by {selectedSnapshotVersion.editorName || "Staff"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setVersionToRestore(selectedSnapshotVersion)}
+                      className="bg-violet-600 text-white hover:bg-violet-700 font-bold shadow-sm"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1.5" />
+                      Restore this version
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedSnapshotVersion(null)}
+                      className="bg-white hover:bg-slate-50 font-bold text-slate-700"
+                    >
+                      <ArrowLeft className="h-4 w-4 mr-1.5" />
+                      Exit preview
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <TabsContent value="info" data-tour-id="patient-details-info-content" className="mt-0 outline-none">
               <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
                 {/* Left Column: Profile Insight Card */}
@@ -5741,12 +5985,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
             <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto w-full max-w-[1680px] space-y-4">
               <DentalChart
-                records={formData.dentalCharts}
+                records={selectedSnapshotVersion ? (selectedSnapshotVersion.snapshot?.dentalCharts || []) : formData.dentalCharts}
                 onSaveRecords={(updatedRecords) => {
+                  if (selectedSnapshotVersion) return;
                   setFormData(prev => ({ ...prev, dentalCharts: updatedRecords }));
                   setIsModified(true);
                 }}
-                patientDateOfBirth={formData.dateOfBirth}
+                patientDateOfBirth={selectedSnapshotVersion?.snapshot?.formData?.dateOfBirth || formData.dateOfBirth}
+                isReadOnly={Boolean(selectedSnapshotVersion)}
               />
             </TabsContent>
 
@@ -6371,6 +6617,36 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           }}
           triggerVariant="section"
           showTrigger={false}
+        />
+
+        {/* Patient Profile Version History Drawer */}
+        <PatientProfileVersionHistory
+          open={isVersionHistoryOpen}
+          onOpenChange={setIsVersionHistoryOpen}
+          versions={versionHistory}
+          selectedVersionId={selectedSnapshotVersion?.id}
+          onSelectVersion={(v) => {
+            if (versionHistory[0]?.id === v.id) {
+              setSelectedSnapshotVersion(null);
+            } else {
+              setSelectedSnapshotVersion(v);
+            }
+          }}
+          onRestoreVersion={(v) => setVersionToRestore(v)}
+          onRenameVersion={handleRenameVersion}
+        />
+
+        {/* Confirm Restore Version Dialog */}
+        <ConfirmDialog
+          open={Boolean(versionToRestore)}
+          onOpenChange={(open) => { if (!open) setVersionToRestore(null); }}
+          title="Restore Patient Record"
+          message={`Are you sure you want to revert the patient record to the version snapshot from ${
+            versionToRestore ? new Date(versionToRestore.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""
+          }? All personal info, medical records, questionnaire answers, and dental chart will be reverted to this version.`}
+          onConfirm={confirmRestoreVersion}
+          confirmLabel="Restore Record"
+          cancelLabel="Cancel"
         />
 
       </div>

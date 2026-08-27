@@ -57,12 +57,30 @@ export interface Patient {
   company?: string | null;
   companyAddress?: string | null;
   height?: string | null;
-  weight?: string | null;
+  versionHistory?: PatientVersionRecord[];
   patientSince?: string | Date;
   createdAt?: Date;
   updatedAt?: Date;
   deleted?: boolean;
   deletedAt?: Date;
+}
+
+export interface PatientVersionRecord {
+  id: string;
+  timestamp: string; // ISO 8601 string
+  editorName: string;
+  versionName?: string;
+  summary: string;
+  changedSections: ("info" | "medical" | "chart" | "questionnaire" | "consent")[];
+  changedFieldsSummary?: string[];
+  snapshot: {
+    formData: Record<string, any>;
+    questionnaireAnswers?: Record<string, any>;
+    patientQuestionnaireData?: Record<string, any>;
+    physicianInformation?: Record<string, any>;
+    consentForm?: Record<string, any>;
+    dentalCharts?: any[];
+  };
 }
 
 export interface ApiResponse<T> {

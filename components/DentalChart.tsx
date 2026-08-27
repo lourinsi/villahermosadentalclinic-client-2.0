@@ -1,13 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+"use client";
+
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "./ui/button";
-import { Calendar as CalendarPicker } from "./ui/calendar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical, CalendarDays } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { Eraser, RotateCcw, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
-import { parseBackendDateToLocal, formatDateToYYYYMMDD, formatWordyDate } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,14 +13,7 @@ type ToothSection = "top" | "bottom" | "left" | "right" | "center";
 type ToothColor = "none" | "blue" | "red";
 type ToothState = Record<ToothSection, ToothColor>;
 
-interface ChartRecord {
-  date: string;
-  data: string; // JSON stringified
-  isEmpty: boolean;
-}
-
 // ─── PDA FDI Tooth Number Arrays ─────────────────────────────────────────────
-// Arrays ordered outer-to-inner (away from midline → toward midline)
 const U_R_PERM = [18, 17, 16, 15, 14, 13, 12, 11]; // Upper right permanent
 const U_L_PERM = [21, 22, 23, 24, 25, 26, 27, 28]; // Upper left permanent
 const L_R_PERM = [48, 47, 46, 45, 44, 43, 42, 41]; // Lower right permanent
@@ -32,9 +23,7 @@ const U_L_PRIM = [61, 62, 63, 64, 65]; // Upper left primary
 const L_R_PRIM = [85, 84, 83, 82, 81]; // Lower right primary
 const L_L_PRIM = [71, 72, 73, 74, 75]; // Lower left primary
 
-// ─── Data Serialization ───────────────────────────────────────────────────────
-// Status box keys: "_s{toothNumber}"  — for primary teeth top/bottom
-// Condition box keys: "_c{toothNumber}" — for permanent teeth between sections
+// ─── Keys & Helpers ───────────────────────────────────────────────────────────
 const statusKey = (n: number) => `_s${n}`;
 const condKey = (n: number) => `_c${n}`;
 
@@ -75,446 +64,215 @@ const isDataEmpty = (
   return true;
 };
 
-// ─── Calendar Styles ──────────────────────────────────────────────────────────
-const chartDatePickerClassNames = {
-  root: "relative p-0",
-  months: "flex flex-col",
-  month: "w-full space-y-3",
-  month_caption: "flex h-10 items-center justify-center",
-  caption_label: "flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm",
-  dropdowns: "flex items-center justify-center gap-2",
-  dropdown_root: "relative inline-flex",
-  dropdown: "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0",
-  nav: "pointer-events-none absolute left-0 right-0 top-1 flex items-center justify-between",
-  button_previous: "pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-violet-50 hover:text-violet-700",
-  button_next: "pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-violet-50 hover:text-violet-700",
-  chevron: "h-4 w-4",
-  month_grid: "w-full border-collapse",
-  weekdays: "grid grid-cols-7",
-  weekday: "flex h-8 w-9 items-center justify-center text-[11px] font-black uppercase tracking-wide text-slate-400",
-  week: "grid grid-cols-7",
-  day: "h-9 w-9 p-0 text-center",
-  day_button: "inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300",
-  selected: "bg-violet-600 text-white shadow-md shadow-violet-200 hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-  today: "bg-slate-100 text-slate-900",
-  outside: "text-slate-300 opacity-60",
-  disabled: "text-slate-300 opacity-40",
-  hidden: "invisible",
-};
-
 // ─── Props ────────────────────────────────────────────────────────────────────
-interface DentalChartProps {
-  records: ChartRecord[];
-  onSaveRecords: (records: ChartRecord[]) => void;
-  /** Kept for API compatibility — no longer used for conditional rendering */
+export interface DentalChartProps {
+  records?: any[];
+  onSaveRecords?: (records: any[]) => void;
   patientDateOfBirth?: string | Date | null;
+  isReadOnly?: boolean;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
-  const isChartEmpty = useCallback(
-    (teeth: Record<number, ToothState>, extras: Record<string, string>): boolean =>
-      isDataEmpty(teeth, extras),
-    []
-  );
-
-  const [localRecords, setLocalRecords] = useState<ChartRecord[]>([]);
-
-  useEffect(() => {
-    if (records.length === 0) {
-      setLocalRecords([{ date: formatDateToYYYYMMDD(new Date()), data: "{}", isEmpty: true }]);
-    } else {
-      setLocalRecords(
-        records.map((r) => {
-          const { teeth, extras } = parseData(r.data);
-          return { ...r, isEmpty: r.isEmpty ?? isChartEmpty(teeth, extras) };
-        })
-      );
+export function DentalChart({
+  records = [],
+  onSaveRecords,
+  isReadOnly = false,
+}: DentalChartProps) {
+  // Read active data from records[0] (or fallback)
+  const currentRawData = useMemo(() => {
+    if (Array.isArray(records) && records.length > 0) {
+      return records[0]?.data || "{}";
     }
-  }, [records, isChartEmpty]);
+    if (typeof records === "string") return records;
+    return "{}";
+  }, [records]);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  useEffect(() => {
-    if (localRecords.length > 0 && currentIndex >= localRecords.length) {
-      setCurrentIndex(localRecords.length - 1);
-    }
-  }, [localRecords.length, currentIndex]);
-
-  const [selectedColor, setSelectedColor] = useState<ToothColor>("blue");
   const [teethState, setTeethState] = useState<Record<number, ToothState>>({});
   const [extrasState, setExtrasState] = useState<Record<string, string>>({});
-  const [originalTeethState, setOriginalTeethState] = useState<Record<number, ToothState>>({});
-  const [originalExtrasState, setOriginalExtrasState] = useState<Record<string, string>>({});
-  const [currentDate, setCurrentDate] = useState("");
-  const [isConfirmDeleteChartOpen, setIsConfirmDeleteChartOpen] = useState(false);
-  const [isConfirmDeleteEmptyChartsOpen, setIsConfirmDeleteEmptyChartsOpen] = useState(false);
-  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<ToothColor>("blue");
+  const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
 
-  // Load state from current record
+  // Sync state with incoming records
   useEffect(() => {
-    const rec = localRecords[currentIndex];
-    if (rec) {
-      try {
-        const { teeth, extras } = parseData(rec.data);
-        setTeethState(teeth);
-        setOriginalTeethState(teeth);
-        setExtrasState(extras);
-        setOriginalExtrasState(extras);
-        setCurrentDate(rec.date);
-      } catch {
-        setTeethState({});
-        setOriginalTeethState({});
-        setExtrasState({});
-        setOriginalExtrasState({});
-        setCurrentDate(formatDateToYYYYMMDD(new Date()));
-      }
-    } else {
-      setTeethState({});
-      setOriginalTeethState({});
-      setExtrasState({});
-      setOriginalExtrasState({});
-      setCurrentDate(formatDateToYYYYMMDD(new Date()));
-    }
-  }, [currentIndex, localRecords]);
+    const { teeth, extras } = parseData(currentRawData);
+    setTeethState(teeth);
+    setExtrasState(extras);
+  }, [currentRawData]);
 
-  // Auto-save on change
-  useEffect(() => {
-    const teethChanged = JSON.stringify(teethState) !== JSON.stringify(originalTeethState);
-    const extrasChanged = JSON.stringify(extrasState) !== JSON.stringify(originalExtrasState);
-    if (!teethChanged && !extrasChanged) return;
-
-    const updatedRecords = [...localRecords];
-    const rec = updatedRecords[currentIndex];
-    if (!rec) return;
-
-    updatedRecords[currentIndex] = {
-      ...rec,
-      data: serializeData(teethState, extrasState),
-      isEmpty: isChartEmpty(teethState, extrasState),
+  // Dispatch updates to parent
+  const emitChanges = (newTeeth: Record<number, ToothState>, newExtras: Record<string, string>) => {
+    if (isReadOnly) return;
+    const serialized = serializeData(newTeeth, newExtras);
+    const isEmpty = isDataEmpty(newTeeth, newExtras);
+    const newRecord = {
+      date: new Date().toISOString().split("T")[0],
+      data: serialized,
+      isEmpty,
     };
-    onSaveRecords(updatedRecords);
-  }, [teethState, extrasState, currentIndex, localRecords, onSaveRecords, originalTeethState, originalExtrasState, isChartEmpty]);
-
-  // ─── Handlers ───────────────────────────────────────────────────────────────
-  const getToothState = (n: number): ToothState =>
-    teethState[n] || { top: "none", bottom: "none", left: "none", right: "none", center: "none" };
-
-  const handleSectionClick = (n: number, section: ToothSection) => {
-    setTeethState((prev) => {
-      const curr = getToothState(n);
-      const newColor =
-        selectedColor === "none"
-          ? "none"
-          : curr[section] === selectedColor
-          ? "none"
-          : selectedColor;
-      return { ...prev, [n]: { ...curr, [section]: newColor } };
-    });
+    onSaveRecords?.([newRecord]);
   };
 
+  // Section click
+  const handleSectionClick = (n: number, section: ToothSection) => {
+    if (isReadOnly) return;
+
+    const curr = teethState[n] || { top: "none", bottom: "none", left: "none", right: "none", center: "none" };
+    const newColor =
+      selectedColor === "none"
+        ? "none"
+        : curr[section] === selectedColor
+        ? "none"
+        : selectedColor;
+    const updated = { ...teethState, [n]: { ...curr, [section]: newColor } };
+    setTeethState(updated);
+    emitChanges(updated, extrasState);
+  };
+
+  // Status / condition code change
   const handleExtraChange = (key: string, value: string) => {
-    setExtrasState((prev) => ({ ...prev, [key]: value.slice(0, 3).toUpperCase() }));
+    if (isReadOnly) return;
+
+    const updated = { ...extrasState, [key]: value.slice(0, 3).toUpperCase() };
+    setExtrasState(updated);
+    emitChanges(teethState, updated);
   };
 
   const getExtra = (key: string) => extrasState[key] ?? "";
 
   const handleClear = () => {
-    setConfirmAction(() => () => {
-      setTeethState({});
-      setExtrasState({});
-    });
-    setIsConfirmOpen(true);
+    if (isReadOnly) return;
+    setIsConfirmClearOpen(true);
   };
 
-  const handleCreateNew = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let newChartDate = new Date(today);
-
-    const sortedRecords = [...localRecords].sort(
-      (a, b) =>
-        parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime()
-    );
-
-    const latestFutureRecordDate = sortedRecords.reduce<Date | null>((latest, r) => {
-      const d = parseBackendDateToLocal(r.date);
-      d.setHours(0, 0, 0, 0);
-      if (d.getTime() >= today.getTime() && (!latest || d.getTime() > latest.getTime())) return d;
-      return latest;
-    }, null);
-
-    if (latestFutureRecordDate) {
-      newChartDate = new Date(latestFutureRecordDate);
-      newChartDate.setDate(newChartDate.getDate() + 1);
-    }
-
-    const newRecord: ChartRecord = {
-      date: formatDateToYYYYMMDD(newChartDate),
-      data: "{}",
-      isEmpty: true,
-    };
-    const updated = [...localRecords, newRecord];
-    onSaveRecords(updated);
-    setCurrentIndex(updated.length - 1);
-    toast.info("New dental chart record created for " + formatWordyDate(newChartDate));
+  const confirmClear = () => {
+    setTeethState({});
+    setExtrasState({});
+    emitChanges({}, {});
+    setIsConfirmClearOpen(false);
+    toast.info("Dental chart cleared");
   };
 
-  const handleDeleteChart = () => {
-    if (localRecords.length === 1 && records.length === 0) {
-      toast.info("This is a temporary chart and cannot be deleted yet.");
-      return;
-    }
-    setIsConfirmDeleteChartOpen(true);
-  };
-
-  const confirmDeleteChart = () => {
-    const updated = localRecords.filter((_, i) => i !== currentIndex);
-    if (updated.length === 0) {
-      const temp: ChartRecord = { date: formatDateToYYYYMMDD(new Date()), data: "{}", isEmpty: true };
-      setLocalRecords([temp]);
-      setCurrentIndex(0);
-      onSaveRecords([]);
-      toast.info("Last chart deleted. A new temporary chart has been created.");
-    } else {
-      onSaveRecords(updated);
-      setCurrentIndex(Math.min(currentIndex, updated.length - 1));
-      toast.success("Dental chart record deleted.");
-    }
-    setIsConfirmDeleteChartOpen(false);
-  };
-
-  const handleDeleteEmptyCharts = () => {
-    if (
-      localRecords.length === 0 ||
-      (localRecords.length === 1 && localRecords[0].data === "{}" && records.length === 0)
-    ) {
-      toast.info("No charts to clean up.");
-      return;
-    }
-    setIsConfirmDeleteEmptyChartsOpen(true);
-  };
-
-  const confirmDeleteEmptyCharts = () => {
-    const cleaned = localRecords.filter((r) => !r.isEmpty);
-    if (cleaned.length === 0) {
-      const temp: ChartRecord = { date: formatDateToYYYYMMDD(new Date()), data: "{}", isEmpty: true };
-      setLocalRecords([temp]);
-      setCurrentIndex(0);
-      onSaveRecords([]);
-      toast.info("All charts were empty. A new temporary chart has been created.");
-    } else if (cleaned.length === localRecords.length) {
-      toast.info("No empty charts found to delete.");
-      setIsConfirmDeleteEmptyChartsOpen(false);
-      return;
-    } else {
-      onSaveRecords(cleaned);
-      if (currentIndex >= cleaned.length) setCurrentIndex(cleaned.length - 1);
-      toast.success(`${localRecords.length - cleaned.length} empty charts deleted.`);
-    }
-    setIsConfirmDeleteEmptyChartsOpen(false);
-  };
-
-  const handleChartDateSelect = (date: Date | undefined) => {
-    if (!date) return;
-    const updated = [...localRecords];
-    const rec = updated[currentIndex];
-    if (!rec) return;
-    const nextDate = formatDateToYYYYMMDD(date);
-    if (rec.date === nextDate) { setIsDatePickerOpen(false); return; }
-    updated[currentIndex] = { ...rec, date: nextDate };
-    setCurrentDate(nextDate);
-    setLocalRecords(updated);
-    onSaveRecords(updated);
-    setIsDatePickerOpen(false);
-  };
-
-  const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex < localRecords.length - 1;
-  const selectedChartDate = currentDate ? parseBackendDateToLocal(currentDate) : new Date();
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       {/* Toolbar */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Color Palette */}
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-slate-600">Color:</span>
+              <span className="text-sm font-bold text-slate-700">Select Color:</span>
               <div className="flex gap-2">
                 <Button
-                  variant={selectedColor === "blue" ? "brand" : "outline"}
+                  type="button"
+                  variant={selectedColor === "blue" && !isReadOnly ? "brand" : "outline"}
                   size="sm"
+                  disabled={isReadOnly}
                   onClick={() => setSelectedColor("blue")}
-                  className={selectedColor === "blue" ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-600" : ""}
+                  className={
+                    selectedColor === "blue" && !isReadOnly
+                      ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-600 font-bold"
+                      : "font-semibold"
+                  }
                 >
                   Blue
                 </Button>
                 <Button
-                  variant={selectedColor === "red" ? "destructive" : "outline"}
+                  type="button"
+                  variant={selectedColor === "red" && !isReadOnly ? "destructive" : "outline"}
                   size="sm"
+                  disabled={isReadOnly}
                   onClick={() => setSelectedColor("red")}
-                  className={selectedColor === "red" ? "bg-red-500 hover:bg-red-600 text-white border-red-600" : ""}
+                  className={
+                    selectedColor === "red" && !isReadOnly
+                      ? "bg-red-500 hover:bg-red-600 text-white border-red-600 font-bold"
+                      : "font-semibold"
+                  }
                 >
                   Red
                 </Button>
                 <Button
-                  variant={selectedColor === "none" ? "secondary" : "outline"}
+                  type="button"
+                  variant={selectedColor === "none" && !isReadOnly ? "secondary" : "outline"}
                   size="sm"
+                  disabled={isReadOnly}
                   onClick={() => setSelectedColor("none")}
+                  className="font-semibold"
                 >
                   <Eraser className="h-4 w-4 mr-1" />
                   Eraser
                 </Button>
               </div>
             </div>
-            <div className="flex items-center gap-5 text-xs text-slate-500">
+
+            {/* Legend */}
+            <div className="flex items-center gap-5 text-xs font-semibold text-slate-600">
               <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-sm bg-blue-500" />
+                <div className="w-3.5 h-3.5 rounded bg-blue-500 shadow-xs" />
                 <span>Cavity / Decay</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-sm bg-red-500" />
+                <div className="w-3.5 h-3.5 rounded bg-red-500 shadow-xs" />
                 <span>Treatment Required</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-sm border border-slate-300 bg-white" />
-                <span>Condition Code Box</span>
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* PDA Chart */}
+      {/* PDA Dental Chart Diagram Card */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">PDA Dental Chart Diagram</CardTitle>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900" title="Chart options">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleCreateNew}>
-                  <Plus className="h-4 w-4 mr-2" />New Chart
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleClear}>
-                  <RotateCcw className="h-4 w-4 mr-2" />Clear
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleDeleteEmptyCharts} disabled={records.length === 0} className="text-red-600">
-                  <Trash2 className="h-4 w-4 mr-2" />Delete Empty Charts
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDeleteChart} className="text-red-600">
-                  <Trash2 className="h-4 w-4 mr-2" />Delete Current Chart
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div>
+              <CardTitle className="text-base font-black">PDA Dental Chart Diagram</CardTitle>
+              <p className="text-xs font-semibold text-slate-400 mt-0.5">
+                {isReadOnly ? "Read-only preview mode" : "Universal 4-arch PDA clinical chart"}
+              </p>
+            </div>
+
+            {!isReadOnly && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900" title="Options">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleClear} className="text-red-600 font-semibold">
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Clear Chart
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </CardHeader>
 
         <CardContent>
-          <div className="overflow-x-auto pb-2">
-            <PdaChartDiagram
-              teethState={teethState}
-              onSectionClick={handleSectionClick}
-              onExtraChange={handleExtraChange}
-              getExtra={getExtra}
-            />
-          </div>
-
-          {/* Pagination */}
-          <div className="flex justify-center mt-6">
-            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400" onClick={() => setCurrentIndex(0)} disabled={!canGoPrevious}>
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400" onClick={() => setCurrentIndex((p) => p - 1)} disabled={!canGoPrevious}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-
-              <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="ghost" className="h-8 min-w-[150px] justify-center gap-2 px-4 text-sm font-medium text-gray-600 hover:bg-violet-50 hover:text-violet-700">
-                    <CalendarDays className="h-4 w-4 text-gray-400" />
-                    {formatWordyDate(selectedChartDate)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="z-[60] w-[318px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-100" align="center" side="top" sideOffset={10}>
-                  <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">Chart Date</div>
-                    <div className="mt-0.5 text-sm font-bold text-slate-900">{formatWordyDate(selectedChartDate)}</div>
-                  </div>
-                  <div className="p-4">
-                    <CalendarPicker
-                      mode="single"
-                      selected={selectedChartDate}
-                      defaultMonth={selectedChartDate}
-                      onSelect={handleChartDateSelect}
-                      captionLayout="dropdown"
-                      startMonth={new Date(1900, 0)}
-                      endMonth={new Date(2100, 11)}
-                      className="rounded-none border-0"
-                      classNames={chartDatePickerClassNames}
-                    />
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400" onClick={() => setCurrentIndex((p) => p + 1)} disabled={!canGoNext}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400" onClick={() => setCurrentIndex(localRecords.length - 1)} disabled={!canGoNext}>
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
+          <div className="overflow-x-auto pb-4">
+            <div className="mx-auto" style={{ minWidth: 760 }}>
+              <PdaChartDiagram
+                teethState={teethState}
+                onSectionClick={handleSectionClick}
+                onExtraChange={handleExtraChange}
+                getExtra={getExtra}
+                isReadOnly={isReadOnly}
+              />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Confirm Dialogs */}
+      {/* Confirm Clear Dialog */}
       <ConfirmDialog
-        open={isConfirmOpen}
-        onOpenChange={(open) => { if (!open) setConfirmAction(null); setIsConfirmOpen(open); }}
-        title="Confirm"
-        message="Are you sure?"
-        loading={confirmLoading}
-        onConfirm={async () => {
-          if (confirmAction) {
-            try { setConfirmLoading(true); await confirmAction(); }
-            finally { setConfirmLoading(false); setConfirmAction(null); }
-          }
-        }}
-        confirmLabel="Yes"
-        cancelLabel="No"
+        open={isConfirmClearOpen}
+        onOpenChange={setIsConfirmClearOpen}
+        title="Clear Dental Chart"
+        message="Are you sure you want to clear all markings and condition codes on the current dental chart?"
+        onConfirm={confirmClear}
+        confirmLabel="Clear Chart"
+        cancelLabel="Cancel"
       />
-      <Dialog open={isConfirmDeleteChartOpen} onOpenChange={setIsConfirmDeleteChartOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Confirm Chart Deletion</DialogTitle></DialogHeader>
-          <div className="py-4"><p className="text-sm text-muted-foreground">Are you sure you want to delete this dental chart record? This action cannot be undone.</p></div>
-          <DialogFooter className="sm:justify-center">
-            <Button variant="outline" onClick={() => setIsConfirmDeleteChartOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDeleteChart}>Delete</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isConfirmDeleteEmptyChartsOpen} onOpenChange={setIsConfirmDeleteEmptyChartsOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Confirm Delete Empty Charts</DialogTitle></DialogHeader>
-          <div className="py-4"><p className="text-sm text-muted-foreground">Are you sure you want to delete all empty dental chart records? This action cannot be undone.</p></div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsConfirmDeleteEmptyChartsOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDeleteEmptyCharts}>Delete All Empty Charts</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -525,18 +283,24 @@ interface PdaChartDiagramProps {
   onSectionClick: (n: number, section: ToothSection) => void;
   onExtraChange: (key: string, value: string) => void;
   getExtra: (key: string) => string;
+  isReadOnly?: boolean;
 }
 
 // Layout constants
-const TOOTH_W = 42;        // px per tooth column (permanent & primary share same width)
-const PERM_COUNT = 8;      // permanent teeth per side
-const PRIM_COUNT = 5;      // primary teeth per side
-const PERM_SIDE_W = PERM_COUNT * TOOTH_W;  // 336px per arch half
-const MID_W = 32;          // midline column width
-const LABEL_W = 80;        // vertical section label area
-const SIDE_W = 52;         // RIGHT / LEFT label width
+const TOOTH_W = 42;
+const PERM_COUNT = 8;
+const PERM_SIDE_W = PERM_COUNT * TOOTH_W; // 336px per arch half
+const MID_W = 32;
+const LABEL_W = 80;
+const SIDE_W = 52;
 
-function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }: PdaChartDiagramProps) {
+function PdaChartDiagram({
+  teethState,
+  onSectionClick,
+  onExtraChange,
+  getExtra,
+  isReadOnly = false,
+}: PdaChartDiagramProps) {
   const getToothState = (n: number): ToothState =>
     teethState[n] || { top: "none", bottom: "none", left: "none", right: "none", center: "none" };
 
@@ -551,7 +315,7 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
     size: "normal" | "small";
   }) => (
     <div className="flex items-center">
-      {/* Right arch — justify-end so primary teeth align to midline */}
+      {/* Right arch */}
       <div className="flex items-end justify-end" style={{ width: PERM_SIDE_W }}>
         {right.map((n) => (
           <ToothDiagram
@@ -560,14 +324,15 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
             state={getToothState(n)}
             onSectionClick={onSectionClick}
             size={size}
+            isReadOnly={isReadOnly}
           />
         ))}
       </div>
       {/* Midline */}
       <div className="flex justify-center" style={{ width: MID_W }}>
-        <div className="w-px bg-slate-500" style={{ height: size === "small" ? 32 : 42 }} />
+        <div className="w-px bg-slate-400" style={{ height: size === "small" ? 32 : 42 }} />
       </div>
-      {/* Left arch — justify-start so primary teeth align to midline */}
+      {/* Left arch */}
       <div className="flex items-end justify-start" style={{ width: PERM_SIDE_W }}>
         {left.map((n) => (
           <ToothDiagram
@@ -576,6 +341,7 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
             state={getToothState(n)}
             onSectionClick={onSectionClick}
             size={size}
+            isReadOnly={isReadOnly}
           />
         ))}
       </div>
@@ -583,17 +349,15 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
   );
 
   // Renders one row of tooth numbers
-  const NumberRow = ({
-    right,
-    left,
-  }: {
-    right: number[];
-    left: number[];
-  }) => (
+  const NumberRow = ({ right, left }: { right: number[]; left: number[] }) => (
     <div className="flex items-center">
       <div className="flex items-center justify-end" style={{ width: PERM_SIDE_W }}>
         {right.map((n) => (
-          <div key={n} className="flex items-center justify-center text-[10px] font-bold text-slate-500" style={{ width: TOOTH_W }}>
+          <div
+            key={n}
+            className="flex items-center justify-center text-[10px] font-bold text-slate-500"
+            style={{ width: TOOTH_W }}
+          >
             {n}
           </div>
         ))}
@@ -601,7 +365,11 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
       <div style={{ width: MID_W }} />
       <div className="flex items-center justify-start" style={{ width: PERM_SIDE_W }}>
         {left.map((n) => (
-          <div key={n} className="flex items-center justify-center text-[10px] font-bold text-slate-500" style={{ width: TOOTH_W }}>
+          <div
+            key={n}
+            className="flex items-center justify-center text-[10px] font-bold text-slate-500"
+            style={{ width: TOOTH_W }}
+          >
             {n}
           </div>
         ))}
@@ -626,9 +394,14 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
             <input
               type="text"
               maxLength={3}
+              disabled={isReadOnly}
               value={getExtra(keyFn(n))}
               onChange={(e) => onExtraChange(keyFn(n), e.target.value)}
-              className="h-5 w-7 rounded border border-slate-300 bg-white text-center text-[10px] font-black uppercase text-slate-700 outline-none transition-colors focus:border-violet-400 focus:ring-1 focus:ring-violet-300 hover:border-slate-400"
+              className={`h-5 w-7 rounded border text-center text-[10px] font-black uppercase outline-none transition-colors ${
+                isReadOnly
+                  ? "border-slate-200 bg-slate-50 text-slate-600 cursor-default"
+                  : "border-slate-300 bg-white text-slate-700 focus:border-violet-400 focus:ring-1 focus:ring-violet-300 hover:border-slate-400"
+              }`}
             />
           </div>
         ))}
@@ -640,9 +413,14 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
             <input
               type="text"
               maxLength={3}
+              disabled={isReadOnly}
               value={getExtra(keyFn(n))}
               onChange={(e) => onExtraChange(keyFn(n), e.target.value)}
-              className="h-5 w-7 rounded border border-slate-300 bg-white text-center text-[10px] font-black uppercase text-slate-700 outline-none transition-colors focus:border-violet-400 focus:ring-1 focus:ring-violet-300 hover:border-slate-400"
+              className={`h-5 w-7 rounded border text-center text-[10px] font-black uppercase outline-none transition-colors ${
+                isReadOnly
+                  ? "border-slate-200 bg-slate-50 text-slate-600 cursor-default"
+                  : "border-slate-300 bg-white text-slate-700 focus:border-violet-400 focus:ring-1 focus:ring-violet-300 hover:border-slate-400"
+              }`}
             />
           </div>
         ))}
@@ -695,7 +473,6 @@ function PdaChartDiagram({ teethState, onSectionClick, onExtraChange, getExtra }
 
   return (
     <div className="mx-auto select-none" style={{ width: PERM_SIDE_W * 2 + MID_W + LABEL_W + SIDE_W * 2 }}>
-
       {/* ══════════════════ UPPER SECTION ══════════════════ */}
 
       {/* STATUS row — upper primary */}
@@ -813,9 +590,16 @@ interface ToothDiagramProps {
   state: ToothState;
   onSectionClick: (toothNumber: number, section: ToothSection) => void;
   size?: "normal" | "small";
+  isReadOnly?: boolean;
 }
 
-function ToothDiagram({ toothNumber, state, onSectionClick, size = "normal" }: ToothDiagramProps) {
+function ToothDiagram({
+  toothNumber,
+  state,
+  onSectionClick,
+  size = "normal",
+  isReadOnly = false,
+}: ToothDiagramProps) {
   const isSmall = size === "small";
   const circleSize = isSmall ? 34 : 40;
   const center = circleSize / 2;
@@ -841,7 +625,11 @@ function ToothDiagram({ toothNumber, state, onSectionClick, size = "normal" }: T
 
   return (
     <div className="flex flex-col items-center justify-end" style={{ width: TOOTH_W }}>
-      <svg width={circleSize} height={circleSize} className="cursor-pointer">
+      <svg
+        width={circleSize}
+        height={circleSize}
+        className={isReadOnly ? "cursor-default" : "cursor-pointer"}
+      >
         <circle cx={c} cy={c} r={outerRadius} fill="white" stroke="#cbd5e1" strokeWidth="1.5" />
         {(Object.entries(paths) as [Exclude<ToothSection, "center">, string][]).map(([section, path]) => (
           <path
@@ -850,9 +638,9 @@ function ToothDiagram({ toothNumber, state, onSectionClick, size = "normal" }: T
             fill={getColor(state[section])}
             stroke="#cbd5e1"
             strokeWidth="0.8"
-            className="transition-opacity hover:opacity-70"
-            onClick={() => onSectionClick(toothNumber, section)}
-            style={{ cursor: "pointer" }}
+            className={isReadOnly ? "" : "transition-opacity hover:opacity-70"}
+            onClick={() => !isReadOnly && onSectionClick(toothNumber, section)}
+            style={{ cursor: isReadOnly ? "default" : "pointer" }}
           />
         ))}
         <circle
@@ -862,9 +650,9 @@ function ToothDiagram({ toothNumber, state, onSectionClick, size = "normal" }: T
           fill={getColor(state.center)}
           stroke="#cbd5e1"
           strokeWidth="0.8"
-          className="transition-opacity hover:opacity-70"
-          onClick={() => onSectionClick(toothNumber, "center")}
-          style={{ cursor: "pointer" }}
+          className={isReadOnly ? "" : "transition-opacity hover:opacity-70"}
+          onClick={() => !isReadOnly && onSectionClick(toothNumber, "center")}
+          style={{ cursor: isReadOnly ? "default" : "pointer" }}
         />
       </svg>
     </div>
