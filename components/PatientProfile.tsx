@@ -15,6 +15,7 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAdminViewMode } from "@/hooks/useAdminViewMode";
+import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentTypeOptions } from "@/hooks/useAppointmentTypeOptions";
 import { useIsMobile } from "./ui/use-mobile";
 import { Input } from "./ui/input";
@@ -1654,6 +1655,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const { refreshPatients, appointments, refreshAppointments, openCreateModal, updateAppointment, refreshTrigger } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const { effectiveRole } = useAdminViewMode();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("history");
   const shouldLoadHistoryData = activeTab === "history" || activeTab === "payments" || Boolean(openBookingAppointmentId);
   const shouldLoadFinancialLog = activeTab === "payments" || activeTab === "history";
@@ -3978,7 +3980,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         }
       });
 
-      const editorName = doctorFilter || (effectiveRole === "admin" ? "Administrator" : "Staff");
+      const editorName = doctorFilter || user?.username || (effectiveRole === "admin" ? "Administrator" : "Staff");
       const summary = summaryItems.slice(0, 4).join(" • ") || "Patient record updated";
 
       const newVersion: PatientVersionRecord = {
